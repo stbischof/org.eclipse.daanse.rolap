@@ -937,7 +937,7 @@ ElevatorSimplifyer.simplifyEvaluator(calc, evaluator);
                 }
 
                 @Override
-				public Object evaluate(Evaluator evaluator) {
+				public Object evaluateInternal(Evaluator evaluator) {
                     if (system) {
                         final String name =
                             SystemPropertyParameter.this.getName();

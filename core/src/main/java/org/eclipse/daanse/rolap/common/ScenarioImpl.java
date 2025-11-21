@@ -544,7 +544,7 @@ public class ScenarioImpl implements Scenario {
         }
 
         @Override
-        public Object evaluate(Evaluator evaluator) {
+        public Object evaluateInternal(Evaluator evaluator) {
             // Evaluate current member in the given scenario by expanding in
             // terms of the writeback cells.
 

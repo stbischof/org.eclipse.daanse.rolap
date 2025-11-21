@@ -28,7 +28,6 @@ import java.util.List;
 
 import org.eclipse.daanse.olap.api.calc.Calc;
 import org.eclipse.daanse.olap.api.calc.compiler.ExpressionCompiler;
-import org.eclipse.daanse.olap.api.calc.profile.ProfilingCalc;
 import org.eclipse.daanse.olap.api.element.Member;
 import org.eclipse.daanse.olap.api.query.component.Expression;
 import org.eclipse.daanse.olap.calc.base.compiler.DelegatingExpCompiler;
@@ -47,10 +46,10 @@ import org.eclipse.daanse.olap.calc.base.compiler.DelegatingExpCompiler;
  *
  * Rationale: Children calcs are used in about 50 places, but mostly for
  * dependency-checking (e.g.
- * org.eclipse.daanse.olap.calc.base.AbstractProfilingNestedCalc#anyDepends. A few places uses the
- * calcs array but should use more strongly typed members. e.g.
- * FilterFunDef.MutableMemberIterCalc should have data members 'MemberListCalc
- * listCalc' and 'BooleanCalc conditionCalc'.
+ * org.eclipse.daanse.olap.calc.base.AbstractProfilingNestedCalc#anyDepends. A
+ * few places uses the calcs array but should use more strongly typed members.
+ * e.g. FilterFunDef.MutableMemberIterCalc should have data members
+ * 'MemberListCalc listCalc' and 'BooleanCalc conditionCalc'.
  *
  *
  * 2. Split Query into parse tree, plan, statement. Fits better into the
@@ -63,60 +62,44 @@ import org.eclipse.daanse.olap.calc.base.compiler.DelegatingExpCompiler;
  * @author jhyde
  * @since October, 2010
  */
-public class RolapProfilingEvaluator extends RolapEvaluator {
+public class RolapInterceptaleEvaluator extends RolapEvaluator {
 
-	/**
-	 * Creates a profiling evaluator.
-	 *
-	 * @param root Shared context between this evaluator and its children
-	 */
-	RolapProfilingEvaluator(RolapEvaluatorRoot root) {
-		super(root);
-	}
+    /**
+     * Creates a profiling evaluator.
+     *
+     * @param root Shared context between this evaluator and its children
+     */
+    RolapInterceptaleEvaluator(RolapEvaluatorRoot root) {
+        super(root);
+    }
 
-	/**
-	 * Creates a child evaluator.
-	 *
-	 * @param root      Root evaluation context
-	 * @param evaluator Parent evaluator
-	 */
-	private RolapProfilingEvaluator(RolapEvaluatorRoot root, RolapProfilingEvaluator evaluator,
-			List<List<Member>> aggregationList) {
-		super(root, evaluator, aggregationList);
-	}
+    /**
+     * Creates a child evaluator.
+     *
+     * @param root      Root evaluation context
+     * @param evaluator Parent evaluator
+     */
+    private RolapInterceptaleEvaluator(RolapEvaluatorRoot root, RolapInterceptaleEvaluator evaluator,
+            List<List<Member>> aggregationList) {
+        super(root, evaluator, aggregationList);
+    }
 
-	@Override
-	protected RolapEvaluator pushClone(List<List<Member>> aggregationList) {
-		return new RolapProfilingEvaluator(root, this, aggregationList);
-	}
+    @Override
+    protected RolapEvaluator pushClone(List<List<Member>> aggregationList) {
+        return new RolapInterceptaleEvaluator(root, this, aggregationList);
+    }
 
-	/**
-	 * Expression compiler which introduces dependency testing.
-	 *
-	 *
-	 * It also checks that the caller does not modify lists unless it has explicitly
-	 * asked for a mutable list.
-	 */
-	public static class ProfilingEvaluatorCompiler extends DelegatingExpCompiler {
-		public ProfilingEvaluatorCompiler(ExpressionCompiler compiler) {
-			super(compiler);
-		}
+    public static class InterceptableEvaluatorCompiler extends DelegatingExpCompiler {
+        public InterceptableEvaluatorCompiler(ExpressionCompiler compiler) {
+            super(compiler);
+        }
 
-		@Override
-		protected ProfilingCalc<?> afterCompile(Expression exp, Calc calc, boolean mutable) {
-			calc = super.afterCompile(exp, calc, mutable);
-			if (calc == null) {
-				return null;
-			}
-
-			if (calc instanceof ProfilingCalc pc) {
-				return pc;
-			}
-
-			throw new RuntimeException("MUST BE PROFILING");
-		}
-	}
-
-
+        @Override
+        protected Calc<?> afterCompile(Expression exp, Calc calc, boolean mutable) {
+            calc = super.afterCompile(exp, calc, mutable);
+            // Theoretical option to wrap a calc for special reasons, to do extras
+            return calc;
+        }
+    }
 
 }

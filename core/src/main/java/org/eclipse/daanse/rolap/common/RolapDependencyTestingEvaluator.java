@@ -342,7 +342,7 @@ public class RolapDependencyTestingEvaluator extends RolapEvaluator {
         }
 
         @Override
-		public Object evaluate(Evaluator evaluator) {
+		public Object evaluateInternal(Evaluator evaluator) {
             RolapDependencyTestingEvaluator dtEval =
                 (RolapDependencyTestingEvaluator) evaluator;
             return dtEval.evaluate(calc, independentHierarchies, mdxString);
@@ -383,7 +383,7 @@ public class RolapDependencyTestingEvaluator extends RolapEvaluator {
         }
 
         @Override
-		public TupleIterable evaluate(Evaluator evaluator) {
+		public TupleIterable evaluateInternal(Evaluator evaluator) {
             RolapDependencyTestingEvaluator dtEval =
                     (RolapDependencyTestingEvaluator) evaluator;
             return (TupleIterable) dtEval.evaluate(calc, independentHierarchies, mdxString);
@@ -427,7 +427,7 @@ public class RolapDependencyTestingEvaluator extends RolapEvaluator {
 
 
         @Override
-        public TupleList evaluate(Evaluator evaluator) {
+        public TupleList evaluateInternal(Evaluator evaluator) {
             RolapDependencyTestingEvaluator dtEval = (RolapDependencyTestingEvaluator) evaluator;
             Object o = dtEval.evaluate(calc, independentHierarchies, mdxString);
 
