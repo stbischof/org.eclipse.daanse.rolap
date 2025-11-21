@@ -40,7 +40,7 @@ public class IntersectCalc extends AbstractProfilingNestedTupleListCalc {
     }
 
     @Override
-    public TupleList evaluate(Evaluator evaluator) {
+    public TupleList evaluateInternal(Evaluator evaluator) {
         TupleList leftList = getChildCalc(0, TupleListCalc.class).evaluate(evaluator);
         if (leftList.isEmpty()) {
             return leftList;

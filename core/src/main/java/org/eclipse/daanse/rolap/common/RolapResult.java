@@ -172,7 +172,7 @@ public class RolapResult extends ResultBase {
     } else {
       final RolapEvaluatorRoot root = new RolapResultEvaluatorRoot( this );
       if ( statement.getProfileHandler() != null ) {
-        this.evaluator = new RolapProfilingEvaluator( root );
+        this.evaluator = new RolapInterceptaleEvaluator( root );
       } else {
         this.evaluator = new RolapEvaluator( root );
       }
@@ -325,7 +325,7 @@ public class RolapResult extends ResultBase {
                         setType, new Calc[0])
                 {
                   @Override
-				public TupleList evaluate(
+				public TupleList evaluateInternal(
                           Evaluator evaluator)
                   {
                     ArrayList<Member> children = new ArrayList<>();
@@ -416,7 +416,7 @@ public class RolapResult extends ResultBase {
       } else {
         final RolapEvaluatorRoot root = new RolapResultEvaluatorRoot( this );
         if ( statement.getProfileHandler() != null ) {
-          this.evaluator = new RolapProfilingEvaluator( root );
+          this.evaluator = new RolapInterceptaleEvaluator( root );
         } else {
           this.evaluator = new RolapEvaluator( root );
         }
@@ -505,7 +505,7 @@ public class RolapResult extends ResultBase {
 
           final Calc calcCached = new AbstractProfilingNestedUnknownCalc( query.getSlicerCalc().getType() ) {
             @Override
-			public Object evaluate( Evaluator evaluator ) {
+			public Object evaluateInternal( Evaluator evaluator ) {
               try {
                 evaluator.getTiming().markStart( "EvalForSlicer" );
                 TupleList list =
