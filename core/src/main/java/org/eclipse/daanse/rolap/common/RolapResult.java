@@ -325,7 +325,7 @@ public class RolapResult extends ResultBase {
                         setType, new Calc[0])
                 {
                   @Override
-				public TupleList evaluateInternal(
+				public TupleList evaluate(
                           Evaluator evaluator)
                   {
                     ArrayList<Member> children = new ArrayList<>();
@@ -505,7 +505,7 @@ public class RolapResult extends ResultBase {
 
           final Calc calcCached = new AbstractProfilingNestedUnknownCalc( query.getSlicerCalc().getType() ) {
             @Override
-			public Object evaluateInternal( Evaluator evaluator ) {
+			public Object evaluate( Evaluator evaluator ) {
               try {
                 evaluator.getTiming().markStart( "EvalForSlicer" );
                 TupleList list =

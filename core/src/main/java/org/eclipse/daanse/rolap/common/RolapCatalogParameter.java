@@ -157,7 +157,7 @@ public class RolapCatalogParameter implements Parameter, CompilableParameter {
             }
 
             @Override
-			public Object evaluateInternal(Evaluator evaluator) {
+			public Object evaluate(Evaluator evaluator) {
                 if (value != null) {
                     return value;
                 }

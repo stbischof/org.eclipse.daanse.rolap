@@ -46,7 +46,7 @@ public class VisualTotalsCalc extends AbstractProfilingNestedTupleListCalc {
     }
 
     @Override
-    public TupleList evaluateInternal(Evaluator evaluator) {
+    public TupleList evaluate(Evaluator evaluator) {
         final List<Member> list =
             tupleListCalc.evaluate(evaluator).slice(0);
         final List<Member> resultList = new ArrayList<>(list);
