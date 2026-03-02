@@ -13,11 +13,16 @@
  */
 package org.eclipse.daanse.rolap.api;
 
+import java.util.Optional;
+
 import org.eclipse.daanse.olap.api.Context;
 import org.eclipse.daanse.olap.api.connection.Connection;
+import org.eclipse.daanse.rolap.api.aggmatch.AggregationMatchRulesSupplier;
 import org.eclipse.daanse.rolap.mapping.model.Catalog;
 
 public interface RolapContext extends Context<Connection> {
 
 	Catalog getCatalogMapping();
+
+	Optional<AggregationMatchRulesSupplier> getAggMatchRulesSupplier();
 }

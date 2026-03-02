@@ -62,7 +62,7 @@ import org.eclipse.daanse.olap.common.StandardProperty;
 import org.eclipse.daanse.olap.common.SystemWideProperties;
 import org.eclipse.daanse.olap.common.Util;
 import org.eclipse.daanse.olap.fun.FunUtil;
-import  org.eclipse.daanse.olap.util.Format;
+import org.eclipse.daanse.olap.util.format.Format;
 import org.eclipse.daanse.rolap.common.constraint.CompoundPredicateInfo;
 import org.eclipse.daanse.rolap.common.constraint.SqlConstraintUtils;
 import org.eclipse.daanse.rolap.common.result.CellReader;

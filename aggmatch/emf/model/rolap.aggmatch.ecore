@@ -1,0 +1,359 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ecore:EPackage xmi:version="2.0" xmlns:xmi="http://www.omg.org/XMI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:ecore="http://www.eclipse.org/emf/2002/Ecore" name="aggmatch" nsURI="https://www.daanse.org/spec/org.eclipse.daanse.rolap.aggmatch"
+    nsPrefix="aggm">
+  <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+    <details key="prefix" value="AggMatch"/>
+    <details key="oSGiCompatible" value="true"/>
+    <details key="basePackage" value="org.eclipse.daanse.rolap.aggmatch"/>
+    <details key="copyrightText" value="Copyright (c) 2025 Contributors to the Eclipse Foundation.&#xA;&#xA;This program and the accompanying materials are made&#xA;available under the terms of the Eclipse Public License 2.0&#xA;which is available at https://www.eclipse.org/legal/epl-2.0/&#xA;&#xA;SPDX-License-Identifier: EPL-2.0"/>
+    <details key="documentation" value="Eclipse Daanse ROLAP Aggregate Matching EMF Package - Defines the rule-based system for automatic discovery and recognition of aggregate tables in OLAP databases. This model captures configurable regex patterns, template-based matching rules, and named matcher references that enable the ROLAP engine to identify pre-computed aggregate tables by matching database table names and column names against naming conventions."/>
+    <details key="loadInitialization" value="false"/>
+    <details key="literalsInterface" value="true"/>
+  </eAnnotations>
+  <!-- ==================== EEnum ==================== -->
+  <eClassifiers xsi:type="ecore:EEnum" name="AggregationCharacterCase">
+    <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+      <details key="documentation" value="Controls how character case is handled during regex pattern matching. IGNORE uses Pattern.CASE_INSENSITIVE, EXACT requires exact case match, UPPER converts input to uppercase before matching, LOWER converts input to lowercase before matching."/>
+    </eAnnotations>
+    <eLiterals name="IGNORE"/>
+    <eLiterals name="EXACT" value="1"/>
+    <eLiterals name="UPPER" value="2"/>
+    <eLiterals name="LOWER" value="3"/>
+  </eClassifiers>
+  <!-- ==================== Abstract Base Classes ==================== -->
+  <eClassifiers xsi:type="ecore:EClass" name="AggregationMatchBase" abstract="true">
+    <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+      <details key="documentation" value="Abstract root class for all aggregate matching rule elements. Provides an enabled flag to activate or deactivate individual rule components."/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type="ecore:EAttribute" name="enabled" eType="ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EBooleanObject"
+        defaultValueLiteral="true">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Whether this rule element is active. Disabled elements are skipped during matching. Default is true."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type="ecore:EClass" name="AggregationMatchCaseMatcher" abstract="true" eSuperTypes="#//AggregationMatchBase">
+    <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+      <details key="documentation" value="Abstract base class for matchers that consider string case sensitivity. Provides an id for referencing and a charCase attribute controlling case handling during pattern matching."/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type="ecore:EAttribute" name="id" eType="ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EString">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Unique identifier for this matcher, used for reference lookup from AggRule Ref elements."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type="ecore:EAttribute" name="charCase" eType="#//AggregationCharacterCase"
+        defaultValueLiteral="IGNORE">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="How character case is handled during matching. Default is IGNORE (case-insensitive)."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type="ecore:EClass" name="AggregationMatchNameMatcher" abstract="true" eSuperTypes="#//AggregationMatchCaseMatcher">
+    <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+      <details key="documentation" value="Abstract base class for matchers that wrap a single name value with optional pre and post regex patterns. Used by TableMatch, ForeignKeyMatch, and FactCountMatch. The generated regex is: pretemplate + name + posttemplate."/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type="ecore:EAttribute" name="pretemplate" eType="ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EString">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Regular expression prepended to the name value. For example, 'agg_.+_' generates regex 'agg_.+_&lt;name&gt;'."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type="ecore:EAttribute" name="posttemplate" eType="ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EString">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Regular expression appended to the name value."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type="ecore:EAttribute" name="basename" eType="ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EString">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Optional regex with a capture group to extract a base name from the input name. For example, 'RF_(.*)_TABLE' extracts the middle portion. Compiled to a Pattern at runtime."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type="ecore:EClass" name="AggregationMatchMapper" abstract="true" eSuperTypes="#//AggregationMatchCaseMatcher">
+    <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+      <details key="documentation" value="Abstract base class for template-based regex mappers. Templates contain ${variable_name} placeholders that are substituted with actual values at runtime. Space and dot characters in substituted names are replaced with the configured replacement strings."/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type="ecore:EAttribute" name="template" lowerBound="1" eType="ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EString">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Template string with ${variable_name} placeholders. For example, '${hierarchy_name}_${level_name}'. Variables are substituted with actual metadata names at runtime."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type="ecore:EAttribute" name="space" eType="ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EString"
+        defaultValueLiteral="_">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Replacement string for space characters in substituted names. Default is underscore."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type="ecore:EAttribute" name="dot" eType="ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EString"
+        defaultValueLiteral="_">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Replacement string for dot characters in substituted names. Default is underscore."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <!-- ==================== Concrete Matchers ==================== -->
+  <eClassifiers xsi:type="ecore:EClass" name="AggregationMatchRegex" eSuperTypes="#//AggregationMatchCaseMatcher">
+    <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+      <details key="documentation" value="Individual regex template used as a child of RegexMapper. Contains a template with ${variable_name} placeholders and character replacement settings. Multiple Regex objects in a RegexMapper are OR-ed together during matching."/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type="ecore:EAttribute" name="template" lowerBound="1" eType="ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EString">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Template string with ${variable_name} placeholders. Variables are substituted at runtime and the result is compiled into a java.util.regex.Pattern."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type="ecore:EAttribute" name="space" eType="ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EString"
+        defaultValueLiteral="_">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Replacement string for space characters in substituted names. Default is underscore."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type="ecore:EAttribute" name="dot" eType="ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EString"
+        defaultValueLiteral="_">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Replacement string for dot characters in substituted names. Default is underscore."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type="ecore:EClass" name="AggregationFactCountMatch" eSuperTypes="#//AggregationMatchNameMatcher">
+    <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+      <details key="documentation" value="Matches the fact count column in an aggregate table. The fact count column stores the number of fact rows aggregated into each aggregate row, needed for computing averages from sums."/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type="ecore:EAttribute" name="factCountName" eType="ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EString"
+        defaultValueLiteral="fact_count">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Base name for the fact count column. Default is 'fact_count'. Combined with pre/post templates to form the matching regex."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type="ecore:EClass" name="AggregationForeignKeyMatch" eSuperTypes="#//AggregationMatchNameMatcher">
+    <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+      <details key="documentation" value="Matches foreign key columns in an aggregate table by wrapping the fact table FK column name with pre/post patterns. By default uses exact name matching (no pre/post templates)."/>
+    </eAnnotations>
+  </eClassifiers>
+  <eClassifiers xsi:type="ecore:EClass" name="AggregationTableMatch" eSuperTypes="#//AggregationMatchNameMatcher">
+    <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+      <details key="documentation" value="Matches aggregate table names by wrapping the fact table name with pre/post regex patterns. For example, with pretemplate='agg_.+_' and fact table 'sales_fact', matches tables like 'agg_weekly_sales_fact'."/>
+    </eAnnotations>
+  </eClassifiers>
+  <!-- ==================== Ref Classes ==================== -->
+  <eClassifiers xsi:type="ecore:EClass" name="AggregationMatchRef" abstract="true" eSuperTypes="#//AggregationMatchBase">
+    <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+      <details key="documentation" value="Abstract base class for reference elements that point to shared matchers defined at the AggregationMatchRules level. During validation, the refId is resolved to the actual shared matcher object."/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type="ecore:EAttribute" name="refId" lowerBound="1" eType="ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EString">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="ID of the shared matcher to reference. Must match the id attribute of a matcher defined in the AggregationMatchRules container."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type="ecore:EClass" name="AggregationFactCountMatchRef" eSuperTypes="#//AggregationMatchRef">
+    <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+      <details key="documentation" value="Reference to a shared AggregationFactCountMatch defined in the AggregationMatchRules container."/>
+    </eAnnotations>
+  </eClassifiers>
+  <eClassifiers xsi:type="ecore:EClass" name="AggregationForeignKeyMatchRef" eSuperTypes="#//AggregationMatchRef">
+    <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+      <details key="documentation" value="Reference to a shared AggregationForeignKeyMatch defined in the AggregationMatchRules container."/>
+    </eAnnotations>
+  </eClassifiers>
+  <eClassifiers xsi:type="ecore:EClass" name="AggregationTableMatchRef" eSuperTypes="#//AggregationMatchRef">
+    <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+      <details key="documentation" value="Reference to a shared AggregationTableMatch defined in the AggregationMatchRules container."/>
+    </eAnnotations>
+  </eClassifiers>
+  <eClassifiers xsi:type="ecore:EClass" name="AggregationIgnoreMapRef" eSuperTypes="#//AggregationMatchRef">
+    <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+      <details key="documentation" value="Reference to a shared AggregationIgnoreMap defined in the AggregationMatchRules container."/>
+    </eAnnotations>
+  </eClassifiers>
+  <eClassifiers xsi:type="ecore:EClass" name="AggregationLevelMapRef" eSuperTypes="#//AggregationMatchRef">
+    <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+      <details key="documentation" value="Reference to a shared AggregationLevelMap defined in the AggregationMatchRules container."/>
+    </eAnnotations>
+  </eClassifiers>
+  <eClassifiers xsi:type="ecore:EClass" name="AggregationMeasureMapRef" eSuperTypes="#//AggregationMatchRef">
+    <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+      <details key="documentation" value="Reference to a shared AggregationMeasureMap defined in the AggregationMatchRules container."/>
+    </eAnnotations>
+  </eClassifiers>
+  <!-- ==================== RegexMapper Hierarchy ==================== -->
+  <eClassifiers xsi:type="ecore:EClass" name="AggregationMatchRegexMapper" abstract="true" eSuperTypes="#//AggregationMatchBase">
+    <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+      <details key="documentation" value="Abstract base class for regex-based mappers that contain multiple Regex objects OR-ed together. A column matches if ANY contained regex matches. Subclasses define which template variable names are allowed."/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type="ecore:EAttribute" name="id" eType="ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EString">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Unique identifier for this mapper, used for reference lookup from AggRule Ref elements."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type="ecore:EReference" name="regexes" upperBound="-1"
+        eType="#//AggregationMatchRegex" containment="true">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Ordered list of regex patterns. During matching, each regex is tried in order; a column matches if ANY regex produces a match. Earlier regexes have higher priority."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <eClassifiers xsi:type="ecore:EClass" name="AggregationIgnoreMap" eSuperTypes="#//AggregationMatchRegexMapper">
+    <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+      <details key="documentation" value="Specifies columns to ignore in aggregate tables using raw regex patterns (no template variable substitution). Matched columns get usage type IGNORE and are excluded from further matching."/>
+    </eAnnotations>
+  </eClassifiers>
+  <eClassifiers xsi:type="ecore:EClass" name="AggregationLevelMap" eSuperTypes="#//AggregationMatchRegexMapper">
+    <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+      <details key="documentation" value="Maps dimension level columns in aggregate tables using template regex patterns. Allowed template variables: ${usage_prefix}, ${hierarchy_name}, ${level_name}, ${level_column_name}. Multiple regex strategies are tried in priority order."/>
+    </eAnnotations>
+  </eClassifiers>
+  <eClassifiers xsi:type="ecore:EClass" name="AggregationMeasureMap" eSuperTypes="#//AggregationMatchRegexMapper">
+    <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+      <details key="documentation" value="Maps measure columns in aggregate tables using template regex patterns. Allowed template variables: ${measure_name}, ${measure_column_name}, ${aggregate_name}. Multiple regex strategies are tried in priority order."/>
+    </eAnnotations>
+  </eClassifiers>
+  <!-- ==================== AggregationMatchRule ==================== -->
+  <eClassifiers xsi:type="ecore:EClass" name="AggregationMatchRule" eSuperTypes="#//AggregationMatchBase">
+    <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+      <details key="documentation" value="A single aggregate matching rule identified by a tag. Contains 6 pairs of optional containment references (inline matcher + matcher-by-reference) for each matcher type. For each pair, exactly one of inline or ref should be set."/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type="ecore:EAttribute" name="tag" lowerBound="1" eType="ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EString">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Unique tag identifying this rule. Used for rule selection by AggregationMatchRules.getAggRule(tag)."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type="ecore:EAttribute" name="countColumn" eType="ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EString"
+        defaultValueLiteral="fact_count">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Name of the fact count column. Default is 'fact_count'."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <!-- IgnoreMap pair -->
+    <eStructuralFeatures xsi:type="ecore:EReference" name="ignoreMap" eType="#//AggregationIgnoreMap"
+        containment="true">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Inline ignore map definition. Mutually exclusive with ignoreMapRef."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type="ecore:EReference" name="ignoreMapRef" eType="#//AggregationIgnoreMapRef"
+        containment="true">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Reference to a shared ignore map. Mutually exclusive with ignoreMap."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <!-- FactCountMatch pair -->
+    <eStructuralFeatures xsi:type="ecore:EReference" name="factCountMatch" eType="#//AggregationFactCountMatch"
+        containment="true">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Inline fact count match definition. Mutually exclusive with factCountMatchRef."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type="ecore:EReference" name="factCountMatchRef" eType="#//AggregationFactCountMatchRef"
+        containment="true">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Reference to a shared fact count match. Mutually exclusive with factCountMatch."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <!-- ForeignKeyMatch pair -->
+    <eStructuralFeatures xsi:type="ecore:EReference" name="foreignKeyMatch" eType="#//AggregationForeignKeyMatch"
+        containment="true">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Inline foreign key match definition. Mutually exclusive with foreignKeyMatchRef."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type="ecore:EReference" name="foreignKeyMatchRef" eType="#//AggregationForeignKeyMatchRef"
+        containment="true">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Reference to a shared foreign key match. Mutually exclusive with foreignKeyMatch."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <!-- TableMatch pair -->
+    <eStructuralFeatures xsi:type="ecore:EReference" name="tableMatch" eType="#//AggregationTableMatch"
+        containment="true">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Inline table match definition. Mutually exclusive with tableMatchRef."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type="ecore:EReference" name="tableMatchRef" eType="#//AggregationTableMatchRef"
+        containment="true">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Reference to a shared table match. Mutually exclusive with tableMatch."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <!-- LevelMap pair -->
+    <eStructuralFeatures xsi:type="ecore:EReference" name="levelMap" eType="#//AggregationLevelMap"
+        containment="true">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Inline level map definition. Mutually exclusive with levelMapRef."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type="ecore:EReference" name="levelMapRef" eType="#//AggregationLevelMapRef"
+        containment="true">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Reference to a shared level map. Mutually exclusive with levelMap."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <!-- MeasureMap pair -->
+    <eStructuralFeatures xsi:type="ecore:EReference" name="measureMap" eType="#//AggregationMeasureMap"
+        containment="true">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Inline measure map definition. Mutually exclusive with measureMapRef."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type="ecore:EReference" name="measureMapRef" eType="#//AggregationMeasureMapRef"
+        containment="true">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Reference to a shared measure map. Mutually exclusive with measureMap."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+  <!-- ==================== AggregationMatchRules (top-level container) ==================== -->
+  <eClassifiers xsi:type="ecore:EClass" name="AggregationMatchRules">
+    <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+      <details key="documentation" value="Top-level container for all aggregate matching rules and shared matcher definitions. Does NOT extend AggregationMatchBase (mirrors the JAXB design where AggRules does not extend Base). Contains shared matchers referenced by id from AggRule Ref elements, plus one or more AggregationMatchRule instances selected by tag."/>
+    </eAnnotations>
+    <eStructuralFeatures xsi:type="ecore:EAttribute" name="tag" lowerBound="1" eType="ecore:EDataType http://www.eclipse.org/emf/2002/Ecore#//EString">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Identifier for this rule set configuration."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type="ecore:EReference" name="tableMatches" upperBound="-1"
+        eType="#//AggregationTableMatch" containment="true">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Shared table match definitions that can be referenced by id from AggregationMatchRule instances."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type="ecore:EReference" name="factCountMatches" upperBound="-1"
+        eType="#//AggregationFactCountMatch" containment="true">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Shared fact count match definitions that can be referenced by id from AggregationMatchRule instances."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type="ecore:EReference" name="foreignKeyMatches" upperBound="-1"
+        eType="#//AggregationForeignKeyMatch" containment="true">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Shared foreign key match definitions that can be referenced by id from AggregationMatchRule instances."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type="ecore:EReference" name="levelMaps" upperBound="-1"
+        eType="#//AggregationLevelMap" containment="true">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Shared level map definitions that can be referenced by id from AggregationMatchRule instances."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type="ecore:EReference" name="measureMaps" upperBound="-1"
+        eType="#//AggregationMeasureMap" containment="true">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Shared measure map definitions that can be referenced by id from AggregationMatchRule instances."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type="ecore:EReference" name="ignoreMaps" upperBound="-1"
+        eType="#//AggregationIgnoreMap" containment="true">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="Shared ignore map definitions that can be referenced by id from AggregationMatchRule instances."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+    <eStructuralFeatures xsi:type="ecore:EReference" name="aggregationRules" lowerBound="1" upperBound="-1"
+        eType="#//AggregationMatchRule" containment="true">
+      <eAnnotations source="http://www.eclipse.org/emf/2002/GenModel">
+        <details key="documentation" value="The aggregation matching rules. At least one rule must be defined. Each rule is identified by a tag and selected via getAggRule(tag)."/>
+      </eAnnotations>
+    </eStructuralFeatures>
+  </eClassifiers>
+</ecore:EPackage>

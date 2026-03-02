@@ -38,6 +38,7 @@ import org.eclipse.daanse.olap.api.exception.OlapRuntimeException;
 import org.eclipse.daanse.olap.common.ConfigConstants;
 import org.eclipse.daanse.olap.common.Util;
 import org.eclipse.daanse.rolap.api.RolapContext;
+import org.eclipse.daanse.rolap.api.aggmatch.AggregationMatchRulesSupplier;
 import org.eclipse.daanse.rolap.common.star.RolapStar;
 import org.eclipse.daanse.rolap.common.util.PojoUtil;
 import org.eclipse.daanse.rolap.element.RolapCatalog;
@@ -171,7 +172,11 @@ public class AggTableManager {
     {
         ListRecorder msgRecorder = new ListRecorder();
         try {
-            DefaultRules rules = DefaultRules.getInstance();
+            Optional<AggregationMatchRulesSupplier> optSupplier =
+                ((RolapContext) context).getAggMatchRulesSupplier();
+            PatternbasedRules rules = optSupplier
+                .map(s -> new PatternbasedRules(s.get(), "default"))
+                .orElse(null);
 
 //            connectionProps.aggregateScanCatalog();
             Optional<String> oAaggregateScanSchema=    connectionProps.aggregateScanSchema();
@@ -255,8 +260,9 @@ public class AggTableManager {
                                 msgRecorder);
                             approxRowCount = tableDef.getApproxRowCount();
                         }
-                        // Is it handled by the DefaultRules
+                        // Is it handled by the PatternbasedRules
                         if (! makeAggStar
+                            && rules != null
                             && context.getConfigValue(ConfigConstants.READ_AGGREGATES, ConfigConstants.READ_AGGREGATES_DEFAULT_VALUE ,Boolean.class)
                             && rules.matchesTableName(factTableName, name)) {
                             makeAggStar = rules.columnsOK(
