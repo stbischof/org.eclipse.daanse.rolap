@@ -1,2 +1,3 @@
 # org.eclipse.daanse.rolap
-Repository for the rolap
+
+Eclipse Daanse ROLAP (Relational OLAP) core modules.

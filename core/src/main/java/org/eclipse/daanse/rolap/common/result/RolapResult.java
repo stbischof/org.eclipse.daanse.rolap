@@ -107,7 +107,7 @@ import org.eclipse.daanse.olap.key.CellKey;
 import org.eclipse.daanse.olap.query.component.MdxVisitorImpl;
 import org.eclipse.daanse.olap.query.component.ResolvedFunCallImpl;
 import  org.eclipse.daanse.olap.util.CancellationChecker;
-import  org.eclipse.daanse.olap.util.Format;
+import org.eclipse.daanse.olap.util.format.Format;
 import org.eclipse.daanse.rolap.aggregator.DistinctCountAggregator;
 import org.eclipse.daanse.rolap.common.RolapRuntimeException;
 import org.eclipse.daanse.rolap.common.agg.AggregationManager;

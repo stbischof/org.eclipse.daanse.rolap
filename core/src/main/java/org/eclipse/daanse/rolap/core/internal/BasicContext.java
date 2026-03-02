@@ -55,6 +55,7 @@ import org.eclipse.daanse.olap.common.ExecuteDurationUtil;
 import org.eclipse.daanse.olap.core.LoggingEventBus;
 import org.eclipse.daanse.olap.execution.ExecutionImpl;
 import org.eclipse.daanse.rolap.api.RolapContext;
+import org.eclipse.daanse.rolap.api.aggmatch.AggregationMatchRulesSupplier;
 import org.eclipse.daanse.rolap.common.AbstractRolapContext;
 import org.eclipse.daanse.rolap.common.agg.AggregationManager;
 import org.eclipse.daanse.rolap.common.aggregator.AggregationFactoryImpl;
@@ -108,6 +109,9 @@ public class BasicContext extends AbstractRolapContext implements RolapContext {
 
     @Reference(cardinality = OPTIONAL)
     private SqlGuardFactory sqlGuardFactory;
+
+    @Reference(cardinality = OPTIONAL)
+    private AggregationMatchRulesSupplier aggMatchRulesSupplier;
 
     private Dialect dialect = null;
 
@@ -249,6 +253,11 @@ public class BasicContext extends AbstractRolapContext implements RolapContext {
     @Override
     public Optional<SqlGuardFactory> getSqlGuardFactory() {
         return Optional.ofNullable(sqlGuardFactory);
+    }
+
+    @Override
+    public Optional<AggregationMatchRulesSupplier> getAggMatchRulesSupplier() {
+        return Optional.ofNullable(aggMatchRulesSupplier);
     }
 
     @Override
