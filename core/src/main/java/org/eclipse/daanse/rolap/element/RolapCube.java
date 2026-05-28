@@ -1047,6 +1047,34 @@ public abstract class RolapCube extends CubeBase {
         }
     }
 
+    public void registerWb() {
+        if (this instanceof RolapVirtualCube) {
+            return;
+        }
+        List<RolapBaseCubeMeasure> storedMeasures =
+            new ArrayList<>();
+        for (Member measure : getMeasures()) {
+            if (measure instanceof RolapBaseCubeMeasure rolapBaseCubeMeasure) {
+                storedMeasures.add(rolapBaseCubeMeasure);
+            }
+        }
+
+        RolapStar starInner = getStar();
+        if (dimensions != null) {
+            for (Dimension d : getDimensions()) {
+                if (d instanceof RolapCubeDimension rcd) {
+                    this.registerDimension(rcd);
+                }
+            }
+         }
+        RolapStar.Table table = starInner.getFactTable();
+
+        // create measures (and stars for them, if necessary)
+        for (RolapBaseCubeMeasure storedMeasure : storedMeasures) {
+            table.makeMeasure(storedMeasure);
+        }
+    }
+
     /**
      * Returns true if this Cube is either virtual or if the Cube's
      * RolapStar is caching aggregates.
@@ -2568,7 +2596,7 @@ public abstract class RolapCube extends CubeBase {
 
     private void changeFact(org.eclipse.daanse.rolap.mapping.model.database.source.SqlSelectSource sqls) {
         setFact(sqls);
-        register();
+        registerWb();
     }
 
     static CharSequence getWriteBackSql(Dialect dialect, RolapWritebackTable writebackTable, List<Map<String, Map.Entry<Datatype, Object>>> sessionValues) {
@@ -2589,7 +2617,7 @@ public abstract class RolapCube extends CubeBase {
         if (restoreFact != null) {
             setFact(restoreFact);
             restoreFact = null;
-            register();
+            registerWb();
         }
 
     }
