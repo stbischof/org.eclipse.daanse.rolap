@@ -25,6 +25,7 @@ import org.eclipse.daanse.rolap.SchemaModifiersEmf;
 import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.CatalogSupplier;
 import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.FoodmartDatabaseSupplier;
 import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.FoodmartTestInstance;
+import org.eclipse.daanse.rolap.testkit.junit.api.DbScope;
 import org.eclipse.daanse.rolap.testkit.junit.api.RolapContextTest;
 import org.junit.jupiter.api.Test;
 
@@ -177,7 +178,7 @@ class HierarchizeFunDefTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.FunctionTestModifier3.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
     void testHierarchizeOrdinal(Context<?> context) {
         //TestContext<?> testContext<?> = getTestContext().withCube( "[Sales_Hierarchize]" );
     /*

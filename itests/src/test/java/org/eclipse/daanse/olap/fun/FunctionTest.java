@@ -55,6 +55,7 @@ import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.CatalogSup
 import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.FoodmartDatabaseSupplier;
 import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.FoodmartTestInstance;
 import org.eclipse.daanse.rolap.testkit.assertions.FunDependencies;
+import org.eclipse.daanse.rolap.testkit.junit.api.DbScope;
 import org.eclipse.daanse.rolap.testkit.junit.api.RolapContextTest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -1955,7 +1956,7 @@ org.eclipse.daanse.olap.calc.base.type.tuplebase.MemberArrayValueCalc(type=SCALA
   @Disabled //TODO need investigate
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.FunctionTestModifier.class },
-          database = FoodmartDatabaseSupplier.class)
+          database = FoodmartDatabaseSupplier.class, dbScope = DbScope.PER_TEST)
   void testComplexSlicer_Unsupported(Context<?> context) {
     /*
     ((BaseTestContext)context).update(SchemaUpdater.createSubstitutingCube(

@@ -33,6 +33,7 @@ import org.eclipse.daanse.olap.api.Context;
 import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.CatalogSupplier;
 import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.FoodmartDatabaseSupplier;
 import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.FoodmartTestInstance;
+import org.eclipse.daanse.rolap.testkit.junit.api.DbScope;
 import org.eclipse.daanse.rolap.testkit.junit.api.RolapContextTest;
 import org.junit.jupiter.api.Test;
 import org.eclipse.daanse.rolap.SchemaModifiersEmf;
@@ -51,7 +52,7 @@ class ValidMeasureFunDefTest {
    */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.ValidMeasureFunDefTestModifier.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
     void testSecondHierarchyInDimension(Context<?> context) throws SQLException {
     /*
     final String schema = "<?xml version=\"1.0\"?>\n"

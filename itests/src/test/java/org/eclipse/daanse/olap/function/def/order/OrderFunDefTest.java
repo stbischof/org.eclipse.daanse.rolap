@@ -37,6 +37,7 @@ import org.eclipse.daanse.rolap.mapping.model.olap.cube.VirtualCube;
 import org.eclipse.daanse.rolap.mapping.model.olap.cube.measure.BaseMeasure;
 import org.eclipse.daanse.rolap.mapping.model.olap.dimension.DimensionConnector;
 import org.eclipse.daanse.rolap.mapping.model.provider.CatalogMappingSupplier;
+import org.eclipse.daanse.rolap.testkit.junit.api.DbScope;
 import org.eclipse.daanse.rolap.testkit.junit.api.RolapConfig;
 import org.eclipse.daanse.rolap.testkit.junit.api.RolapContextTest;
 import org.eclipse.emf.ecore.util.EcoreUtil;
@@ -1103,7 +1104,7 @@ org.eclipse.daanse.olap.function.def.order.OrderContextCalc(type=SetType<MemberT
     @Test
     @RolapConfig(key = ConfigConstants.COMPARE_SIBLINGS_BY_ORDER_KEY, value = "true", type = Boolean.class)
     @RolapContextTest(catalog = { CatalogSupplier.class, TestOrderTupleMultiKeyswithVCubeModifierEmf.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
     void testOrderTupleMultiKeyswithVCube(Context<?> context) {
         // WA unit sales is greater than CA unit sales
 

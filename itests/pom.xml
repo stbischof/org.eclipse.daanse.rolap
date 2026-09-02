@@ -31,7 +31,7 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
-          <argLine>-Xmx4g</argLine>
+          <argLine>-Xms4g -Xmx6g</argLine>
           <!-- Intentionally misconfigured case classes only run via EngineTestKit. -->
           <excludedGroups>failure-mode-case</excludedGroups>
         </configuration>
@@ -122,6 +122,12 @@
     <dependency>
       <groupId>org.eclipse.daanse</groupId>
       <artifactId>org.eclipse.daanse.jdbc.datasource.testkit.duckdb</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.eclipse.daanse</groupId>
+      <artifactId>org.eclipse.daanse.rolap.mapping.instance.emf.complex.expressivenames</artifactId>
       <version>${revision}</version>
       <scope>test</scope>
     </dependency>

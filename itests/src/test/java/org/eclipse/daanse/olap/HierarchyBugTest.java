@@ -56,6 +56,7 @@ import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.CatalogSup
 import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.FoodmartDatabaseSupplier;
 import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.FoodmartTestInstance;
 import org.eclipse.daanse.rolap.testkit.assertions.FlushSchemaCacheModifier;
+import org.eclipse.daanse.rolap.testkit.junit.api.DbScope;
 import org.eclipse.daanse.rolap.testkit.junit.api.RolapContextTest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -274,7 +275,7 @@ FlushSchemaCacheModifier.flushSchemaCache(conn);
     }
 	@Test
 	@RolapContextTest(catalog = { CatalogSupplier.class, VerifyMemberLevelNamesIdentityOlap4jDateDimModifier.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
     void testNamesIdentitySsasCompatibleOlap4jDateDim(Context<?> foodMartContext)
         throws SQLException
     {

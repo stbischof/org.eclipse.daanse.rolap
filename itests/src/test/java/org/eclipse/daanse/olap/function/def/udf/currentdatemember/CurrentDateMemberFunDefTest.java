@@ -24,6 +24,7 @@ import org.eclipse.daanse.olap.api.connection.Connection;
 import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.CatalogSupplier;
 import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.FoodmartDatabaseSupplier;
 import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.FoodmartTestInstance;
+import org.eclipse.daanse.rolap.testkit.junit.api.DbScope;
 import org.eclipse.daanse.rolap.testkit.junit.api.RolapContextTest;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
@@ -43,7 +44,7 @@ class CurrentDateMemberFunDefTest {
     @Disabled //TODO: UserDefinedFunction
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.CurrentDateMemberUdfTestModifier1.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
     void testCurrentDateMemberUdf(Context<?> context) {
         //TODO: context redesign
         //Assertions.fail("Handle comment , Context<?> redesign nedded");

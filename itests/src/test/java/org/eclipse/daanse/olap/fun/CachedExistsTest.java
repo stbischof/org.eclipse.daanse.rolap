@@ -53,6 +53,7 @@ import org.eclipse.daanse.rolap.mapping.model.olap.dimension.hierarchy.level.Lev
 import org.eclipse.daanse.rolap.mapping.model.olap.dimension.hierarchy.level.LevelDefinition;
 import org.eclipse.daanse.rolap.mapping.model.olap.dimension.hierarchy.level.LevelFactory;
 import org.eclipse.daanse.rolap.mapping.model.provider.CatalogMappingSupplier;
+import org.eclipse.daanse.rolap.testkit.junit.api.DbScope;
 import org.eclipse.daanse.rolap.testkit.junit.api.RolapContextTest;
 import org.junit.jupiter.api.Test;
 /**
@@ -334,7 +335,7 @@ class CachedExistsTest{
 
 	@Test
 	@RolapContextTest(catalog = { CatalogSupplier.class, TestMondrian2704ModifierEmf.class },
-	        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
+	        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
     void testMondrian2704(Connection connection) {
     // Verifies second arg of CachedExists uses a tuple type
     	assertThatQuery(connection,

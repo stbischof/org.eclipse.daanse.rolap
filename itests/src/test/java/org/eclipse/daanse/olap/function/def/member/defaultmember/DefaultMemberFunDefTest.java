@@ -47,6 +47,7 @@ import org.eclipse.daanse.rolap.mapping.model.olap.dimension.hierarchy.level.Lev
 import org.eclipse.daanse.rolap.mapping.model.olap.dimension.hierarchy.level.LevelDefinition;
 import org.eclipse.daanse.rolap.mapping.model.olap.dimension.hierarchy.level.LevelFactory;
 import org.eclipse.daanse.rolap.mapping.model.provider.CatalogMappingSupplier;
+import org.eclipse.daanse.rolap.testkit.junit.api.DbScope;
 import org.eclipse.daanse.rolap.testkit.junit.api.RolapContextTest;
 import org.eclipse.emf.ecore.util.EcoreUtil;
 import org.junit.jupiter.api.Test;
@@ -209,7 +210,7 @@ class DefaultMemberFunDefTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestDefaultMemberModifierEmf.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
     void testExplicitDefaultMember(Context<?> context) {
         final String memberUname ="[Time2].[Weekly].[1997].[23]";
     /*

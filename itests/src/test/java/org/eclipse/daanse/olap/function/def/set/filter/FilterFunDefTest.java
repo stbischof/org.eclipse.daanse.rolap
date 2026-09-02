@@ -38,6 +38,7 @@ import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.FoodmartTe
 import org.eclipse.daanse.rolap.mapping.model.catalog.Catalog;
 import org.eclipse.daanse.rolap.mapping.model.catalog.impl.CatalogImpl;
 import org.eclipse.daanse.rolap.mapping.model.provider.CatalogMappingSupplier;
+import org.eclipse.daanse.rolap.testkit.junit.api.DbScope;
 import org.eclipse.daanse.rolap.testkit.junit.api.RolapConfig;
 import org.eclipse.daanse.rolap.testkit.junit.api.RolapContextTest;
 import org.junit.jupiter.api.Disabled;
@@ -128,7 +129,7 @@ class FilterFunDefTest {
     @RolapConfig(key = ConfigConstants.QUERY_TIMEOUT, value = "3", type = Integer.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_NON_EMPTY, value = "false", type = Boolean.class)
     @RolapContextTest(catalog = { CatalogSupplier.class, TestFilterWillTimeoutModifierEmf.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
     void testFilterWillTimeout(Context<?> context) {
         try {
             executeQuery(context.getConnectionWithDefaultRole(), "select {"
