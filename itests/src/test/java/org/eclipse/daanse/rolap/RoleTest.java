@@ -38,8 +38,8 @@ import org.eclipse.daanse.rolap.CellKeyTest.FoodmartData;
 @RolapContextTest(FoodmartTestInstance.class)
 public class RoleTest {
 
-    @Disabled("fix PR: not reproducible in isolation under DuckDB; failed in full-suite run, cause unconfirmed")
     @Test
+    @RolapContextTest(value = FoodmartTestInstance.class, dbScope = DbScope.PER_TEST)
     void testDatabaseSchemaWithNoRole(Context<?> context) {
         Connection connection = context.getConnectionWithDefaultRole();
         try {

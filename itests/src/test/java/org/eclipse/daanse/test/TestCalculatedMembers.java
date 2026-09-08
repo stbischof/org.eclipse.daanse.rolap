@@ -32,6 +32,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.text.NumberFormat;
+import java.util.Locale;
+
 import org.eclipse.daanse.olap.api.Context;
 import org.eclipse.daanse.olap.api.connection.Connection;
 import org.eclipse.daanse.olap.api.element.Member;
@@ -79,7 +82,6 @@ import org.eclipse.daanse.test.PropertiesTest.FoodmartData;
     public void afterEach() {
     }
 
-    @Disabled("fix PR: not reproducible in isolation under DuckDB; failed in full-suite run, cause unconfirmed")
     @Test
      void testCalculatedMemberInCube(Context<?> context) {
         assertThatExpr(context.getConnectionWithDefaultRole(), "Sales", "[Measures].[Profit]").returns( "$339,610.90");
@@ -97,8 +99,8 @@ import org.eclipse.daanse.test.PropertiesTest.FoodmartData;
             + "{[Measures].[Org Salary]}\n"
             + "Axis #2:\n"
             + "{[Time].[Time].[1997], [Store].[Store].[All Stores], [Employees].[Employees].[All Employees]}\n"
-            + "Row #0: $40.31\n"
-            + "Row #0: $11,406.75\n");
+            + "Row #0: " + currency(40.31) + "\n"
+            + "Row #0: " + currency(11406.75) + "\n");
     }
 
     /**
@@ -1697,5 +1699,10 @@ import org.eclipse.daanse.test.PropertiesTest.FoodmartData;
             + " from [Sales]")
             .throwsMessage("The '[X]' calculated member cannot be created because its parent is "
             + "at the lowest level in the [Gender].[Gender] hierarchy.");
+    }
+
+    /** Formats a value the way the "Currency" FORMAT_STRING macro does: via the JVM's default locale. */
+    private static String currency(double value) {
+        return NumberFormat.getCurrencyInstance(Locale.getDefault()).format(value);
     }
 }

@@ -37,7 +37,6 @@ import org.junit.jupiter.api.Test;
 public class FirstTest {
 
 
-    @Disabled("fix PR: MDX object '[Measures].[Anzahl]' not found in cube 'Schulen in Jena (Institutionen)'")
     @Test
     void capturesMemberChildrenSqlFromSchoolCatalog() throws Exception {
         ActiveDatabase db = DatabaseProvider.selected().activate();
@@ -45,7 +44,7 @@ public class FirstTest {
         DatabaseLayer.apply(db.dataSource(), db.dialect(), dbSup.schema());
         DataLayer.apply(db.dataSource(), db.dialect(), dbSup.schema(), new SchoolDataSupplier());
         String mdx =
-                "SELECT {[Measures].[Anzahl]} ON COLUMNS FROM [Schulen in Jena (Institutionen)]";
+                "SELECT {[Measures].[Anzahl Schulen]} ON COLUMNS FROM [Schulen in Jena (Institutionen)]";
         TestContext ctx = new TestContext(db.dataSource(), db.dialect(), new CatalogSupplier());
         Connection conn = ((Context<?>) ctx).getConnectionWithDefaultRole();
         

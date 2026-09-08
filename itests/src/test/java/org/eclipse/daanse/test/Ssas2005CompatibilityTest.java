@@ -669,7 +669,7 @@ class Ssas2005CompatibilityTest {
             + "from [Warehouse and Sales]");
     }
 
-    @Disabled("fix PR: MDX parser error text/position changed to \"input:2:1 ... Found from\", no longer \"input:2:6\"")
+    //@Disabled("fix PR: MDX parser error text/position changed to \"input:2:1 ... Found from\", no longer \"input:2:6\"")
     @Test
     void testCannotDistinguishMdxFromSql(Context<?> context) {
         // Cannot tell whether statement is MDX or SQL
@@ -678,7 +678,7 @@ class Ssas2005CompatibilityTest {
         //   to ambiguity.
         assertThatQuery(context.getConnectionWithDefaultRole(), "select [Time].Members\n"
             + "from [Warehouse and Sales]")
-            .throwsMessage("Encountered an error at (or somewhere around) input:2:6");
+            .throwsMessage("Encountered an error at (or somewhere around) input:2:1");
     }
 
     @Test

@@ -86,7 +86,7 @@ class AggSchemaScanTest {
   }
 
 
-  @Disabled("fix PR: not reproducible in isolation under DuckDB; failed in full-suite run, cause unconfirmed")
+  //@Disabled("fix PR: not reproducible in isolation under DuckDB; failed in full-suite run, cause unconfirmed")
   @Test
   void testAggScanPropertiesPopulatedSchema(Context<?> context) throws Exception {
     final org.eclipse.daanse.olap.api.connection.Connection rolapConn = (org.eclipse.daanse.olap.api.connection.Connection) context.getConnectionWithDefaultRole();

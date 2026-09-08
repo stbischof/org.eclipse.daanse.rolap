@@ -3383,7 +3383,7 @@ class TestAggregationManager extends BatchTestCase {
         context.getCatalogCache().clear();
     }
 
-    @Disabled("fix PR: DuckDB: agg_c_special_sales_fact_1997 not found by getAggStar, spy(null) NPEs")
+    //@Disabled("fix PR: DuckDB: agg_c_special_sales_fact_1997 not found by getAggStar, spy(null) NPEs")
     @Test
     @RolapConfig(key = ConfigConstants.READ_AGGREGATES, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.USE_AGGREGATES, value = "true", type = Boolean.class)

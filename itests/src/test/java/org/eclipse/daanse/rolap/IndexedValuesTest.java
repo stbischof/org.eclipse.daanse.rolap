@@ -26,6 +26,9 @@ package org.eclipse.daanse.rolap;
 
 import static org.eclipse.daanse.rolap.testkit.assertions.MdxAssert.assertThatQuery;
 
+import java.text.NumberFormat;
+import java.util.Locale;
+
 import org.eclipse.daanse.olap.api.Context;
 import org.eclipse.daanse.olap.api.connection.Connection;
 import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.FoodmartTestInstance;
@@ -47,7 +50,6 @@ import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
 @RolapContextTest(FoodmartTestInstance.class)
 class IndexedValuesTest {
 
-    @Disabled("fix PR: not reproducible in isolation under DuckDB; failed in full-suite run, cause unconfirmed")
     @Test
     @DisabledIfSystemProperty(named = "test.disable.knownFails", matches = "true")
     void testQueryWithIndex(Context<?> context) {
@@ -59,7 +61,7 @@ class IndexedValuesTest {
             + "{[Measures].[Count]}\n"
             + "Axis #2:\n"
             + "{[Employees].[Employees].[Sheri Nowmer]}\n"
-            + "Row #0: $39,431.67\n"
+            + "Row #0: " + currency(39431.67) + "\n"
             + "Row #0: 7,392\n";
         Connection connection = context.getConnectionWithDefaultRole();
         // Query using name
@@ -73,5 +75,10 @@ class IndexedValuesTest {
         // Member-by-key resolution ("&[key]") is not supported: the SQL builder
         // cannot model a MemberKeyConstraint read. Restore the key-based assertions
         // once it can.
+    }
+
+    /** Formats a value the way the "Currency" FORMAT_STRING macro does: via the JVM's default locale. */
+    private static String currency(double value) {
+        return NumberFormat.getCurrencyInstance(Locale.getDefault()).format(value);
     }
 }
