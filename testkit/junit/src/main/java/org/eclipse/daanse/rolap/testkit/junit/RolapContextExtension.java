@@ -170,7 +170,7 @@ public class RolapContextExtension implements BeforeAllCallback, BeforeEachCallb
         return switch (fixture.dbScope()) {
         case PER_TEST -> "test:" + extensionContext.getUniqueId();
         case PER_CLASS -> "class:" + className;
-        case PER_RUNTIME -> "fixture:" + fixture.fixtureKey();
+        case PER_RUNTIME -> "db:" + fixture.databaseKey();
         case NAMED -> "named:" + fixture.scopeName();
         };
     }

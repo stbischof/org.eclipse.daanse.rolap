@@ -175,7 +175,7 @@ class AggMeasureFactCountTest {
     @Disabled // TODO need investigate
     @Test
     @DisabledIfSystemProperty(named = "tempIgnoreStrageTests", matches = "true")
-    @RolapContextTest(value = AggMeasureFactCountTestInstances.FactColumnNotExists.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AggMeasureFactCountTestInstances.FactColumnNotExists.class)
     @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.USE_AGGREGATES, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.READ_AGGREGATES, value = "true", type = Boolean.class)
@@ -227,7 +227,7 @@ class AggMeasureFactCountTest {
     // column since every AggMeasureFactCount.factColumn points at a column
     // that does not exist in the fact table.
     @Test
-    @RolapContextTest(value = AggMeasureFactCountTestInstances.MeasureFactColumnNotExist.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AggMeasureFactCountTestInstances.MeasureFactColumnNotExist.class)
     @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.USE_AGGREGATES, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.READ_AGGREGATES, value = "true", type = Boolean.class)
@@ -254,7 +254,7 @@ class AggMeasureFactCountTest {
     // no AggMeasureFactCount elements at all -- falls back to the general
     // fact_count column.
     @Test
-    @RolapContextTest(value = AggMeasureFactCountTestInstances.WithoutMeasureFactColumnElement.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AggMeasureFactCountTestInstances.WithoutMeasureFactColumnElement.class)
     @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.USE_AGGREGATES, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.READ_AGGREGATES, value = "true", type = Boolean.class)
@@ -279,7 +279,7 @@ class AggMeasureFactCountTest {
     }
 
     @Test
-    @RolapContextTest(value = AggMeasureFactCountTestInstances.MeasureFactColumnAndAggFactCountNotExist.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AggMeasureFactCountTestInstances.MeasureFactColumnAndAggFactCountNotExist.class)
     @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.USE_AGGREGATES, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.READ_AGGREGATES, value = "true", type = Boolean.class)
@@ -333,7 +333,7 @@ class AggMeasureFactCountTest {
     }
 
     @Test
-    @RolapContextTest(value = AggMeasureFactCountTestInstances.AggDivideByZero.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AggMeasureFactCountTestInstances.AggDivideByZero.class)
     @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.USE_AGGREGATES, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.READ_AGGREGATES, value = "true", type = Boolean.class)

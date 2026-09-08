@@ -49,6 +49,8 @@ import org.eclipse.daanse.olap.api.result.CellSet;
 import org.eclipse.daanse.olap.api.result.Result;
 import org.eclipse.daanse.olap.api.result.Scenario;
 import org.eclipse.daanse.olap.impl.TraditionalCellSetFormatter;
+import org.eclipse.daanse.rolap.common.writeback.ScenarioImpl;
+import org.eclipse.daanse.rolap.element.RolapCatalog;
 import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.CatalogSupplier;
 import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.FoodmartDatabaseSupplier;
 import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.FoodmartTestInstance;
@@ -58,7 +60,7 @@ import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import org.eclipse.daanse.rolap.SchemaModifiersEmf;
-import org.eclipse.daanse.test.CaptionTest.FoodmartData;
+import org.eclipse.daanse.test.FoodmartData;
 
 /**
  * Test for writeback functionality.
@@ -239,7 +241,6 @@ class ScenarioTest {
     /**
      * Tests setting cells by the "equal allocation" allocation policy.
      */
-    @Disabled("fix PR: DuckDB rejects the empty VALUES() clause used for the Scenario inline table (H2 allowed it)")
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.ScenarioTestModifier1.class },
     database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
@@ -275,6 +276,9 @@ class ScenarioTest {
         final Connection connection = context.getConnectionWithDefaultRole();
         connection.setScenario(connection.createScenario());
         final Scenario scenario = connection.getScenario();
+        // createScenario() does not register with the catalog; the
+        // [Scenario].[{id}] member exists only after an explicit register
+        ((ScenarioImpl) scenario).register((RolapCatalog) connection.getCatalog());
         String id = scenario.getId();
         final Statement pstmt = connection.createStatement();
         CellSet cellSet = pstmt.executeQuery(
@@ -371,6 +375,7 @@ class ScenarioTest {
         // Create a new scenario, and show that the scenario in the slicer
         // overrides.
         final Scenario scenario2 = connection.createScenario();
+        ((ScenarioImpl) scenario2).register((RolapCatalog) connection.getCatalog());
         final String id2 = scenario2.getId();
 
         // Connection has scenario1,
@@ -438,7 +443,6 @@ class ScenarioTest {
      * <a href="http://jira.pentaho.com/browse/MONDRIAN-815">MONDRIAN-815</a>,
      * "NPE from query if use a scenario and one of the cells is empty/null".
      */
-    @Disabled("fix PR: DuckDB rejects the empty VALUES() clause used for the Scenario inline table (H2 allowed it)")
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.ScenarioTestModifier1.class },
     database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
@@ -464,6 +468,7 @@ class ScenarioTest {
         connection.setScenario(connection.createScenario());
         final Scenario scenario = connection.createScenario();
         connection.setScenario(scenario);
+        ((ScenarioImpl) scenario).register((RolapCatalog) connection.getCatalog());
         final String id = scenario.getId();
         final String scenarioUniqueName = "[Scenario].[Scenario].[" + id + "]";
         final Statement pstmt = connection.createStatement();

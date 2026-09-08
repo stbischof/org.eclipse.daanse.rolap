@@ -35,7 +35,7 @@ import org.eclipse.daanse.rolap.testkit.junit.api.RolapContextTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
 
-import org.eclipse.daanse.rolap.CellKeyTest.FoodmartData;
+import org.eclipse.daanse.test.FoodmartData;
 
 /**
  * Unit test for shared dimensions.

@@ -86,6 +86,7 @@ import org.junit.jupiter.api.Test;
 import org.eclipse.daanse.rolap.testkit.assertions.ConfigOverride;
 import org.eclipse.daanse.rolap.testkit.assertions.DatabaseProduct;
 import org.eclipse.daanse.rolap.testkit.assertions.SqlPattern;
+import org.eclipse.daanse.test.FoodmartData;
 
 /**
  * Tests for NON EMPTY Optimization, includes SqlConstraint type hierarchy and RolapNative classes.
@@ -732,7 +733,7 @@ class NonEmptyTest extends BatchTestCase {
 
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, TestStrMeasureModifier.class },
-          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   @RolapConfig(key = ConfigConstants.LEVEL_PRE_CACHE_THRESHOLD, value = "0", type = Integer.class)
   void testStrMeasure(Context<?> context) {
       assertThatQuery(context.getConnectionWithDefaultRole(),
@@ -746,7 +747,7 @@ class NonEmptyTest extends BatchTestCase {
 
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, TestBug1515302Modifier.class },
-          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   @RolapConfig(key = ConfigConstants.LEVEL_PRE_CACHE_THRESHOLD, value = "0", type = Integer.class)
   void testBug1515302(Context<?> context) {
     assertThatQuery(context.getConnectionWithDefaultRole(),
@@ -1641,7 +1642,7 @@ class NonEmptyTest extends BatchTestCase {
 
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.NonEmptyTestModifier.class },
-          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   @RolapConfig(key = ConfigConstants.LEVEL_PRE_CACHE_THRESHOLD, value = "0", type = Integer.class)
   void testCjMembersWithHideIfBlankLeafAndNoAll(Context<?> context) {
     // No 'all' level, and ragged because [Product Name] is hidden if
@@ -1683,7 +1684,7 @@ class NonEmptyTest extends BatchTestCase {
 
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, NonEmptyTestModifier2HideIfParentsName.class },
-          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   @RolapConfig(key = ConfigConstants.LEVEL_PRE_CACHE_THRESHOLD, value = "0", type = Integer.class)
   void testCjMembersWithHideIfParentsNameLeaf(Context<?> context) {
       // [Product Name] can be hidden if it it matches its parent name, so
@@ -2084,7 +2085,7 @@ class NonEmptyTest extends BatchTestCase {
    */
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, TestMultiLevelMemberConstraintNullParentModifier.class },
-          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   @RolapConfig(key = ConfigConstants.LEVEL_PRE_CACHE_THRESHOLD, value = "0", type = Integer.class)
   @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
   void testMultiLevelMemberConstraintNullParent(Context<?> context)  {
@@ -2147,7 +2148,7 @@ class NonEmptyTest extends BatchTestCase {
    */
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, TestMultiLevelMemberConstraintMixedNullNonNullParentModifier.class },
-          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   @RolapConfig(key = ConfigConstants.LEVEL_PRE_CACHE_THRESHOLD, value = "0", type = Integer.class)
   @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
   void testMultiLevelMemberConstraintMixedNullNonNullParent(Context<?> context)  {
@@ -2208,7 +2209,7 @@ class NonEmptyTest extends BatchTestCase {
    */
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, TestMultiLevelMemberConstraintWithMixedNullNonNullChildModifier.class },
-          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   @RolapConfig(key = ConfigConstants.LEVEL_PRE_CACHE_THRESHOLD, value = "0", type = Integer.class)
   void testMultiLevelMemberConstraintWithMixedNullNonNullChild(Context<?> context)  {
     if ( !context.getConfigValue(ConfigConstants.FILTER_CHILDLESS_SNOWFLAKE_MEMBERS, ConfigConstants.FILTER_CHILDLESS_SNOWFLAKE_MEMBERS_DEFAULT_VALUE, Boolean.class) ) {
@@ -4719,7 +4720,7 @@ class NonEmptyTest extends BatchTestCase {
 
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, TestContextAtAllWorksWithConstraintModifier.class },
-          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   @RolapConfig(key = ConfigConstants.LEVEL_PRE_CACHE_THRESHOLD, value = "0", type = Integer.class)
   void testContextAtAllWorksWithConstraint(Context<?> context)  {
       String mdx =
@@ -4749,7 +4750,7 @@ class NonEmptyTest extends BatchTestCase {
    */
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, TestCalculatedDefaultMeasureOnVirtualCubeNoThrowExceptionModifier.class },
-          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   @RolapConfig(key = ConfigConstants.LEVEL_PRE_CACHE_THRESHOLD, value = "0", type = Integer.class)
   @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_NON_EMPTY, value = "true", type = Boolean.class)
   void testCalculatedDefaultMeasureOnVirtualCubeNoThrowException(Context<?> context)  {
@@ -6412,7 +6413,7 @@ class NonEmptyTest extends BatchTestCase {
 
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.NonEmptyTestModifier5.class },
-          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   @RolapConfig(key = ConfigConstants.LEVEL_PRE_CACHE_THRESHOLD, value = "0", type = Integer.class)
   void testDefaultMemberNonEmptyContext(Context<?> context)  {
       assertThatQuery(context.getConnectionWithDefaultRole(),
@@ -6441,7 +6442,7 @@ class NonEmptyTest extends BatchTestCase {
 
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.NonEmptyTestModifier7.class },
-          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   @RolapConfig(key = ConfigConstants.LEVEL_PRE_CACHE_THRESHOLD, value = "0", type = Integer.class)
   @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_NON_EMPTY, value = "true", type = Boolean.class)
   void testCalcMeasureInVirtualCubeWithoutBaseComponents(Context<?> context)  {
@@ -6470,10 +6471,4 @@ class NonEmptyTest extends BatchTestCase {
   }
 
   /** Named bridge onto the FoodMart CSVs (for the data=-Supplier form). */
-  public static class FoodmartData implements org.eclipse.daanse.cwm.testkit.api.DataSupplier {
-      @Override
-      public java.util.Map<String, java.net.URL> csvResources() {
-          return new FoodmartTestInstance().dataSupplier().csvResources();
-      }
-  }
 }

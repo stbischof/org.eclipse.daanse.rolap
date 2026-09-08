@@ -35,6 +35,7 @@ import org.eclipse.daanse.rolap.testkit.junit.api.RolapContextTest;
 import org.junit.jupiter.api.Test;
 
 import org.eclipse.daanse.test.DiffRepository;
+import org.eclipse.daanse.test.FoodmartData;
 
 /**
  * <code>MiscTest</code> is a test suite which tests miscellaneous
@@ -80,7 +81,7 @@ public class MiscTest extends ClearViewBase {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, MiscTestModifier.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testSolveOrder(Context<?> context) {
         DiffRepository diffRepos = getDiffRepos();
         setName("testSolveOrder");
@@ -89,11 +90,5 @@ public class MiscTest extends ClearViewBase {
     }
 
     /** Named bridge onto the FoodMart CSVs (for the data=-Supplier form). */
-    public static class FoodmartData implements org.eclipse.daanse.cwm.testkit.api.DataSupplier {
-        @Override
-        public java.util.Map<String, java.net.URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 
 }

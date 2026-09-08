@@ -66,6 +66,7 @@ import org.eclipse.daanse.rolap.testkit.junit.api.RolapContextTest;
 import org.eclipse.daanse.rolap.testkit.junit.api.Roles;
 import org.eclipse.emf.ecore.util.EcoreUtil;
 import org.junit.jupiter.api.Test;
+import org.eclipse.daanse.test.FoodmartData;
 
 /**
  * Unit test for {@link CatalogReader}.
@@ -159,7 +160,7 @@ class RolapCatalogReaderTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, Reg1AccessRoleModifier.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testGetCubeDimensions(@Roles("REG1") Connection connection) {
         final String timeWeekly = "[Time].[Weekly]";
 
@@ -197,12 +198,6 @@ class RolapCatalogReaderTest {
     }
 
     /** Benannte Brücke auf die FoodMart-CSVs (für die data=-Supplier-Form). */
-    public static class FoodmartData implements org.eclipse.daanse.cwm.testkit.api.DataSupplier {
-        @Override
-        public Map<String, java.net.URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 
     /**
      * Erzeugt die Access-Rolle 'REG1' mit Dimension- und Hierarchy-Grants

@@ -89,6 +89,7 @@ import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
 
 import org.eclipse.daanse.rolap.testkit.assertions.DatabaseProduct;
 import org.eclipse.daanse.rolap.testkit.assertions.SqlPattern;
+import org.eclipse.daanse.test.FoodmartData;
 /**
  * Test case for pushing MDX filter conditions down to SQL.
  */
@@ -314,7 +315,7 @@ class NativeFilterMatchingTest extends BatchTestCase {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestMatchesWithAccessControlModifierEmf.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testMatchesWithAccessControl(@Roles("test") Connection connection ) {
         NativeVerify.assertSameNativeAndNot(connection.getContext(),
             "select Filter([Product].[Product Category].Members, [Product].CurrentMember.Name matches \"(?i).*Food.*\")"
@@ -594,12 +595,6 @@ class NativeFilterMatchingTest extends BatchTestCase {
     }
 
     /** Named bridge onto the FoodMart CSVs (for the {@code data =} supplier form). */
-    public static class FoodmartData implements DataSupplier {
-        @Override
-        public Map<String, URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 
     @Test
     @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)

@@ -69,7 +69,7 @@ import org.eclipse.emf.ecore.util.EcoreUtil;
 import org.junit.jupiter.api.Test;
 
 import org.eclipse.daanse.rolap.testkit.assertions.DatabaseProduct;
-import org.eclipse.daanse.test.AccessControlTest.FoodmartData;
+import org.eclipse.daanse.test.FoodmartData;
 /**
  * Unit test for the InlineTable element, defining tables whose values are held
  * in the Mondrian schema file, not in the database.
@@ -81,7 +81,7 @@ class InlineTableTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestInlineTableModifierEmf.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testInlineTable(Context<?> context) {
         final String cubeName = "Sales_inline";
         /*
@@ -317,7 +317,7 @@ class InlineTableTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestInlineTableInSharedDimModifierEmf.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testInlineTableInSharedDim(Context<?> context) {
         final String cubeName = "Sales_inline_shared";
         /*
@@ -560,7 +560,7 @@ class InlineTableTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestInlineTableSnowflakeModifierEmf.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testInlineTableSnowflake(Context<?> context) {
         if (getDatabaseProduct(getDialect(context.getConnectionWithDefaultRole()).name())
             == DatabaseProduct.INFOBRIGHT)
@@ -878,7 +878,7 @@ class InlineTableTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestInlineTableDateModifierEmf.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testInlineTableDate(Context<?> context) {
         final String cubeName = "Sales_Inline_Date";
         /*

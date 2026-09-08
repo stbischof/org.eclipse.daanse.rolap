@@ -451,7 +451,7 @@ class RaggedHierarchyTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.RaggedHierarchyTestModifier1.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     @RolapConfig(key = ConfigConstants.NULL_MEMBER_REPRESENTATION, value = "null", type = String.class)
     void testHideIfBlankHidesWhitespace(Connection connection) {
         if (getDatabaseProduct(getDialect(connection).name())
@@ -626,10 +626,4 @@ class RaggedHierarchyTest {
     }
 
     /** Named bridge onto the FoodMart CSVs (for the {@code data =} supplier form). */
-    public static class FoodmartData implements DataSupplier {
-        @Override
-        public Map<String, URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 }

@@ -7644,7 +7644,9 @@ public class SchemaModifiersEmf {
         private Catalog catalog;
 
         public OrderByAliasTestModifier2(Catalog catalogMapping) {
-            final String colName = "\"supervisor_id\"";
+            // supervisor_id is INTEGER; DuckDB has no rtrim(INTEGER) overload
+            // (H2 coerced silently), so the test expression casts explicitly
+            final String colName = "CAST(\"supervisor_id\" AS VARCHAR)";
             EcoreUtil.Copier copier = EmfUtil.copier((CatalogImpl) catalogMapping);
             this.catalog = (CatalogImpl) copier.get(catalogMapping);
             Optional<Cube> oCube = Packages.available(catalog, Cube.class).stream()

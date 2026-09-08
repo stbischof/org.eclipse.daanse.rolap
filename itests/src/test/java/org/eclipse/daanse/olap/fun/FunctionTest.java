@@ -65,6 +65,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.eclipse.daanse.rolap.SchemaModifiersEmf;
+import org.eclipse.daanse.test.FoodmartData;
 
 //import mondrian.spi.DialectManager;
 
@@ -1956,7 +1957,7 @@ org.eclipse.daanse.olap.calc.base.type.tuplebase.MemberArrayValueCalc(type=SCALA
   @Disabled //TODO need investigate
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.FunctionTestModifier.class },
-          database = FoodmartDatabaseSupplier.class, dbScope = DbScope.PER_TEST)
+          database = FoodmartDatabaseSupplier.class)
   void testComplexSlicer_Unsupported(Context<?> context) {
     /*
     ((BaseTestContext)context).update(SchemaUpdater.createSubstitutingCube(
@@ -2007,10 +2008,4 @@ org.eclipse.daanse.olap.calc.base.type.tuplebase.MemberArrayValueCalc(type=SCALA
   }
 
   /** Named bridge onto the FoodMart CSVs (for the {@code data =} supplier form). */
-  public static class FoodmartData implements org.eclipse.daanse.cwm.testkit.api.DataSupplier {
-      @Override
-      public Map<String, URL> csvResources() {
-          return new FoodmartTestInstance().dataSupplier().csvResources();
-      }
-  }
 }

@@ -73,12 +73,6 @@ import org.eclipse.daanse.rolap.SchemaModifiersEmf;
 @RolapContextTest(FoodmartTestInstance.class)
 class CompatibilityTest {
 
-    public static class FoodmartData implements DataSupplier {
-        @Override
-        public Map<String, URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 
     @BeforeAll
     public static void beforeAll() {
@@ -339,7 +333,7 @@ class CompatibilityTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.Ssas2005CompatibilityTestModifier4.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCaseInsensitiveNullMember(Context<?> context, Dialect dialect, Connection connection) {
         if (getDatabaseProduct(dialect.name()) == DatabaseProduct.LUCIDDB) {
             // TODO jvs 29-Nov-2006:  LucidDB is strict about
@@ -372,7 +366,7 @@ class CompatibilityTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.CompatibilityTestModifier.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testNullNameColumn(Context<?> context, Dialect dialect, Connection connection) {
         switch (getDatabaseProduct(dialect.name())) {
         case LUCIDDB:
@@ -455,7 +449,7 @@ class CompatibilityTest {
       */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.CompatibilityTestModifier2.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testNullCollation(Dialect dialect, Connection connection) {
         if (dialect.supportsGroupByExpressions()) {
             // Derby does not support expressions in the GROUP BY clause,

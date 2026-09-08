@@ -73,17 +73,11 @@ import org.eclipse.daanse.rolap.SchemaModifiersEmf;
 class ParentChildHierarchyTest {
 
     /** Named bridge onto the FoodMart CSVs (for the data=-Supplier form). */
-    public static class FoodmartData implements org.eclipse.daanse.cwm.testkit.api.DataSupplier {
-        @Override
-        public java.util.Map<String, java.net.URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.ParentChildHierarchyTestModifier5.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testDotMembersNoClosure(Context<?> context) {
         /*
         ((BaseTestContext)context).update(SchemaUpdater.createSubstitutingCube(
@@ -142,7 +136,7 @@ class ParentChildHierarchyTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.ParentChildHierarchyTestModifier2.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testSnowflakeClosure(Context<?> context) {
         MdxAssert.assertThatQuery(context.getConnectionWithDefaultRole(),
             "select {[Measures].[Count], [Measures].[Org Salary], \n"
@@ -166,7 +160,7 @@ class ParentChildHierarchyTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.ParentChildHierarchyTestModifier3.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testSharedClosureParentChildHierarchy(Context<?> context) {
         MdxAssert.assertThatQuery(context.getConnectionWithDefaultRole(),
             "Select "
@@ -198,7 +192,7 @@ class ParentChildHierarchyTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.ParentChildHierarchyTestModifier4.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testNonClosureParentChildHierarchy(Context<?> context) {
         String part1 =
             "Axis #0:\n"
@@ -2962,7 +2956,7 @@ expected);
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.ParentChildHierarchyTestModifier6.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testHierarchyFalseCycleFewerDimensions(Context<?> context) {
         if (Bug.avoidSlowTestOnLucidDB(getDialect(context.getConnectionWithDefaultRole()))) {
             return;
@@ -3349,7 +3343,7 @@ expected);
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.ParentChildHierarchyTestModifier8.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testClosureTableInVirtualCube(Context<?> context) {
         MdxAssert.assertThatQuery(context.getConnectionWithDefaultRole(),
 "select "
@@ -3374,7 +3368,7 @@ expected);
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.ParentChildHierarchyTestModifier9.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testClosureVsNoClosure(Context<?> context) {
         if (Bug.avoidSlowTestOnLucidDB(getDialect(context.getConnectionWithDefaultRole()))) {
             return;
@@ -3438,7 +3432,7 @@ expected);
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.ParentChildHierarchyTestModifier10.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testClosureVsNoClosureNoClosureTable(Context<?> context) {
         if (Bug.avoidSlowTestOnLucidDB(getDialect(context.getConnectionWithDefaultRole()))) {
             return;
@@ -3520,7 +3514,7 @@ expected);
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.ParentChildHierarchyTestModifier11.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBridgeTable(Context<?> context) {
         if (!Bug.Bug441Fixed) {
             return;

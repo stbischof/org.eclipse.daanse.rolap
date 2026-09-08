@@ -79,12 +79,6 @@ import org.eclipse.daanse.rolap.SchemaModifiersEmf;
 class Ssas2005CompatibilityTest {
 
     /** Named bridge onto the FoodMart CSVs (for the {@code data =} supplier form). */
-    public static class FoodmartData implements DataSupplier {
-        @Override
-        public Map<String, URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 
     /**
      * Whether member naming rules are implemented.

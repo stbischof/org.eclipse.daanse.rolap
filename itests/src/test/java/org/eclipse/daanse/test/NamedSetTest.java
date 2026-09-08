@@ -61,7 +61,7 @@ import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.eclipse.daanse.cwm.model.cwm.objectmodel.core.util.Packages;
 
-import org.eclipse.daanse.test.AccessControlTest.FoodmartData;
+import org.eclipse.daanse.test.FoodmartData;
 /**
  * Unit-test for named sets, in all their various forms: <code>WITH SET</code>,
  * sets defined against cubes, virtual cubes, and at the schema level.
@@ -835,7 +835,7 @@ class NamedSetTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, NamedSetsInCubeAndSchemaModifierEmf.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testNamedSetAgainstSchema(Context<?> context) {
     	Thread.currentThread().setContextClassLoader(getClass().getClassLoader());
         Connection connection = context.getConnectionWithDefaultRole();
@@ -982,7 +982,7 @@ class NamedSetTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, MixedNamedSetSchemaModifierEmf.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testNamedSetsMixedWithCalcMembers(Context<?> context)
     {
         assertThatQuery(context.getConnectionWithDefaultRole(),

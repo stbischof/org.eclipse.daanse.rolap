@@ -65,7 +65,7 @@ import org.eclipse.daanse.rolap.SchemaModifiersEmf;
  * @since Apr 04, 2008
  */
 @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.SolveOrderScopeIsolationTestModifier.class },
-        database = FoodmartDatabaseSupplier.class, data = SolveOrderScopeIsolationTest.FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
 class SolveOrderScopeIsolationTest {
     //SolveOrderMode defaultSolveOrderMode;
 
@@ -126,12 +126,6 @@ class SolveOrderScopeIsolationTest {
     }
 
     /** Named bridge onto the FoodMart CSVs (for the data=-Supplier form). */
-    public static class FoodmartData implements org.eclipse.daanse.cwm.testkit.api.DataSupplier {
-        @Override
-        public java.util.Map<String, java.net.URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 
     @Test
     @RolapContextTest(FoodmartTestInstance.class)

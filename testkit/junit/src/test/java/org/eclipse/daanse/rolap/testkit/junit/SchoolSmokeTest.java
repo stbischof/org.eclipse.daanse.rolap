@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Test;
 /**
  * End-to-end smoke over the complex School catalog — the same scenario the
  * hand-wired {@code MdxQuerySmokeTest} covers, in three lines. Runs against
- * whatever {@code DAANSE_TEST_DB} selects (h2 default; duckdb in CI).
+ * whatever {@code DAANSE_TEST_DB} selects (default: DuckDB).
  */
 @RolapContextTest(SchoolTestInstance.class)
 class SchoolSmokeTest {

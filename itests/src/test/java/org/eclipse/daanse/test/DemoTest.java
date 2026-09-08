@@ -21,7 +21,7 @@ import org.eclipse.daanse.rolap.testkit.junit.api.DbScope;
 import org.eclipse.daanse.rolap.testkit.junit.api.RolapContextTest;
 import org.junit.jupiter.api.Test;
 
-@RolapContextTest(value = ExpressiveNamesTestInstance.class, dbScope = DbScope.PER_TEST)
+@RolapContextTest(value = ExpressiveNamesTestInstance.class)
 class DemoTest {
 
     private static final QueryAndResult[] sampleQueries = {

@@ -37,7 +37,7 @@ import org.eclipse.daanse.rolap.testkit.junit.api.RolapContextTest;
 import org.junit.jupiter.api.Test;
 
 import org.eclipse.daanse.rolap.SchemaModifiersEmf;
-import org.eclipse.daanse.test.AccessControlTest.FoodmartData;
+import org.eclipse.daanse.test.FoodmartData;
 
 @RolapContextTest(FoodmartTestInstance.class)
 class DrillThroughExcludeFilterTest {
@@ -88,7 +88,7 @@ class DrillThroughExcludeFilterTest {
     // on level not present in report
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.DrillThroughExcludeFilterTestModifier.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testDrillThroughExcludeFilter(Context<?> context) throws Exception    {
         int expectedDrillThroughCountForCell0 = 3773;
         int expectedDrillThroughCountForCell1 = 78120;

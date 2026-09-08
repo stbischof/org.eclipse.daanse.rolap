@@ -59,7 +59,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.eclipse.daanse.rolap.SchemaModifiersEmf;
-import org.eclipse.daanse.test.CaptionTest.FoodmartData;
+import org.eclipse.daanse.test.FoodmartData;
 
 /**
  * Various unit tests concerned with performance.
@@ -372,7 +372,7 @@ public class PerformanceTest {
    */
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.PerformanceTestModifier2.class },
-  database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+  database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testBigResultsWithBigSchemaPerforms(Context<?> context) {
     if ( !LOGGER.isDebugEnabled() ) {
       return;

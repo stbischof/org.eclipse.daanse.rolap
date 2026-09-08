@@ -44,6 +44,7 @@ import org.junit.jupiter.api.Test;
 
 import org.eclipse.daanse.rolap.testkit.assertions.DatabaseProduct;
 import org.eclipse.daanse.rolap.testkit.assertions.SqlPattern;
+import org.eclipse.daanse.test.FoodmartData;
 
 /**
  * Tests for Filter and native Filters.
@@ -536,7 +537,7 @@ class FilterTest extends BatchTestCase {
    */
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, TestNotInMultiLevelMemberConstraintMixedNullNonNullParentModifier.class },
-          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   public void  testNotInMultiLevelMemberConstraintMixedNullNonNullParent(Context<?> context) {
     if ( context.getConfigValue(ConfigConstants.FILTER_CHILDLESS_SNOWFLAKE_MEMBERS, ConfigConstants.FILTER_CHILDLESS_SNOWFLAKE_MEMBERS_DEFAULT_VALUE, Boolean.class) ) {
       return;
@@ -737,7 +738,7 @@ class FilterTest extends BatchTestCase {
    */
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, TestNotInMultiLevelMemberConstraintSingleNullParentModifier.class },
-          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   public void  testNotInMultiLevelMemberConstraintSingleNullParent(Context<?> context) {
     if ( context.getConfigValue(ConfigConstants.FILTER_CHILDLESS_SNOWFLAKE_MEMBERS, ConfigConstants.FILTER_CHILDLESS_SNOWFLAKE_MEMBERS_DEFAULT_VALUE, Boolean.class) ) {
       return;
@@ -1197,7 +1198,7 @@ class FilterTest extends BatchTestCase {
    */
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.FilterTestModifier.class },
-          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   @RolapConfig(key = ConfigConstants.USE_AGGREGATES, value = "false", type = Boolean.class)
   @RolapConfig(key = ConfigConstants.READ_AGGREGATES, value = "false", type = Boolean.class)
   @RolapConfig(key = ConfigConstants.DISABLE_CACHING, value = "false", type = Boolean.class)
@@ -1490,11 +1491,5 @@ class FilterTest extends BatchTestCase {
   }
 
   /** Named bridge onto the FoodMart CSVs (for the {@code data =} supplier form). */
-  public static class FoodmartData implements org.eclipse.daanse.cwm.testkit.api.DataSupplier {
-      @Override
-      public java.util.Map<String, java.net.URL> csvResources() {
-          return new FoodmartTestInstance().dataSupplier().csvResources();
-      }
-  }
 
 }

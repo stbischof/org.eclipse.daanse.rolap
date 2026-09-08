@@ -113,6 +113,24 @@ public class DrillThroughQuerySpec extends AbstractQuerySpec {
         columnNames.add(columnName);
     }
 
+    /**
+     * The SELECT rule the legacy {@code extraPredicates} applied to a slicer
+     * predicate's constrained columns: each is projected iff the request
+     * includes it and no already-projected column claims its name; the alias
+     * is deduplicated through {@link #makeAlias}. Package-private so the rule
+     * stays unit-testable now that it feeds
+     * {@code AggregateSqlMapper.drillThrough} instead of a SqlQuery.
+     */
+    void appendPredicateColumns(StarPredicate sp, List<AggregateSqlMapper.DrillColumn> drillColumns,
+            List<String> columnNames, Set<String> columnNameSet, boolean allowsFieldAlias) {
+        for (RolapStar.Column c : sp.getConstrainedColumnList()) {
+            boolean inSelect = isPartOfSelect(c) && !columnNameSet.contains(c.getName());
+            String alias = inSelect ? makeAlias(c, columnNames, columnNameSet) : null;
+            drillColumns.add(new AggregateSqlMapper.DrillColumn(
+                c, null, inSelect, allowsFieldAlias ? alias : null, false));
+        }
+    }
+
     private String makeAlias(
         final RolapStar.Column column,
         final List<String> columnNames,
@@ -266,12 +284,7 @@ public class DrillThroughQuerySpec extends AbstractQuerySpec {
             if (translated != null) {
                 extraFilters.add(translated);
             }
-            for (RolapStar.Column c : sp.getConstrainedColumnList()) {
-                boolean inSelect = isPartOfSelect(c) && !columnNameSet.contains(c.getName());
-                String alias = inSelect ? makeAlias(c, columnNames, columnNameSet) : null;
-                drillColumns.add(new AggregateSqlMapper.DrillColumn(
-                    c, null, inSelect, allowsFieldAlias ? alias : null, false));
-            }
+            appendPredicateColumns(sp, drillColumns, columnNames, columnNameSet, allowsFieldAlias);
         }
 
         // SELECT extras: measures (raw, named) then NULL placeholders for inapplicable members.

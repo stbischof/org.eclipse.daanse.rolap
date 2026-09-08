@@ -54,7 +54,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import org.eclipse.daanse.rolap.CellKeyTest.FoodmartData;
+import org.eclipse.daanse.test.FoodmartData;
 
 /**
  * @author Andrey Khayrutdinov
@@ -99,7 +99,7 @@ class RolapNativeTopCountVersusNonNativeTest extends BatchTestCase {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.CustomCountMeasureCubeName.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testTopCount_CountMeasure(Context<?> context) throws Exception {
 
         assertResultsAreEqual(context.getConnectionWithDefaultRole(),
@@ -136,7 +136,7 @@ class RolapNativeTopCountVersusNonNativeTest extends BatchTestCase {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.RoleRestrictionWorksWaRoleDef.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testRoleRestrictionWorks_ForRowWithData(@Roles(ROLE_RESTRICTION_WORKS_WA_ROLE_NAME) Connection connection) {
         assertResultsAreEqual(connection,
             "Role restriction works - For WA state",
@@ -145,7 +145,7 @@ class RolapNativeTopCountVersusNonNativeTest extends BatchTestCase {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.RoleRestrictionWorksDfRoleDef.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testRoleRestrictionWorks_ForRowWithOutData(@Roles(ROLE_RESTRICTION_WORKS_DF_ROLE_NAME) Connection connection) {
         assertResultsAreEqual(connection,
             "Role restriction works - For DF state",

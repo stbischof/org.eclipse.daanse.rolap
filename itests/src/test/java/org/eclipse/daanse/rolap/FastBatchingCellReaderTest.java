@@ -103,6 +103,7 @@ import org.junit.jupiter.api.Test;
 
 import org.eclipse.daanse.rolap.testkit.assertions.DatabaseProduct;
 import org.eclipse.daanse.rolap.testkit.assertions.SqlPattern;
+import org.eclipse.daanse.test.FoodmartData;
 /**
  * Test for <code>FastBatchingCellReader</code>.
  *
@@ -1091,7 +1092,7 @@ class FastBatchingCellReaderTest extends BatchTestCase {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestLoadDistinctSqlMeasureModifierEmf.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testLoadDistinctSqlMeasure(Context<?> context) {
         prepareContext(context);
         // Some databases cannot handle scalar subqueries inside
@@ -1707,7 +1708,7 @@ class FastBatchingCellReaderTest extends BatchTestCase {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestCountDistinctAggWithOtherCountDistinctInContextModifierEmf.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCountDistinctAggWithOtherCountDistinctInContext(Context<?> context) {
         prepareContext(context);
         // tests that Aggregate( <set>, <count-distinct measure>) aggregates
@@ -2089,12 +2090,6 @@ class FastBatchingCellReaderTest extends BatchTestCase {
     }
 
     /** Named bridge onto the FoodMart CSVs (for the data=-Supplier form). */
-    public static class FoodmartData implements org.eclipse.daanse.cwm.testkit.api.DataSupplier {
-        @Override
-        public java.util.Map<String, java.net.URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 
     /**
      * Converts a {@link Result} to text in traditional format.

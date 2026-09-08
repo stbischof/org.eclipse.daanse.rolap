@@ -42,16 +42,11 @@ import org.eclipse.daanse.rolap.testkit.junit.api.RolapConfig;
 import org.eclipse.daanse.rolap.testkit.junit.api.RolapContextTest;
 import org.eclipse.emf.ecore.util.EcoreUtil;
 import org.junit.jupiter.api.Test;
+import org.eclipse.daanse.test.FoodmartData;
 
 @RolapContextTest(FoodmartTestInstance.class)
 class OrderFunDefTest {
 
-    public static class FoodmartData implements DataSupplier {
-        @Override
-        public Map<String, URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 
     @Test
     void testBug715177c(Context<?> context) {
@@ -1104,7 +1099,7 @@ org.eclipse.daanse.olap.function.def.order.OrderContextCalc(type=SetType<MemberT
     @Test
     @RolapConfig(key = ConfigConstants.COMPARE_SIBLINGS_BY_ORDER_KEY, value = "true", type = Boolean.class)
     @RolapContextTest(catalog = { CatalogSupplier.class, TestOrderTupleMultiKeyswithVCubeModifierEmf.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testOrderTupleMultiKeyswithVCube(Context<?> context) {
         // WA unit sales is greater than CA unit sales
 

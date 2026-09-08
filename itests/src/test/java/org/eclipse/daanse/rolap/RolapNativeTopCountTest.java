@@ -65,6 +65,7 @@ import org.eclipse.daanse.rolap.testkit.junit.api.DbScope;
 import org.eclipse.daanse.rolap.testkit.junit.api.RolapContextTest;
 import org.eclipse.daanse.rolap.testkit.junit.api.Roles;
 import org.junit.jupiter.api.Test;
+import org.eclipse.daanse.test.FoodmartData;
 
 /**
  * @author Andrey Khayrutdinov
@@ -81,7 +82,7 @@ class RolapNativeTopCountTest extends BatchTestCase {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.CustomCountMeasureCubeName.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testTopCount_CountMeasure(Connection connection) throws Exception {
         assertThatQuery(connection,
             CUSTOM_COUNT_MEASURE_QUERY).returnsGrid(CUSTOM_COUNT_MEASURE_RESULT);
@@ -123,7 +124,7 @@ class RolapNativeTopCountTest extends BatchTestCase {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.RoleRestrictionWorksWaRoleDef.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testRoleRestrictionWorks_ForRowWithData(
         @Roles(ROLE_RESTRICTION_WORKS_WA_ROLE_NAME) Connection connection) throws Exception
     {
@@ -134,7 +135,7 @@ class RolapNativeTopCountTest extends BatchTestCase {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.RoleRestrictionWorksDfRoleDef.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testRoleRestrictionWorks_ForRowWithOutData(
         @Roles(ROLE_RESTRICTION_WORKS_DF_ROLE_NAME) Connection connection) throws Exception
     {
@@ -172,10 +173,4 @@ class RolapNativeTopCountTest extends BatchTestCase {
     }
 
     /** Named bridge onto the FoodMart CSVs (for the {@code data =} supplier form). */
-    public static class FoodmartData implements org.eclipse.daanse.cwm.testkit.api.DataSupplier {
-        @Override
-        public Map<String, URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 }

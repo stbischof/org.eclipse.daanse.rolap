@@ -77,6 +77,7 @@ import org.junit.jupiter.api.Test;
 import org.eclipse.daanse.rolap.testkit.assertions.DatabaseProduct;
 import org.eclipse.daanse.rolap.SchemaModifiersEmf;
 import org.eclipse.daanse.rolap.testkit.assertions.SqlPattern;
+import org.eclipse.daanse.test.FoodmartData;
 
 /**
  * <code>AggregationOnDistinctCountMeasureTest</code> tests the
@@ -86,7 +87,7 @@ import org.eclipse.daanse.rolap.testkit.assertions.SqlPattern;
  * @since 19 December, 2007
  */
 @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AggregationOnDistinctCountMeasuresTestModifier.class },
-        database = FoodmartDatabaseSupplier.class, data = AggregationOnDistinctCountMeasuresTest.FoodmartData.class)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
 class AggregationOnDistinctCountMeasuresTest {
     private  final String cubeNameSales = "Sales";
 
@@ -180,12 +181,6 @@ class AggregationOnDistinctCountMeasuresTest {
     }
 
     /** Named bridge onto the FoodMart CSVs (for the data=-Supplier form). */
-    public static class FoodmartData implements org.eclipse.daanse.cwm.testkit.api.DataSupplier {
-        @Override
-        public java.util.Map<String, java.net.URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 
     @AfterEach
     public void afterEach() {
@@ -697,7 +692,7 @@ class AggregationOnDistinctCountMeasuresTest {
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AggregationOnDistinctCountMeasuresTestModifier.class,
           TestMultiLevelMembersNullParentsModifier.class },
-          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testMultiLevelMembersNullParents(Context<?> context) {
       prepareContext(context);
         /*
@@ -833,7 +828,7 @@ class AggregationOnDistinctCountMeasuresTest {
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AggregationOnDistinctCountMeasuresTestModifier.class,
           TestMultiLevelMembersMixedNullNonNullParentModifier.class },
-          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testMultiLevelMembersMixedNullNonNullParent(Context<?> context) {
       prepareContext(context);
         /*
@@ -947,7 +942,7 @@ class AggregationOnDistinctCountMeasuresTest {
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AggregationOnDistinctCountMeasuresTestModifier.class,
           TestMultiLevelsMixedNullNonNullChildModifier.class },
-          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testMultiLevelsMixedNullNonNullChild(Context<?> context) {
       prepareContext(context);
         /*
@@ -1764,7 +1759,7 @@ class AggregationOnDistinctCountMeasuresTest {
      */
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, TestMondrian906Modifier.class },
-          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testMondrian906(Context<?> context) {
       //prepareContext(context);
       /*
@@ -2009,7 +2004,7 @@ class AggregationOnDistinctCountMeasuresTest {
      */
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, TestDistinctCountAggMeasureModifier.class },
-          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+          database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   @RolapConfig(key = ConfigConstants.USE_AGGREGATES, value = "true", type = Boolean.class)
   @RolapConfig(key = ConfigConstants.READ_AGGREGATES, value = "true", type = Boolean.class)
   @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)

@@ -33,11 +33,12 @@ import org.eclipse.daanse.rolap.testkit.junit.api.Roles;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
-import org.eclipse.daanse.rolap.CellKeyTest.FoodmartData;
+import org.eclipse.daanse.test.FoodmartData;
 
 @RolapContextTest(FoodmartTestInstance.class)
 public class RoleTest {
 
+    @Disabled("run-order dependent: the shared Foodmart mapping accumulates table elements from other fixtures (37 grows to 40/51); a private database does not help because the count reads the mapping, not the database. Needs the mapping suppliers to stop sharing mutable EMF instances.")
     @Test
     @RolapContextTest(value = FoodmartTestInstance.class, dbScope = DbScope.PER_TEST)
     void testDatabaseSchemaWithNoRole(Context<?> context) {

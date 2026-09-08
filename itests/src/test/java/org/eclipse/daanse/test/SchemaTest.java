@@ -177,12 +177,6 @@ class SchemaTest {
     private static final String warehouseCubeName = "Warehouse";
 
     /** Named bridge onto the FoodMart CSVs (for the {@code data =} supplier form). */
-    public static class FoodmartData implements DataSupplier {
-        @Override
-        public Map<String, URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 
     private static final String CUBES_AB =
             "<Cube name=\"CubeA\" defaultMeasure=\"Unit Sales\">\n"
@@ -239,7 +233,7 @@ class SchemaTest {
 
     // Tests follow...
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestSolveOrderInCalculatedMemberModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestSolveOrderInCalculatedMemberModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testSolveOrderInCalculatedMember(Context<?> context) {
         /*POJO modifier
         class TestSolveOrderInCalculatedMemberModifier extends PojoMappingModifier{
@@ -357,7 +351,7 @@ class SchemaTest {
 
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestHierarchyDefaultMemberModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestHierarchyDefaultMemberModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testHierarchyDefaultMember(Context<?> context) {
         /*
         class TestHierarchyDefaultMemberModifier extends PojoMappingModifier {
@@ -477,7 +471,7 @@ class SchemaTest {
      * forum post 'wrong unique name for default member when hasAll=false'</a>.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestDefaultMemberNameModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestDefaultMemberNameModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testDefaultMemberName(Context<?> context) {
         /*
         class TestDefaultMemberNameModifier extends PojoMappingModifier {
@@ -648,7 +642,7 @@ class SchemaTest {
 
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestHierarchyAbbreviatedDefaultMemberModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestHierarchyAbbreviatedDefaultMemberModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testHierarchyAbbreviatedDefaultMember(Context<?> context) {
         /*
         class TestHierarchyAbbreviatedDefaultMemberModifier extends PojoMappingModifier {
@@ -765,7 +759,7 @@ class SchemaTest {
 
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestHierarchyNoLevelsFailsModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestHierarchyNoLevelsFailsModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testHierarchyNoLevelsFails(Context<?> context) {
         /*
         class TestHierarchyNoLevelsFailsModifier extends PojoMappingModifier {
@@ -858,7 +852,7 @@ class SchemaTest {
 
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestHierarchyNonUniqueLevelsFailsModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestHierarchyNonUniqueLevelsFailsModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testHierarchyNonUniqueLevelsFails(Context<?> context) {
         /*
         class TestHierarchyNonUniqueLevelsFailsModifier extends PojoMappingModifier {
@@ -982,7 +976,7 @@ class SchemaTest {
      * Tests a measure based on 'count'.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestCountMeasureModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestCountMeasureModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCountMeasure(Context<?> context) {
         /*
         class TestCountMeasureModifier extends PojoMappingModifier {
@@ -1068,7 +1062,7 @@ class SchemaTest {
      * table.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestHierarchyTableNotFoundModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestHierarchyTableNotFoundModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testHierarchyTableNotFound(Context<?> context) {
         /*
          class TestHierarchyTableNotFoundModifier extends PojoMappingModifier {
@@ -1201,7 +1195,7 @@ class SchemaTest {
 
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestPrimaryKeyTableNotFoundModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestPrimaryKeyTableNotFoundModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testPrimaryKeyTableNotFound(Context<?> context) {
         /*
         class TestPrimaryKeyTableNotFoundModifier extends PojoMappingModifier {
@@ -1324,7 +1318,7 @@ class SchemaTest {
         }
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestLevelTableNotFoundModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestLevelTableNotFoundModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testLevelTableNotFound(Context<?> context) {
         /*
         class TestLevelTableNotFoundModifier extends PojoMappingModifier {
@@ -1445,7 +1439,7 @@ class SchemaTest {
 
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestHierarchyBadDefaultMemberModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestHierarchyBadDefaultMemberModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testHierarchyBadDefaultMember(Context<?> context) {
         /*
         class TestHierarchyBadDefaultMemberModifier extends PojoMappingModifier {
@@ -1563,7 +1557,7 @@ class SchemaTest {
      * Bug MONDRIAN-236, "Mondrian generates invalid SQL"</a>.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestDuplicateTableAliasModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestDuplicateTableAliasModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testDuplicateTableAlias(Context<?> context) {
         /*
         class TestDuplicateTableAliasModifier extends PojoMappingModifier {
@@ -1679,7 +1673,7 @@ class SchemaTest {
      * table without an alias, and the system doesn't complain.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestDuplicateTableAliasSameForeignKeyModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestDuplicateTableAliasSameForeignKeyModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testDuplicateTableAliasSameForeignKey(Context<?> context) {
         /*
         class TestDuplicateTableAliasSameForeignKeyModifier extends PojoMappingModifier {
@@ -1802,7 +1796,7 @@ class SchemaTest {
      * Without the table alias, generates SQL which is missing a join condition.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestDimensionsShareTableModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestDimensionsShareTableModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testDimensionsShareTable(Context<?> context) {
         /*
         class TestDimensionsShareTableModifier extends PojoMappingModifier {
@@ -2061,7 +2055,7 @@ class SchemaTest {
      * note that this works when native cross join is disabled
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestDimensionsShareTableNativeNonEmptyCrossJoinModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestDimensionsShareTableNativeNonEmptyCrossJoinModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testDimensionsShareTableNativeNonEmptyCrossJoin(Context<?> context) {
         /*
         class TestDimensionsShareTableNativeNonEmptyCrossJoinModifier extends PojoMappingModifier {
@@ -2181,7 +2175,7 @@ class SchemaTest {
      * one table uses an alias.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestDimensionsShareTableSameForeignKeysModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestDimensionsShareTableSameForeignKeysModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testDimensionsShareTableSameForeignKeys(Context<?> context) {
         /*
         class TestDimensionsShareTableSameForeignKeysModifier extends PojoMappingModifier {
@@ -2328,7 +2322,7 @@ class SchemaTest {
      * unique joins to the fact table.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestSnowflakeHierarchyValidationNotNeededModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestSnowflakeHierarchyValidationNotNeededModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testSnowflakeHierarchyValidationNotNeeded(Context<?> context) {
         // this test breaks when using aggregates at the moment
         // due to a known limitation
@@ -2784,7 +2778,7 @@ class SchemaTest {
      * the same join aliases to the fact table.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestSnowflakeHierarchyValidationNotNeeded2ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestSnowflakeHierarchyValidationNotNeeded2ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testSnowflakeHierarchyValidationNotNeeded2(Context<?> context) {
         /*
         class TestSnowflakeHierarchyValidationNotNeeded2Modifier extends PojoMappingModifier {
@@ -3224,7 +3218,7 @@ class SchemaTest {
      * both using a table alias.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestDimensionsShareJoinTableModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestDimensionsShareJoinTableModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testDimensionsShareJoinTable(Context<?> context) {
         /*
         class TestDimensionsShareJoinTableModifier extends PojoMappingModifier {
@@ -3572,7 +3566,7 @@ class SchemaTest {
      * both using a table alias.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestDimensionsShareJoinTableOneAliasModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestDimensionsShareJoinTableOneAliasModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     @DisabledIfSystemProperty(named = "test.disable.knownFails", matches = "true")
     //NOTE : test have issue with alias and Level. we have hierarchy with inner join .
     //Left join have alias with "customer_region" . Level of  hierarchy use table (reference) without alias with table name "region".
@@ -3931,7 +3925,7 @@ class SchemaTest {
      * both using a table alias.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestDimensionsShareJoinTableTwoAliasesModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestDimensionsShareJoinTableTwoAliasesModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     @DisabledIfSystemProperty(named = "test.disable.knownFails", matches = "true")
     //NOTE : test have issue with alias and Level. we have hierarchy with inner join .
     //Left join have alias with "store_region" . Level of  hierarchy use table (reference) without alias with table name "region".
@@ -4292,7 +4286,7 @@ class SchemaTest {
      * both using a table alias.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestTwoAliasesDimensionsShareTableModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestTwoAliasesDimensionsShareTableModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testTwoAliasesDimensionsShareTable(Context<?> context) {
         /*
         class TestTwoAliasesDimensionsShareTableModifier extends PojoMappingModifier {
@@ -4568,7 +4562,7 @@ class SchemaTest {
      * both using a table alias.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestTwoAliasesDimensionsShareTableSameForeignKeysModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestTwoAliasesDimensionsShareTableSameForeignKeysModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testTwoAliasesDimensionsShareTableSameForeignKeys(Context<?> context) {
         /*
         class TestTwoAliasesDimensionsShareTableSameForeignKeysModifier extends PojoMappingModifier {
@@ -4805,7 +4799,7 @@ class SchemaTest {
      * Test Multiple DimensionUsages on same Dimension.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestMultipleDimensionUsagesModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestMultipleDimensionUsagesModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testMultipleDimensionUsages(Context<?> context) {
         /*
         class TestMultipleDimensionUsagesModifier extends PojoMappingModifier {
@@ -5124,7 +5118,7 @@ class SchemaTest {
      * correctly.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestDimensionCreationModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestDimensionCreationModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testDimensionCreation(Context<?> context) {
         /*
         class TestDimensionCreationModifier extends PojoMappingModifier {
@@ -5262,7 +5256,7 @@ class SchemaTest {
      * Test DimensionUsage level attribute
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestDimensionUsageLevelModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestDimensionUsageLevelModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testDimensionUsageLevel(Context<?> context) {
         /*
         class TestDimensionUsageLevelModifier extends PojoMappingModifier {
@@ -5583,7 +5577,7 @@ class SchemaTest {
      * an unaliased name instead of an aliased name
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestNonAliasedDimensionUsageModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestNonAliasedDimensionUsageModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testNonAliasedDimensionUsage(Context<?> context) {
         /*
         class TestNonAliasedDimensionUsageModifier extends PojoMappingModifier {
@@ -5707,7 +5701,7 @@ class SchemaTest {
      * degenerate dimension.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestViewDegenerateDimsModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestViewDegenerateDimsModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testViewDegenerateDims(Context<?> context) {
         /*
         class TestViewDegenerateDimsModifier extends PojoMappingModifier {
@@ -5993,7 +5987,7 @@ class SchemaTest {
      * Tests a cube whose fact table is a &lt;View&gt; element.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestViewFactTableModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestViewFactTableModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testViewFactTable(Context<?> context) {
         /*
         class TestViewFactTableModifier extends PojoMappingModifier {
@@ -6285,7 +6279,7 @@ class SchemaTest {
      * has dimensions based on the fact table.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestViewFactTable2ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestViewFactTable2ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testViewFactTable2(Context<?> context) {
         /*
         class TestViewFactTable2Modifier extends PojoMappingModifier {
@@ -6487,7 +6481,7 @@ class SchemaTest {
      * is "distinct-count".
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestDeprecatedDistinctCountAggregatorModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestDeprecatedDistinctCountAggregatorModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testDeprecatedDistinctCountAggregator(Context<?> context) {
         /*
         class TestDeprecatedDistinctCountAggregatorModifier extends PojoMappingModifier{
@@ -6610,7 +6604,7 @@ class SchemaTest {
      * Bug MONDRIAN-291, "'unknown usage' messages"</a>.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestUnknownUsagesModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestUnknownUsagesModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testUnknownUsages(Context<?> context) {
         /*
         class TestUnknownUsagesModifier extends PojoMappingModifier {
@@ -6985,7 +6979,7 @@ class SchemaTest {
         }
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestUnknownUsages1ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestUnknownUsages1ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testUnknownUsages1(Context<?> context) {
         /*
         class TestUnknownUsages1Modifier extends PojoMappingModifier {
@@ -7437,9 +7431,8 @@ class SchemaTest {
             }
         }
 
-    @Disabled("fix PR: expects legacy 'mondrian.test.SchemaTest$...' class name in error message; actual is 'org.eclipse.daanse.test.SchemaTest$...' after the package migration")
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestPropertyFormatterModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestPropertyFormatterModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testPropertyFormatter(Context<?> context) {
         /*
         class TestPropertyFormatterModifier extends PojoMappingModifier {
@@ -7511,7 +7504,8 @@ class SchemaTest {
          */
         assertThatQuery(context, "select from [Sales]")
             .throwsMessage(
-                "Failed to load formatter class 'mondrian.test.SchemaTest$DummyPropertyFormatter' for property 'Store Type'.");
+                "Failed to load formatter class '" + DummyPropertyFormatter.class.getName()
+                    + "' for property 'Store Type'.");
     }
 
     public static class TestPropertyFormatterModifierEmf implements CatalogMappingSupplier {
@@ -7601,7 +7595,7 @@ class SchemaTest {
      * be qualified by cube name.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestBugMondrian233ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestBugMondrian233ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian233(Context<?> context) {
         /*
         class TestBugMondrian233Modifier extends PojoMappingModifier {
@@ -7748,7 +7742,7 @@ class SchemaTest {
      * MONDRIAN-303, "Property column shifting when use captionColumn"</a>.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestBugMondrian303ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestBugMondrian303ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian303(Context<?> context) {
         /*
         class TestBugMondrian303Modifier extends PojoMappingModifier {
@@ -7947,7 +7941,7 @@ class SchemaTest {
     }
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestCubeWithOneDimensionOneMeasureModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestCubeWithOneDimensionOneMeasureModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCubeWithOneDimensionOneMeasure(Context<?> context) {
         /*
         class TestCubeWithOneDimensionOneMeasureModifier extends PojoMappingModifier {
@@ -8088,7 +8082,7 @@ class SchemaTest {
     }
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestCubeWithOneDimensionUsageOneMeasureModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestCubeWithOneDimensionUsageOneMeasureModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCubeWithOneDimensionUsageOneMeasure(Context<?> context) {
         /*
         class TestCubeWithOneDimensionUsageOneMeasureModifier extends PojoMappingModifier {
@@ -8195,7 +8189,7 @@ class SchemaTest {
     }
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestCubeHasFactModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestCubeHasFactModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCubeHasFact(Context<?> context) {
         /*
         class TestCubeHasFactModifier extends PojoMappingModifier {
@@ -8241,7 +8235,7 @@ class SchemaTest {
     }
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestCubeCaptionModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestCubeCaptionModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCubeCaption(Context<?> context) throws SQLException {
         /*
         class TestCubeCaptionModifier extends PojoMappingModifier {
@@ -8336,7 +8330,7 @@ class SchemaTest {
     }
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestCubeWithNoDimensionsModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestCubeWithNoDimensionsModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCubeWithNoDimensions(Context<?> context) {
         /*
         class TestCubeWithNoDimensionsModifier extends PojoMappingModifier {
@@ -8418,7 +8412,7 @@ class SchemaTest {
     }
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestCubeWithNoMeasuresFailsModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestCubeWithNoMeasuresFailsModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCubeWithNoMeasuresFails(Context<?> context) {
         /*
         class TestCubeWithNoMeasuresFailsModifier extends PojoMappingModifier {
@@ -8558,7 +8552,7 @@ class SchemaTest {
     }
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestCubeWithOneCalcMeasureModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestCubeWithOneCalcMeasureModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCubeWithOneCalcMeasure(Context<?> context) {
         /*
         class TestCubeWithOneCalcMeasureModifier extends PojoMappingModifier {
@@ -8702,7 +8696,7 @@ class SchemaTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestCalcMemberInCubeModifier1Emf.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCalcMemberInCube(Context<?> context) {
         /*
         class TestCalcMemberInCubeModifier1 extends PojoMappingModifier {
@@ -8769,7 +8763,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestCalcMemberInCubeModifier2Emf.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCalcMemberInCubeHierarchyAndDimensionBothSpecified(Context<?> context) {
         // Test where hierarchy & dimension both specified. should fail
         try {
@@ -8834,7 +8828,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestCalcMemberInCubeModifier3Emf.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCalcMemberInCubeInvalidHierarchyName(Context<?> context) {
         // test where hierarchy is not uname of valid hierarchy. should fail
         try {
@@ -8895,7 +8889,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestCalcMemberInCubeModifier4Emf.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCalcMemberInCubeInvalidFormula(Context<?> context) {
         // test where formula is invalid. should fail
         try {
@@ -8955,7 +8949,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestCalcMemberInCubeModifier5Emf.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCalcMemberInCubeInvalidParent(Context<?> context) {
         // Test where parent is invalid. should fail
         try {
@@ -9018,7 +9012,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestCalcMemberInCubeModifier6Emf.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCalcMemberInCubeParentNotInSameHierarchy(Context<?> context) {
         // test where parent is not in same hierarchy as hierarchy. should fail
         try {
@@ -9082,7 +9076,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestCalcMemberInCubeModifier7Emf.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCalcMemberInCubeNoFormula(Context<?> context) {
         // test where calc member has no formula (formula attribute or
         //   embedded element); should fail
@@ -9482,7 +9476,7 @@ class SchemaTest {
      * this test triggers an exception out of the aggregate table manager
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestAggTableSupportOfSharedDimsModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestAggTableSupportOfSharedDimsModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testAggTableSupportOfSharedDims(Context<?> context) {
         /*
         class TestAggTableSupportOfSharedDimsModifier extends PojoMappingModifier {
@@ -9681,7 +9675,7 @@ class SchemaTest {
      * Verifies that RolapHierarchy.tableExists() supports views.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestLevelTableAttributeAsViewModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestLevelTableAttributeAsViewModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testLevelTableAttributeAsView(Context<?> context) {
         /*
         class TestLevelTableAttributeAsViewModifier extends PojoMappingModifier {
@@ -9778,7 +9772,7 @@ class SchemaTest {
     }
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestInvalidSchemaAccessEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestInvalidSchemaAccessEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testInvalidSchemaAccess(Context<?> context) {
         /*
         class TestInvalidSchemaAccess extends PojoMappingModifier {
@@ -9946,7 +9940,7 @@ class SchemaTest {
     }
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestAllMemberNoStringReplaceModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestAllMemberNoStringReplaceModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testAllMemberNoStringReplace(Context<?> context) {
         /*
         class TestAllMemberNoStringReplaceModifier extends PojoMappingModifier {
@@ -10079,7 +10073,7 @@ class SchemaTest {
     }
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestUnionRoleModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestUnionRoleModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testUnionRole(Context<?> context) {
         /*
         class TestUnionRoleModifier extends PojoMappingModifier {
@@ -10166,7 +10160,7 @@ class SchemaTest {
     }
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestUnionRoleContainsGrantsModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestUnionRoleContainsGrantsModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testUnionRoleContainsGrants(Context<?> context) {
         /*
         class TestUnionRoleContainsGrantsModifier extends PojoMappingModifier {
@@ -10316,7 +10310,7 @@ class SchemaTest {
     }
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestVirtualCubeNamedSetSupportInSchemaModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestVirtualCubeNamedSetSupportInSchemaModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testVirtualCubeNamedSetSupportInSchema(Context<?> context) {
         /*
         class TestVirtualCubeNamedSetSupportInSchemaModifier extends PojoMappingModifier {
@@ -10801,7 +10795,7 @@ class SchemaTest {
      * caused by binary column value.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestBinaryLevelKeyModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestBinaryLevelKeyModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBinaryLevelKey(Context<?> context) {
         switch (getDatabaseProduct(getDialect(context.getConnectionWithDefaultRole()).name())) {
         case DERBY:
@@ -11093,7 +11087,7 @@ class SchemaTest {
      * MONDRIAN-896, "Oracle integer columns overflow if value &gt;>2^31"</a>.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestLevelInternalTypeModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestLevelInternalTypeModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testLevelInternalType(Context<?> context) {
         // One of the keys is larger than Integer.MAX_VALUE (2 billion), so
         // will only work if we use long values.
@@ -11548,7 +11542,7 @@ class SchemaTest {
      * any level.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestScdJoinModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestScdJoinModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testScdJoin(Context<?> context) {
         /*
         class TestScdJoinModifier extends PojoMappingModifier {
@@ -11857,7 +11851,7 @@ class SchemaTest {
     }
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestBugMondrian482ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestBugMondrian482ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian482(Context<?> context) {
         // until bug MONDRIAN-495, "Table filter concept does not support
         // dialects." is fixed, this test case only works on MySQL
@@ -11982,7 +11976,7 @@ class SchemaTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, CheckBugMondrian355Modifier1Emf.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian355(Context<?> context) {
         assertThatQuery(context.getConnectionWithDefaultRole(),
             "select Head([Time2].[Quarter hours].Members, 3) on columns\n"
@@ -12011,7 +12005,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, CheckBugMondrian355Modifier2Emf.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian355InvalidLevelType(Context<?> context) {
         // Check that get an error if give invalid level type
         /*
@@ -12192,7 +12186,7 @@ class SchemaTest {
      * elements.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestCaptionDescriptionAndAnnotationModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestCaptionDescriptionAndAnnotationModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCaptionDescriptionAndAnnotation(Context<?> context) {
         /*
         class TestCaptionDescriptionAndAnnotationModifier extends PojoMappingModifier {
@@ -13258,7 +13252,7 @@ class SchemaTest {
     }
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestCaptionModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestCaptionModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCaption(Context<?> context) {
         /*
         class TestCaptionModifier extends PojoMappingModifier {
@@ -13431,7 +13425,7 @@ class SchemaTest {
      * other than its leaf level, Mondrian gives wrong results"</a>.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestBugMondrian747ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestBugMondrian747ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian747(Context<?> context) {
         // Test case requires a pecular inline view, and it works on dialects
         // that scalar subqery, viz oracle. I believe that the mondrian code
@@ -14059,7 +14053,7 @@ class SchemaTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestBugMondrian463Modifier1Emf.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian463(Context<?> context) {
         if (!context.getConfigValue(ConfigConstants.FILTER_CHILDLESS_SNOWFLAKE_MEMBERS,
                 ConfigConstants.FILTER_CHILDLESS_SNOWFLAKE_MEMBERS_DEFAULT_VALUE, Boolean.class))
@@ -14073,7 +14067,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestBugMondrian463Modifier2Emf.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian463SharedDimension(Context<?> context) {
         if (!context.getConfigValue(ConfigConstants.FILTER_CHILDLESS_SNOWFLAKE_MEMBERS,
                 ConfigConstants.FILTER_CHILDLESS_SNOWFLAKE_MEMBERS_DEFAULT_VALUE, Boolean.class))
@@ -14469,7 +14463,7 @@ class SchemaTest {
      * Same schema as {@link #testBugMondrian463}, except left-deep.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestLeftDeepJoinFailsModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestLeftDeepJoinFailsModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testLeftDeepJoinFails(Context<?> context) {
         /*
         class TestLeftDeepJoinFailsModifier extends PojoMappingModifier {
@@ -14725,7 +14719,7 @@ class SchemaTest {
      * Test for MONDRIAN-943 and MONDRIAN-465.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestCaptionWithOrdinalColumnModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestCaptionWithOrdinalColumnModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCaptionWithOrdinalColumn(Context<?> context) {
     	context.getCatalogCache().clear();
     	/*
@@ -14887,7 +14881,7 @@ class SchemaTest {
      * of the base cubes.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestBugMondrian923ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestBugMondrian923ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian923(Context<?> context) throws Exception {
         /*
         class TestBugMondrian923Modifier extends PojoMappingModifier {
@@ -15054,7 +15048,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestCubesVisibilityModifierEmfTrue.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCubesVisibilityWhenVisible(Context<?> context) {
         final Cube cube =
             context.getConnectionWithDefaultRole().getCatalog()
@@ -15064,7 +15058,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestCubesVisibilityModifierEmfFalse.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCubesVisibilityWhenNotVisible(Context<?> context) {
         final Cube cube =
             context.getConnectionWithDefaultRole().getCatalog()
@@ -15157,7 +15151,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestVirtualCubesVisibilityModifierEmfTrue.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testVirtualCubesVisibilityWhenVisible(Context<?> context) {
         final Cube cube =
             context.getConnectionWithDefaultRole().getCatalog()
@@ -15167,7 +15161,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestVirtualCubesVisibilityModifierEmfFalse.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testVirtualCubesVisibilityWhenNotVisible(Context<?> context) {
         final Cube cube =
             context.getConnectionWithDefaultRole().getCatalog()
@@ -15247,7 +15241,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestDimensionVisibilityModifierEmfTrue.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testDimensionVisibilityWhenVisible(Context<?> context) {
         final Cube cube =
             context.getConnectionWithDefaultRole().getCatalog()
@@ -15264,7 +15258,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestDimensionVisibilityModifierEmfFalse.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testDimensionVisibilityWhenNotVisible(Context<?> context) {
         final Cube cube =
             context.getConnectionWithDefaultRole().getCatalog()
@@ -15363,7 +15357,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestVirtualDimensionVisibilityModifierEmfTrue.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testVirtualDimensionVisibilityWhenVisible(Context<?> context) {
         final Cube cube =
             context.getConnectionWithDefaultRole().getCatalog()
@@ -15380,7 +15374,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestVirtualDimensionVisibilityModifierEmfFalse.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testVirtualDimensionVisibilityWhenNotVisible(Context<?> context) {
         final Cube cube =
             context.getConnectionWithDefaultRole().getCatalog()
@@ -15462,7 +15456,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestDimensionUsageVisibilityModifierEmfTrue.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testDimensionUsageVisibilityWhenVisible(Context<?> context) {
         final Cube cube =
             context.getConnectionWithDefaultRole().getCatalog()
@@ -15480,7 +15474,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestDimensionUsageVisibilityModifierEmfFalse.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testDimensionUsageVisibilityWhenNotVisible(Context<?> context) {
         final Cube cube =
             context.getConnectionWithDefaultRole().getCatalog()
@@ -15612,7 +15606,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestHierarchyVisibilityModifierEmfTrue.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testHierarchyVisibilityWhenVisible(Context<?> context) {
         final Cube cube =
             context.getConnectionWithDefaultRole().getCatalog()
@@ -15633,7 +15627,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestHierarchyVisibilityModifierEmfFalse.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testHierarchyVisibilityWhenNotVisible(Context<?> context) {
         final Cube cube =
             context.getConnectionWithDefaultRole().getCatalog()
@@ -15738,7 +15732,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestLevelVisibilityModifierEmfTrue.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testLevelVisibilityWhenVisible(Context<?> context) {
         final Cube cube =
             context.getConnectionWithDefaultRole().getCatalog()
@@ -15761,7 +15755,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestLevelVisibilityModifierEmfFalse.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testLevelVisibilityWhenNotVisible(Context<?> context) {
         final Cube cube =
             context.getConnectionWithDefaultRole().getCatalog()
@@ -15849,7 +15843,7 @@ class SchemaTest {
     }
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestNonCollapsedAggregateModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestNonCollapsedAggregateModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testNonCollapsedAggregate(Context<?> context) throws Exception {
         if (context.getConfigValue(ConfigConstants.USE_AGGREGATES, ConfigConstants.USE_AGGREGATES_DEFAULT_VALUE ,Boolean.class) == false
             && context.getConfigValue(ConfigConstants.READ_AGGREGATES, ConfigConstants.READ_AGGREGATES_DEFAULT_VALUE ,Boolean.class) == false)
@@ -17640,7 +17634,7 @@ class SchemaTest {
 
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestNonCollapsedAggregateOnNonUniqueLevelFailsModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestNonCollapsedAggregateOnNonUniqueLevelFailsModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testNonCollapsedAggregateOnNonUniqueLevelFails(Context<?> context)
         throws Exception
     {
@@ -17781,7 +17775,7 @@ class SchemaTest {
     }
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestTwoNonCollapsedAggregateModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestTwoNonCollapsedAggregateModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testTwoNonCollapsedAggregate(Context<?> context) throws Exception {
         if (context.getConfigValue(ConfigConstants.USE_AGGREGATES, ConfigConstants.USE_AGGREGATES_DEFAULT_VALUE ,Boolean.class) == false
             && context.getConfigValue(ConfigConstants.READ_AGGREGATES, ConfigConstants.READ_AGGREGATES_DEFAULT_VALUE ,Boolean.class) == false)
@@ -18121,7 +18115,7 @@ class SchemaTest {
     }
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestCollapsedErrorModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestCollapsedErrorModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCollapsedError(Context<?> context) throws Exception {
         if (context.getConfigValue(ConfigConstants.USE_AGGREGATES, ConfigConstants.USE_AGGREGATES_DEFAULT_VALUE ,Boolean.class) == false
             && context.getConfigValue(ConfigConstants.READ_AGGREGATES, ConfigConstants.READ_AGGREGATES_DEFAULT_VALUE ,Boolean.class) == false)
@@ -18267,7 +18261,7 @@ class SchemaTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, CheckBugMondrian1047ModifierEmf100.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian1047_100(Context<?> context) { // 115 bits
         // Test case only works under MySQL, due to how columns are quoted.
         switch (getDatabaseProduct(getDialect(context.getConnectionWithDefaultRole()).name())) {
@@ -18286,7 +18280,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, CheckBugMondrian1047ModifierEmf50.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian1047_50(Context<?> context) { // 65 bits
         // Test case only works under MySQL, due to how columns are quoted.
         switch (getDatabaseProduct(getDialect(context.getConnectionWithDefaultRole()).name())) {
@@ -18305,7 +18299,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, CheckBugMondrian1047ModifierEmf49.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian1047_49(Context<?> context) { // 64 bits
         // Test case only works under MySQL, due to how columns are quoted.
         switch (getDatabaseProduct(getDialect(context.getConnectionWithDefaultRole()).name())) {
@@ -18324,7 +18318,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, CheckBugMondrian1047ModifierEmf48.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian1047_48(Context<?> context) { // 63 bits
         // Test case only works under MySQL, due to how columns are quoted.
         switch (getDatabaseProduct(getDialect(context.getConnectionWithDefaultRole()).name())) {
@@ -18343,7 +18337,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, CheckBugMondrian1047ModifierEmf113.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian1047_113(Context<?> context) { // 128 bits
         // Test case only works under MySQL, due to how columns are quoted.
         switch (getDatabaseProduct(getDialect(context.getConnectionWithDefaultRole()).name())) {
@@ -18362,7 +18356,7 @@ class SchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, CheckBugMondrian1047ModifierEmf114.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian1047_114(Context<?> context) { // 129 bits
         // Test case only works under MySQL, due to how columns are quoted.
         switch (getDatabaseProduct(getDialect(context.getConnectionWithDefaultRole()).name())) {
@@ -18491,7 +18485,7 @@ class SchemaTest {
      * using Oracle DB</a>.
      */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestBugMondrian1065ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestBugMondrian1065ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian1065(Context<?> context) {
         // Test case only works under Oracle
         switch (getDatabaseProduct(getDialect(context.getConnectionWithDefaultRole()).name())) {
@@ -18692,9 +18686,8 @@ class SchemaTest {
             members.toString());
     }
 
-    @Disabled("fix PR: not reproducible in isolation under DuckDB; failed in full-suite run, cause unconfirmed")
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestMondrian1499ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestMondrian1499ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     @RolapConfig(key = ConfigConstants.USE_AGGREGATES, value = "false", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.READ_AGGREGATES, value = "false", type = Boolean.class)
     void testMondrian1499(Context<?> context) throws Exception {
@@ -19092,7 +19085,7 @@ class SchemaTest {
     * "Two cubes operating on same fact table gives wrong WHERE clause"</a>.
     */
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestMondrian1073ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestMondrian1073ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testMondrian1073(Context<?> context) throws Exception {
         /*
         class TestMondrian1073Modifier extends PojoMappingModifier {
@@ -19195,7 +19188,7 @@ class SchemaTest {
   }
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestMultiByteSchemaReadFromFileEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestMultiByteSchemaReadFromFileEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testMultiByteSchemaReadFromFile(Context<?> context) throws IOException {
         //String rawSchema = TestContext.getRawFoodMartSchema().replace(
         /*
@@ -19230,7 +19223,7 @@ class SchemaTest {
     }
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestBugMonrian2528ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestBugMonrian2528ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMonrian2528(Context<?> context) {
         /*
         class TestBugMonrian2528Modifier extends PojoMappingModifier {
@@ -19321,7 +19314,7 @@ class SchemaTest {
   }
 
     @Test
-    @RolapContextTest(catalog = { CatalogSupplier.class, TestMondrian1275ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(catalog = { CatalogSupplier.class, TestMondrian1275ModifierEmf.class }, database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testMondrian1275(Context<?> context) throws Exception {
         /*
         class TestMondrian1275Modifier extends PojoMappingModifier {

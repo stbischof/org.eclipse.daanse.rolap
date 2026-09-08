@@ -47,6 +47,7 @@ import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.eclipse.daanse.rolap.testkit.assertions.DatabaseProduct;
 import org.eclipse.daanse.rolap.SchemaModifiersEmf;
 import org.eclipse.daanse.rolap.testkit.assertions.SqlPattern;
+import org.eclipse.daanse.test.FoodmartData;
 
 /**
  * Test that various values of {@link Dialect#allowsSelectNotInGroupBy}
@@ -116,7 +117,7 @@ class SelectNotInGroupByTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.SelectNotInGroupByTestModifier1.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
     void testDependentPropertySkipped(Connection connection) {
         // Property group by should be skipped only if dialect supports it
@@ -136,7 +137,7 @@ class SelectNotInGroupByTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.SelectNotInGroupByTestModifier2.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
     void testIndependentPropertyNotSkipped(Connection connection) {
         SqlPattern[] sqlPatterns = {
@@ -152,7 +153,7 @@ class SelectNotInGroupByTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.SelectNotInGroupByTestModifier3.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
     void testGroupBySkippedIfUniqueLevel(Connection connection) {
         // If unique level is included and all properties are level
@@ -170,7 +171,7 @@ class SelectNotInGroupByTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.SelectNotInGroupByTestModifier4.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
     void testGroupByNotSkippedIfIndependentProperty(Connection connection) {
         SqlPattern[] sqlPatterns = {
@@ -190,10 +191,4 @@ class SelectNotInGroupByTest {
     }
 
     /** Named bridge onto the FoodMart CSVs (for the {@code data =} supplier form). */
-    public static class FoodmartData implements DataSupplier {
-        @Override
-        public Map<String, URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 }
