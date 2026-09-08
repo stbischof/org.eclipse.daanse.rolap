@@ -86,6 +86,7 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 
 import org.eclipse.daanse.test.DiffRepository;
+import org.eclipse.daanse.test.FoodmartData;
 
 /**
  * Unit tests for flushing member cache and editing cached member properties.
@@ -100,7 +101,7 @@ import org.eclipse.daanse.test.DiffRepository;
  * @since Jan 2008
  */
 @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.MemberCacheControlTestModifier.class },
-        database = FoodmartDatabaseSupplier.class, data = MemberCacheControlTest.FoodmartData.class)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
 @RolapConfig(key = ConfigConstants.ENABLE_ROLAP_CUBE_MEMBER_CACHE, value = "false", type = Boolean.class)
 class MemberCacheControlTest {
     private ExecutionContext executionContext;
@@ -115,12 +116,6 @@ class MemberCacheControlTest {
     // @RolapConfig above; testMemberOpsFailIfCacheEnabled overrides it back on.
 
     /** Named bridge onto the FoodMart CSVs (for the data=-Supplier form). */
-    public static class FoodmartData implements org.eclipse.daanse.cwm.testkit.api.DataSupplier {
-        @Override
-        public java.util.Map<String, java.net.URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 
     @AfterEach
     public void afterEach() {

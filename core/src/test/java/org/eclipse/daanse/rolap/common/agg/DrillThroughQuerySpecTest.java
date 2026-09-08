@@ -25,6 +25,8 @@
 
 package org.eclipse.daanse.rolap.common.agg;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -42,6 +44,7 @@ import org.eclipse.daanse.sql.dialect.api.Dialect;
 import org.eclipse.daanse.sql.model.type.BestFitColumnType;
 import org.eclipse.daanse.olap.api.element.OlapElement;
 import org.eclipse.daanse.rolap.common.sql.QueryRecorder;
+import org.eclipse.daanse.rolap.common.sqlbuild.AggregateSqlMapper;
 import org.eclipse.daanse.rolap.common.star.RolapStar;
 import org.eclipse.daanse.rolap.common.star.StarPredicate;
 import org.junit.jupiter.api.BeforeEach;
@@ -83,65 +86,61 @@ class DrillThroughQuerySpecTest {
         (requestMock, starPredicateMock, new ArrayList<OlapElement> (), false);
   }
 
+  // ---- appendPredicateColumns: the SELECT rule the legacy extraPredicates applied to a slicer
+  // predicate's constrained columns, now feeding AggregateSqlMapper.drillThrough ----
+
+  private static List<AggregateSqlMapper.DrillColumn> appended() {
+    List<AggregateSqlMapper.DrillColumn> drillColumns = new ArrayList<>();
+    drillThroughQuerySpec.appendPredicateColumns(
+        starPredicateMock, drillColumns, new ArrayList<>(), new java.util.HashSet<>(), true);
+    return drillColumns;
+  }
+
+  private static long selectedCount(List<AggregateSqlMapper.DrillColumn> drillColumns) {
+    return drillColumns.stream().filter(AggregateSqlMapper.DrillColumn::selected).count();
+  }
+
   @Test
-  @Disabled("Obsolete: DrillThroughQuerySpec.extraPredicates no longer adds the drill-through SELECT "
-      + "columns (that moved to the builder AggregateSqlMapper.drillThrough); the residual toSql "
-      + "fallback that let a bare StarPredicate mock pass is removed (translator is total). TCK-covered.")
   void emptyColumns() {
-    List<RolapStar.Column> columns = Collections.emptyList();
     when(starPredicateMock.getConstrainedColumnList())
-      .thenReturn(columns);
-    drillThroughQuerySpec.extraPredicates(sqlQueryMock);
-    verify(sqlQueryMock, times(0))
-      .addSelect(anyString(), any(BestFitColumnType.class), anyString());
+      .thenReturn(Collections.emptyList());
+    assertEquals(0, appended().size());
   }
 
   @Test
-  @Disabled("Obsolete: DrillThroughQuerySpec.extraPredicates no longer adds the drill-through SELECT "
-      + "columns (that moved to the builder AggregateSqlMapper.drillThrough); covered by the TCK.")
   void oneColumnExists() {
-    drillThroughQuerySpec.extraPredicates(sqlQueryMock);
-    verify(sqlQueryMock, times(1))
-      .addSelect(isNull(), isNull(), anyString());
+    List<AggregateSqlMapper.DrillColumn> drillColumns = appended();
+    assertEquals(1, selectedCount(drillColumns));
+    assertNotNull(drillColumns.get(0).alias());
   }
 
   @Test
-  @Disabled("Obsolete: drill-through SELECT columns moved to AggregateSqlMapper.drillThrough; TCK-covered.")
   void twoColumnsExist() {
     when(starPredicateMock.getConstrainedColumnList())
       .thenReturn(Arrays.asList(includedColumn, excludedColumn));
-    drillThroughQuerySpec.extraPredicates(sqlQueryMock);
-    verify(sqlQueryMock, times(2))
-      .addSelect(isNull(), isNull(), anyString());
+    assertEquals(2, selectedCount(appended()));
   }
 
   @Test
-  @Disabled("Obsolete: DrillThroughQuerySpec.extraPredicates no longer adds the drill-through SELECT "
-      + "columns (that moved to the builder AggregateSqlMapper.drillThrough); the residual toSql "
-      + "fallback that let a bare StarPredicate mock pass is removed (translator is total). TCK-covered.")
   void columnsNotIncludedInSelect() {
-    when(requestMock.includeInSelect(includedColumn)).thenReturn(false);
-    drillThroughQuerySpec.extraPredicates(sqlQueryMock);
-    verify(sqlQueryMock, times(0))
-      .addSelect(anyString(), any(BestFitColumnType.class), anyString());
+    when(requestMock.includeInSelect(any(RolapStar.Column.class))).thenReturn(false);
+    assertEquals(0, selectedCount(appended()));
 
     when(starPredicateMock.getConstrainedColumnList())
       .thenReturn(Arrays.asList(includedColumn, excludedColumn));
-    verify(sqlQueryMock, times(0))
-      .addSelect(anyString(), any(BestFitColumnType.class), anyString());
+    List<AggregateSqlMapper.DrillColumn> drillColumns = appended();
+    // the columns still join, they are just not projected
+    assertEquals(2, drillColumns.size());
+    assertEquals(0, selectedCount(drillColumns));
   }
 
   @Test
-  @Disabled("Obsolete: drill-through SELECT columns moved to AggregateSqlMapper.drillThrough; TCK-covered.")
   void columnsPartiallyIncludedInSelect() {
     when(requestMock.includeInSelect(excludedColumn)).thenReturn(false);
     when(requestMock.includeInSelect(includedColumn)).thenReturn(true);
     when(starPredicateMock.getConstrainedColumnList())
       .thenReturn(Arrays.asList(includedColumn, excludedColumn));
-
-    drillThroughQuerySpec.extraPredicates(sqlQueryMock);
-    verify(sqlQueryMock, times(1))
-      .addSelect(isNull(), isNull(), anyString());
+    assertEquals(1, selectedCount(appended()));
   }
 
   // ---- translateOrResidual: the segment path's residual fallback, mirrored for drill-through ----

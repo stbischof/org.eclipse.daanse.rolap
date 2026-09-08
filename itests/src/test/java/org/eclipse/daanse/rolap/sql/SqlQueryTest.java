@@ -63,6 +63,7 @@ import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.eclipse.daanse.rolap.testkit.assertions.DatabaseProduct;
 import org.eclipse.daanse.rolap.SchemaModifiersEmf;
 import org.eclipse.daanse.rolap.testkit.assertions.SqlPattern;
+import org.eclipse.daanse.test.FoodmartData;
 /**
  * Test for <code>QueryRecorder</code>.
  *
@@ -581,7 +582,7 @@ class SqlQueryTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SqlQueryTestDoubleInListModifierEmf.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     @RolapConfig(key = ConfigConstants.IGNORE_INVALID_MEMBERS, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.IGNORE_INVALID_MEMBERS_DURING_QUERY, value = "true", type = Boolean.class)
     void testDoubleInList(Connection connection) {
@@ -674,7 +675,7 @@ class SqlQueryTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SqlQueryTestApproxRowCountModifierEmf.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testApproxRowCountOverridesCount(Connection connection) {
         final String mdxQuery =
             "SELECT {[Gender].[Gender].Members} ON ROWS, {[Measures].[Unit Sales]} ON COLUMNS FROM [ApproxTest]";
@@ -697,7 +698,7 @@ class SqlQueryTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SqlQueryTestLimitedRollupMemberModifierEmf.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testLimitedRollupMemberRetrievableFromCache(@Roles("justCA") Connection connection) throws Exception {
         final String mdx =
             "select NON EMPTY { [Store].[Store].[Store State].members } on 0 from [Sales]";
@@ -740,7 +741,7 @@ class SqlQueryTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.SqlQueryTestModifier.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
     void testAvgAggregator(Connection connection) {
         String mdx = "select measures.[avg sales] on 0 from sales"
@@ -806,10 +807,4 @@ class SqlQueryTest {
     }
 
     /** Named bridge onto the FoodMart CSVs (for the {@code data =} supplier form). */
-    public static class FoodmartData implements DataSupplier {
-        @Override
-        public Map<String, URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 }

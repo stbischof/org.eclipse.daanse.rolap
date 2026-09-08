@@ -63,17 +63,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
+import org.eclipse.daanse.test.FoodmartData;
 
 @Execution(ExecutionMode.SAME_THREAD)
 @RolapContextTest(FoodmartTestInstance.class)
 class HierarchyBugTest {
 
-    public static class FoodmartData implements DataSupplier {
-        @Override
-        public Map<String, URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 
 	@BeforeEach
 	public void beforeEach() {
@@ -275,7 +270,7 @@ FlushSchemaCacheModifier.flushSchemaCache(conn);
     }
 	@Test
 	@RolapContextTest(catalog = { CatalogSupplier.class, VerifyMemberLevelNamesIdentityOlap4jDateDimModifier.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testNamesIdentitySsasCompatibleOlap4jDateDim(Context<?> foodMartContext)
         throws SQLException
     {

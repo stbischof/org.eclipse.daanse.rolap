@@ -41,7 +41,7 @@ import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import org.eclipse.daanse.rolap.SchemaModifiersEmf;
-import org.eclipse.daanse.test.AccessControlTest.FoodmartData;
+import org.eclipse.daanse.test.FoodmartData;
 
 /**
  * Tests the expressions used for calculated members. Please keep in sync
@@ -233,7 +233,7 @@ class CompoundSlicerTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.CompoundSlicerTestModifier1.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCompoundSlicerWithCellFormatter(Context<?> context) {
         /*
         String xmlMeasure =
@@ -790,7 +790,7 @@ class CompoundSlicerTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.CompoundSlicerTestModifier2.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testRollupAvg(Context<?> context) {
         /*
         ((BaseTestContext)context).update(SchemaUpdater.createSubstitutingCube(

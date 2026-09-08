@@ -51,16 +51,11 @@ import org.eclipse.daanse.rolap.testkit.junit.api.DbScope;
 import org.eclipse.daanse.rolap.testkit.junit.api.RolapContextTest;
 import org.eclipse.emf.ecore.util.EcoreUtil;
 import org.junit.jupiter.api.Test;
+import org.eclipse.daanse.test.FoodmartData;
 
 @RolapContextTest(FoodmartTestInstance.class)
 class DefaultMemberFunDefTest {
 
-    public static class FoodmartData implements DataSupplier {
-        @Override
-        public Map<String, URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 
     /**
      * EMF version of TestDefaultMemberModifier
@@ -210,7 +205,7 @@ class DefaultMemberFunDefTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestDefaultMemberModifierEmf.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testExplicitDefaultMember(Context<?> context) {
         final String memberUname ="[Time2].[Weekly].[1997].[23]";
     /*

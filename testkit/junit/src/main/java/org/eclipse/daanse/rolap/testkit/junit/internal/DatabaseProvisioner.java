@@ -41,6 +41,8 @@ import org.junit.jupiter.api.extension.ExtensionConfigurationException;
  */
 final class DatabaseProvisioner {
 
+    private static final System.Logger LOG = System.getLogger(DatabaseProvisioner.class.getName());
+
     /** Prefix separating this extension's provider keys from everyone else's. */
     private static final String KEY_PREFIX = "rolap-junit:";
 
@@ -48,7 +50,7 @@ final class DatabaseProvisioner {
             new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, Entry> DATABASES = new ConcurrentHashMap<>();
 
-    private record Entry(ActiveDatabase database, String fixtureKey) {
+    private record Entry(ActiveDatabase database, String databaseKey) {
     }
 
     private DatabaseProvisioner() {
@@ -63,6 +65,7 @@ final class DatabaseProvisioner {
         DatabaseProvider provider = PROVIDER.computeIfAbsent("selected", k -> DatabaseProvider.selected());
         String prefixedKey = KEY_PREFIX + isolationKey;
         Entry entry = DATABASES.computeIfAbsent(prefixedKey, key -> {
+            long start = System.nanoTime();
             ActiveDatabase database = provider.activate(key);
             try {
                 load(fixture, database);
@@ -70,13 +73,15 @@ final class DatabaseProvisioner {
                 throw new IllegalStateException(
                         "Database provisioning failed for " + key + " (fixture " + fixture.fixtureKey() + ")", e);
             }
-            return new Entry(database, fixture.fixtureKey());
+            LOG.log(System.Logger.Level.DEBUG, "provisioned {0} (database {1}) in {2} ms", key, fixture.databaseKey(),
+                    (System.nanoTime() - start) / 1_000_000);
+            return new Entry(database, fixture.databaseKey());
         });
-        if (!entry.fixtureKey().equals(fixture.fixtureKey())) {
+        if (!entry.databaseKey().equals(fixture.databaseKey())) {
             throw new ExtensionConfigurationException("DbScope key '" + isolationKey
-                    + "' is already provisioned with fixture " + entry.fixtureKey()
-                    + " but this test declares fixture " + fixture.fixtureKey()
-                    + " — classes sharing a NAMED scope must declare the same catalog/database/data");
+                    + "' is already provisioned with database " + entry.databaseKey()
+                    + " but this test declares database " + fixture.databaseKey()
+                    + " — tests sharing a scope must declare the same database/data suppliers");
         }
         return entry.database();
     }

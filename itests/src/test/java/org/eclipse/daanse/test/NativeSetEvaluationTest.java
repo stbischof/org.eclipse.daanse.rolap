@@ -63,7 +63,7 @@ import org.junit.jupiter.api.Test;
 import org.eclipse.daanse.rolap.testkit.assertions.DatabaseProduct;
 import org.eclipse.daanse.rolap.BatchTestCase;
 import org.eclipse.daanse.rolap.SchemaModifiersEmf;
-import org.eclipse.daanse.test.AccessControlTest.FoodmartData;
+import org.eclipse.daanse.test.FoodmartData;
 
 /**
  * Test native evaluation of supported set operations.
@@ -998,7 +998,7 @@ class NativeSetEvaluationTest extends BatchTestCase {
    */
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, TestMultipleAllWithInExprModifier.class },
-  database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+  database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testMultipleAllWithInExpr(Context<?> context) {
     // set up three hierarchies on same dimension
     final String multiHierarchyCube =
@@ -1500,7 +1500,7 @@ class NativeSetEvaluationTest extends BatchTestCase {
    */
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, TestNativeVirtualRestrictedSetModifier.class },
-  database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+  database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testNativeVirtualRestrictedSet(Context<?> context) throws Exception {
       /*
       class TestNativeVirtualRestrictedSetModifier extends PojoMappingModifier {
@@ -2076,7 +2076,7 @@ class NativeSetEvaluationTest extends BatchTestCase {
 
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.NativeSetEvaluationTestModifier.class },
-  database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+  database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testDimensionUsageWithDifferentNameExecutedNatively(Context<?> context) {
     /*
     ((BaseTestContext)context).update(SchemaUpdater.createSubstitutingCube(

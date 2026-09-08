@@ -62,6 +62,7 @@ import org.junit.jupiter.api.Test;
 
 import org.eclipse.daanse.rolap.testkit.assertions.DatabaseProduct;
 import org.eclipse.daanse.rolap.testkit.assertions.SqlPattern;
+import org.eclipse.daanse.test.FoodmartData;
 
 /**
  * Unit tests for virtual cubes.
@@ -88,7 +89,7 @@ class VirtualCubeTest extends BatchTestCase {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestNoTimeDimensionModifier.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testNoTimeDimension(Context<?> context) {
         /*
         class TestNoTimeDimensionModifier extends PojoMappingModifier {
@@ -123,7 +124,7 @@ class VirtualCubeTest extends BatchTestCase {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestCalculatedMeasureAsDefaultMeasureInVCModifier.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCalculatedMeasureAsDefaultMeasureInVC(Context<?> context) {
         /*
         class TestCalculatedMeasureAsDefaultMeasureInVCModifier extends PojoMappingModifier {
@@ -165,7 +166,7 @@ class VirtualCubeTest extends BatchTestCase {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestDefaultMeasureInVCForIncorrectMeasureNameModifier.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testDefaultMeasureInVCForIncorrectMeasureName(Context<?> context) {
         /*
         class TestDefaultMeasureInVCForIncorrectMeasureNameModifier extends PojoMappingModifier {
@@ -209,7 +210,7 @@ class VirtualCubeTest extends BatchTestCase {
     @Disabled // cube name not a string. we use reference to cube. we not able to set "Bad cube". this test will delete in future
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestVirtualCubeMeasureInvalidCubeNameModifier.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testVirtualCubeMeasureInvalidCubeName(Context<?> context) {
         /*
         class TestVirtualCubeMeasureInvalidCubeNameModifier extends PojoMappingModifier {
@@ -245,7 +246,7 @@ class VirtualCubeTest extends BatchTestCase {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestDefaultMeasureInVCForCaseSensitivityModifier.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testDefaultMeasureInVCForCaseSensitivity(Context<?> context) {
         /*
         class TestDefaultMeasureInVCForCaseSensitivityModifier extends PojoMappingModifier {
@@ -299,7 +300,7 @@ class VirtualCubeTest extends BatchTestCase {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestWithTimeDimensionModifier.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testWithTimeDimension(Context<?> context) {
         /*
         class TestWithTimeDimensionModifier extends PojoMappingModifier {
@@ -366,7 +367,7 @@ class VirtualCubeTest extends BatchTestCase {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, CreateContextWithNonDefaultAllMemberModifier.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testNonDefaultAllMember(Context<?> context) {
         // Create a virtual cube with a non-conforming dimension (Warehouse)
         // that does not have ALL as its default member.
@@ -405,7 +406,7 @@ class VirtualCubeTest extends BatchTestCase {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, CreateContextWithNonDefaultAllMemberModifier.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testNonDefaultAllMember2(Context<?> context) {
         //createContextWithNonDefaultAllMember(context);
         assertThatQuery(context.getConnectionWithDefaultRole(),
@@ -420,7 +421,7 @@ class VirtualCubeTest extends BatchTestCase {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestMemberVisibilityModifier.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testMemberVisibility(Context<?> context) {
         /*
         class TestMemberVisibilityModifier extends PojoMappingModifier {
@@ -529,7 +530,7 @@ class VirtualCubeTest extends BatchTestCase {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestFormatStringExpressionCubeNoCacheModifier.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testFormatStringExpressionCubeNoCache(Context<?> context) {
         /*
         class TestFormatStringExpressionCubeNoCacheModifier extends PojoMappingModifier {
@@ -905,7 +906,7 @@ class VirtualCubeTest extends BatchTestCase {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.VirtualCubeTestModifier1.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCalculatedMemberInSchema(Context<?> context) {
         /*
         ((BaseTestContext)context).update(SchemaUpdater.createSubstitutingCube(
@@ -1015,7 +1016,7 @@ class VirtualCubeTest extends BatchTestCase {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestOrdinalColumnModifier.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testOrdinalColumn(Context<?> context) {
         /*
         class TestOrdinalColumnModifier extends PojoMappingModifier {
@@ -1083,7 +1084,7 @@ class VirtualCubeTest extends BatchTestCase {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestDefaultMeasurePropertyModifier.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testDefaultMeasureProperty(Context<?> context) {
         /*
         class TestDefaultMeasurePropertyModifier extends PojoMappingModifier {
@@ -1254,7 +1255,7 @@ class VirtualCubeTest extends BatchTestCase {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestBugMondrian322Modifier.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian322(Context<?> context) {
         /*
         class TestBugMondrian322Modifier extends PojoMappingModifier {
@@ -1316,7 +1317,7 @@ class VirtualCubeTest extends BatchTestCase {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestBugMondrian322aModifier.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian322a(Context<?> context) {
         /*
         class TestBugMondrian322aModifier extends PojoMappingModifier {
@@ -1371,7 +1372,7 @@ class VirtualCubeTest extends BatchTestCase {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestVirtualCubeMeasureCaptionModifier.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testVirtualCubeMeasureCaption(Context<?> context) {
         /*
         class TestVirtualCubeMeasureCaptionModifier extends PojoMappingModifier {
@@ -1850,7 +1851,7 @@ class VirtualCubeTest extends BatchTestCase {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.VirtualCubeTestModifier3.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testVirtualCubeRecursiveMember(Context<?> context) {
        /*
       final String schema = "<Schema name=\"FoodMart\">"
@@ -1916,7 +1917,7 @@ class VirtualCubeTest extends BatchTestCase {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.VirtualCubeTestModifier2.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCrossjoinOptimizerWithVirtualCube(Context<?> context) {
         /*
         ((BaseTestContext)context).update(SchemaUpdater.createSubstitutingCube(
@@ -1958,12 +1959,6 @@ class VirtualCubeTest extends BatchTestCase {
     }
 
     /** Named bridge onto the FoodMart CSVs (for the {@code data =} supplier form). */
-    public static class FoodmartData implements org.eclipse.daanse.cwm.testkit.api.DataSupplier {
-        @Override
-        public Map<String, URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 
 
     /**

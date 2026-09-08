@@ -75,7 +75,7 @@ class OrderByAliasTest extends BatchTestCase {
 
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.OrderByAliasTestModifier1KE.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
   void testSqlInKeyExpression(Connection connection) {
     if (getDatabaseProduct(getDialect(connection).name())
@@ -114,7 +114,7 @@ class OrderByAliasTest extends BatchTestCase {
 
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.OrderByAliasTestModifier1NE.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
   void testSqlInNameExpression(Connection connection) {
     if (getDatabaseProduct(getDialect(connection).name())
@@ -155,7 +155,7 @@ class OrderByAliasTest extends BatchTestCase {
 
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.OrderByAliasTestModifier1CE.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
   void testSqlInCaptionExpression(Connection connection) {
     if (getDatabaseProduct(getDialect(connection).name())
@@ -196,7 +196,7 @@ class OrderByAliasTest extends BatchTestCase {
 
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.OrderByAliasTestModifier1OE.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
   void testSqlInOrdinalExpression(Connection connection) {
     if (getDatabaseProduct(getDialect(connection).name())
@@ -237,7 +237,7 @@ class OrderByAliasTest extends BatchTestCase {
 
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.OrderByAliasTestModifier2.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
   void testSqlInParentExpression(Connection connection) {
     if (getDatabaseProduct(getDialect(connection).name())
@@ -347,7 +347,7 @@ class OrderByAliasTest extends BatchTestCase {
 
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.OrderByAliasTestModifier1ME.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
   void testSqlInMeasureExpression(Connection connection) {
     if (getDatabaseProduct(getDialect(connection).name())
@@ -461,7 +461,7 @@ class OrderByAliasTest extends BatchTestCase {
 
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.OrderByAliasTestModifier4.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
   void testVirtualCube(Connection connection) {
     if (getDatabaseProduct(getDialect(connection).name())
@@ -504,11 +504,5 @@ class OrderByAliasTest extends BatchTestCase {
   }
 
     /** Named bridge onto the FoodMart CSVs (for the {@code data =} supplier form). */
-    public static class FoodmartData implements DataSupplier {
-        @Override
-        public Map<String, URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 
 }

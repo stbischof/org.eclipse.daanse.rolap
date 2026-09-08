@@ -116,7 +116,7 @@ class SteelWheelsSchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.SteelWheelsSchemaTestModifier1.class },
-        database = SteelWheelsDatabaseSupplier.class, data = SteelWheelsData.class, dbScope = DbScope.PER_TEST)
+        database = SteelWheelsDatabaseSupplier.class, data = SteelWheelsData.class)
     void testMondrian1273(Context<?> context) {
         //createContext(context, schema);
         if (!databaseIsValid(context.getConnection(new ConnectionProps(List.of("dev"))), "Sales")) {
@@ -348,7 +348,7 @@ class SteelWheelsSchemaTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.SteelWheelsSchemaTestModifier3.class },
-        database = SteelWheelsDatabaseSupplier.class, data = SteelWheelsData.class, dbScope = DbScope.PER_TEST)
+        database = SteelWheelsDatabaseSupplier.class, data = SteelWheelsData.class)
     void testBugMondrian805(Context<?> context) {
         //if (!databaseIsValid(context.getConnection())) {
         //    return;
@@ -387,7 +387,7 @@ class SteelWheelsSchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.SteelWheelsSchemaTestModifier4.class },
-        database = SteelWheelsDatabaseSupplier.class, data = SteelWheelsData.class, dbScope = DbScope.PER_TEST)
+        database = SteelWheelsDatabaseSupplier.class, data = SteelWheelsData.class)
     void testMondrianBug476_770_957(Context<?> context) throws Exception {
         final String mdxQuery =
             "with set [*NATIVE_CJ_SET] as 'Filter([*BASE_MEMBERS_Time], (NOT IsEmpty([Measures].[Price Each])))'\n"
@@ -481,7 +481,7 @@ class SteelWheelsSchemaTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.SteelWheelsSchemaTestModifier5.class },
-        database = SteelWheelsDatabaseSupplier.class, data = SteelWheelsData.class, dbScope = DbScope.PER_TEST)
+        database = SteelWheelsDatabaseSupplier.class, data = SteelWheelsData.class)
     void testPropertyWithParameterOfTimestampType(Context<?> context) throws Exception {
         //if (!databaseIsValid(context.getConnection())) {
         //    return;
@@ -1203,7 +1203,7 @@ class SteelWheelsSchemaTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.SteelWheelsSchemaTestModifier6.class },
-        database = SteelWheelsDatabaseSupplier.class, data = SteelWheelsData.class, dbScope = DbScope.PER_TEST)
+        database = SteelWheelsDatabaseSupplier.class, data = SteelWheelsData.class)
     void testMondrian1360(Context<?> context) {
 
         assertThatQuery(context.getConnectionWithDefaultRole(),
@@ -1277,7 +1277,7 @@ class SteelWheelsSchemaTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.SteelWheelsSchemaTestModifier7.class },
-        database = SteelWheelsDatabaseSupplier.class, data = SteelWheelsData.class, dbScope = DbScope.PER_TEST)
+        database = SteelWheelsDatabaseSupplier.class, data = SteelWheelsData.class)
     void testMondrian1252(Context<?> context) throws Exception {
         //if (!databaseIsValid(context.getConnection())) {
         //    return;
@@ -1873,7 +1873,7 @@ class SteelWheelsSchemaTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.SteelWheelsSchemaTestModifier9.class },
-        database = SteelWheelsDatabaseSupplier.class, data = SteelWheelsData.class, dbScope = DbScope.PER_TEST)
+        database = SteelWheelsDatabaseSupplier.class, data = SteelWheelsData.class)
     void testMondrian2411_3(Context<?> context) throws Exception {
         // Tests an admin query followed by a user query, but both are wrapped
         // with a no-op role in a union.
@@ -2123,7 +2123,7 @@ class SteelWheelsSchemaTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.SteelWheelsSchemaTestModifier10.class },
-        database = SteelWheelsDatabaseSupplier.class, data = SteelWheelsData.class, dbScope = DbScope.PER_TEST)
+        database = SteelWheelsDatabaseSupplier.class, data = SteelWheelsData.class)
     void testMondrian2652(Context<?> context) {
         // Check if there is a valid SteelWheels database.
         //if (!databaseIsValid(context.getConnection())) {

@@ -39,6 +39,7 @@ import org.eclipse.daanse.rolap.testkit.junit.api.RolapConfig;
 import org.eclipse.daanse.rolap.testkit.junit.api.RolapContextTest;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import org.eclipse.daanse.test.FoodmartData;
 
 /**
  * Testcase for non-collapsed levels in agg tables.
@@ -142,7 +143,7 @@ class NonCollapsedAggTest {
     }
 
     @Test
-    @RolapContextTest(value = NonCollapsedAggTestSsasInstance.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = NonCollapsedAggTestSsasInstance.class)
     void testSsasCompatNamingInAgg(Connection connection) {
         // MONDRIAN-1085
         final String mdx =
@@ -165,7 +166,7 @@ class NonCollapsedAggTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestMondrian1325Modifier.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testMondrian1325(Connection connection) {
         final String query =
             "SELECT\n"
@@ -177,10 +178,4 @@ class NonCollapsedAggTest {
     }
 
     /** Named bridge onto the FoodMart CSVs (for the {@code data =} supplier form). */
-    public static class FoodmartData implements DataSupplier {
-        @Override
-        public Map<String, URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 }

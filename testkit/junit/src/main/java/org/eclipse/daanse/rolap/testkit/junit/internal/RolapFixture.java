@@ -152,4 +152,20 @@ public final class RolapFixture {
     public String fixtureKey() {
         return fixtureKey;
     }
+
+    /**
+     * Identity of the DATABASE a fixture needs — the schema and data suppliers
+     * only. Catalog mappings and modifiers are in-JVM metadata and never touch
+     * the database, so fixtures differing only in catalog share one loaded
+     * database (the legacy harness's one-database-per-JVM behaviour). The
+     * phase-1 instance form keys on the instance class: its CSV set is part of
+     * the instance.
+     */
+    public String databaseKey() {
+        if (instance != null) {
+            return instance.getClass().getName();
+        }
+        return (databaseSupplier == null ? "-" : databaseSupplier.getClass().getName()) + "+"
+                + (dataSupplier == null ? "-" : dataSupplier.getClass().getName());
+    }
 }

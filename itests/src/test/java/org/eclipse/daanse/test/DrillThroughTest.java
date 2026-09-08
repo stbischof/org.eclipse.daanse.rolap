@@ -80,7 +80,7 @@ import org.junit.jupiter.api.Test;
 import org.eclipse.daanse.rolap.testkit.assertions.DatabaseProduct;
 import org.eclipse.daanse.rolap.testkit.assertions.SqlAssert;
 import org.eclipse.daanse.rolap.SchemaModifiersEmf;
-import org.eclipse.daanse.test.AccessControlTest.FoodmartData;
+import org.eclipse.daanse.test.FoodmartData;
 
 /**
  * Test generation of SQL to access the fact table data underlying an MDX
@@ -995,7 +995,7 @@ class DrillThroughTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.DrillThroughTestModifier1.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void  testDrillThroughDupKeys(Context<?> context) {
          // Note here that the type on the Store Id level is Integer or
          // Numeric. The default, of course, would be String.
@@ -1200,7 +1200,7 @@ class DrillThroughTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.DrillThroughTestModifier2.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void  testBug1438285(Context<?> context) {
         final Dialect dialect = getDialect(context.getConnectionWithDefaultRole());
         if (getDatabaseProduct(dialect.name()) == DatabaseProduct.TERADATA) {
@@ -2138,7 +2138,7 @@ class DrillThroughTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.DrillThroughTestModifier5.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void  testDrillThroughWithReturnClause_ReturnsNameColumn(Context<?> context)
         throws SQLException
     {
@@ -2194,7 +2194,7 @@ class DrillThroughTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.DrillThroughTestModifier6.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void  testDrillThroughWithReturnClause_ReturnsNoNameColumn(Context<?> context)
             throws SQLException
     {

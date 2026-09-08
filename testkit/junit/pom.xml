@@ -32,6 +32,9 @@
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
           <argLine>-Xmx4g</argLine>
+          <systemPropertyVariables>
+            <daanse.test.db>duckdb</daanse.test.db>
+          </systemPropertyVariables>
           <!-- Intentionally misconfigured case classes only run via EngineTestKit. -->
           <excludedGroups>failure-mode-case</excludedGroups>
         </configuration>

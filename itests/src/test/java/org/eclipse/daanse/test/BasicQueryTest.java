@@ -123,12 +123,6 @@ import org.eclipse.daanse.rolap.SchemaModifiersEmf;
 public class BasicQueryTest {
 
   /** Named bridge onto the Foodmart CSVs (for the {@code data =} supplier form). */
-  public static class FoodmartData implements DataSupplier {
-      @Override
-      public Map<String, URL> csvResources() {
-          return new FoodmartTestInstance().dataSupplier().csvResources();
-      }
-  }
 
   static final String EmptyResult = "Axis #0:\n" + "{}\n" + "Axis #1:\n" + "Axis #2:\n";
 
@@ -1794,7 +1788,7 @@ public class BasicQueryTest {
 
     @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier1.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testCatalogHierarchyBasedOnView(Context<?> context) {
     // Don't run this test if aggregates are enabled: two levels mapped to
     // the "gender" column confuse the agg engine.
@@ -1833,7 +1827,7 @@ public class BasicQueryTest {
 
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier2.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testMemberSameNameAsLevel(Context<?> context) throws SQLException {
     // http://jira.pentaho.com/browse/ANALYZER-1618
     // Tests the case where the Level name matches the name of a member
@@ -1874,7 +1868,7 @@ public class BasicQueryTest {
    */
     @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier3.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testCatalogHierarchyBasedOnView2(Context<?> context) {
     // Don't run this test if aggregates are enabled: two levels mapped to
     // the "gender" column confuse the agg engine.
@@ -1980,7 +1974,7 @@ public class BasicQueryTest {
 
     @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier14.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   @RolapConfig(key = ConfigConstants.USE_AGGREGATES, value = "true", type = Boolean.class)
   @RolapConfig(key = ConfigConstants.READ_AGGREGATES, value = "true", type = Boolean.class)
   void testSameColumnAndColumnNameInLevelAttribute(Context<?> context) {
@@ -2018,7 +2012,7 @@ public class BasicQueryTest {
 
     @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier15.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   @RolapConfig(key = ConfigConstants.USE_AGGREGATES, value = "true", type = Boolean.class)
   @RolapConfig(key = ConfigConstants.READ_AGGREGATES, value = "true", type = Boolean.class)
   void testDifferentNameAndKeyColumn(Context<?> context) {
@@ -2056,7 +2050,7 @@ public class BasicQueryTest {
 
     @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier16.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testVirtualCubeAndCalculatedMeasure(Context<?> context) {
     String mdx =
         "" + "WITH\n"
@@ -2185,7 +2179,7 @@ public class BasicQueryTest {
 
     @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier18.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   @RolapConfig(key = ConfigConstants.USE_AGGREGATES, value = "true", type = Boolean.class)
   @RolapConfig(key = ConfigConstants.READ_AGGREGATES, value = "true", type = Boolean.class)
   void testRollupSumFromAvg(Context<?> context) {
@@ -2232,7 +2226,7 @@ public class BasicQueryTest {
 
     @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier19.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   @RolapConfig(key = ConfigConstants.USE_AGGREGATES, value = "true", type = Boolean.class)
   @RolapConfig(key = ConfigConstants.READ_AGGREGATES, value = "true", type = Boolean.class)
   void testWithoutRollupType(Context<?> context) {
@@ -3790,7 +3784,7 @@ public class BasicQueryTest {
    * usage called [Other Store] which is connected to the [Unit Sales] column
    */
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier4.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   public void _testCubeWhichUsesSameSharedDimTwice(Context<?> context) {
     // Create a second usage of the "Store" shared dimension called "Other
     // Store". Attach it to the "unit_sales" column (which has values [1,
@@ -3870,7 +3864,7 @@ public class BasicQueryTest {
 
     @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier20.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testMemberVisibility(Context<?> context) {
     String cubeName = "Sales_MemberVis";
     CatalogReader scr = context.getConnectionWithDefaultRole().getCatalog().lookupCube( cubeName ).orElseThrow().getCatalogReader( null );
@@ -3889,7 +3883,7 @@ public class BasicQueryTest {
 
     @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier5.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testAllMemberCaption(Context<?> context) {
      /*
     ((BaseTestContext)context).update(SchemaUpdater.createSubstitutingCube("Sales",
@@ -3912,7 +3906,7 @@ public class BasicQueryTest {
 
     @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier10.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testAllLevelName(Context<?> context) {
       /*
       ((BaseTestContext)context).update(SchemaUpdater.createSubstitutingCube("Sales",
@@ -3936,7 +3930,7 @@ public class BasicQueryTest {
    */
     @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier21.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testDimWithoutAll(Context<?> context) {
     // Create a test context with a new ""Sales_DimWithoutAll" cube, and
     // which evaluates expressions against that cube.
@@ -4080,7 +4074,7 @@ public class BasicQueryTest {
    */
     @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier22.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testMultipleConstraintsOnSameColumn(Context<?> context) {
     final String cubeName = "Sales_withCities";
     assertThatQuery(context.getConnectionWithDefaultRole(),"select {\n" + " [Customers].[All Customers].[USA],\n"
@@ -4110,7 +4104,7 @@ public class BasicQueryTest {
 
     @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier23.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testBadMeasure1(Context<?> context) {
       /*
       String schema = SchemaUtil.getSchema(baseSchema, null, "<Cube name=\"SalesWithBadMeasure\">\n"
@@ -4126,7 +4120,7 @@ public class BasicQueryTest {
 
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier24.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testBadMeasure2(Context<?> context) {
     // both a source column and source expression specified
     //right now we can define only one column or expression. Test not have sense
@@ -4199,7 +4193,7 @@ public class BasicQueryTest {
    */
     @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier6.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   @RolapConfig(key = ConfigConstants.COMPARE_SIBLINGS_BY_ORDER_KEY, value = "false", type = Boolean.class)
   @RolapConfig(key = ConfigConstants.EXPAND_NON_NATIVE, value = "true", type = Boolean.class)
   @RolapConfig(key = ConfigConstants.ENABLE_ROLAP_CUBE_MEMBER_CACHE, value = "true", type = Boolean.class)
@@ -4749,7 +4743,7 @@ public class BasicQueryTest {
 
     @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier26.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testDefaultMeasureInCube(Context<?> context) {
     String queryWithoutFilter = "select store.members on 0 from " + "DefaultMeasureTesting";
     String queryWithDeflaultMeasureFilter =
@@ -4759,7 +4753,7 @@ public class BasicQueryTest {
 
     @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier27SupplyTimeError.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testDefaultMeasureInCubeForIncorrectMeasureName(Context<?> context) {
     String queryWithoutFilter = "select store.members on 0 from " + "DefaultMeasureTesting";
     String queryWithFirstMeasure =
@@ -4769,7 +4763,7 @@ public class BasicQueryTest {
 
     @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier27SupplyTime.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testDefaultMeasureInCubeForCaseSensitivity(Context<?> context) {
 
     String queryWithoutFilter = "select store.members on 0 from " + "DefaultMeasureTesting";
@@ -4858,7 +4852,7 @@ public class BasicQueryTest {
    */
     @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier11.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testBug1630754(Context<?> context) {
     // In order to reproduce this bug a dimension with 2 levels with more
     // than 1000 member each was necessary. The customer_id column has more
@@ -5171,7 +5165,7 @@ public class BasicQueryTest {
    */
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier12.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testMondrian1432(Context<?> context) {
       /*
       ((BaseTestContext)context).update(SchemaUpdater.createSubstitutingCube( "Sales", null, "<Measure name='zero' aggregator='sum'>\n"
@@ -5190,7 +5184,7 @@ public class BasicQueryTest {
 
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier28.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testMondrian1432_ZeroAxisSegment(Context<?> context) {
       assertThatQuery( context.getConnectionWithDefaultRole(),"select " + "Crossjoin([Gender].[Gender].[Gender].Members, [Measures].[zero]) ON COLUMNS\n"
         + "from [FooBarZerOneAnything] ")
@@ -5243,7 +5237,7 @@ public class BasicQueryTest {
 
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier9.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testDirectMemberReferenceOnDimensionWithCalculationsDefined(Context<?> context) {
     /*
     ((BaseTestContext)context).update(SchemaUpdater.createSubstitutingCube( "Sales", null,
@@ -5482,7 +5476,7 @@ public class BasicQueryTest {
    */
     @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier30.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testMondrian1506(Context<?> context) throws Exception {
     // First test. Run two queries in parallel. Cancel one.
     // The exception should appear on thread 1 and thread 2
@@ -5641,7 +5635,7 @@ public class BasicQueryTest {
    */
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier7.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testArrayIndexOutOfBoundsWithEmptySegment(Context<?> context) {
     /*
     ((BaseTestContext)context).update(SchemaUpdater.createSubstitutingCube( "Sales", null, "<Measure name='zero' aggregator='sum'>\n"
@@ -5805,7 +5799,7 @@ public class BasicQueryTest {
   @DisabledIfSystemProperty(named = "test.disable.knownFails", matches = "true")
       //NOTE issue with aliases
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier31.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testMondrian2245(Context<?> context) {
     String mdxWithoutBug =
         "" + "SELECT " + "   {[Measures].[Sales]} ON Axis(0),\n"
@@ -5949,7 +5943,7 @@ public class BasicQueryTest {
 
   @Test
   @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.BasicQueryTestModifier32.class },
-      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+      database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
   void testMondrian2630(Context<?> context) {
     String mdx =
         "WITH\n" + "SET [*NATIVE_CJ_SET_WITH_SLICER] AS '[*BASE_MEMBERS__Store Size in SQFT_]'\n"

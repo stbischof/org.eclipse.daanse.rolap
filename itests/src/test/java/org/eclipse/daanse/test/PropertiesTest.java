@@ -357,7 +357,7 @@ class PropertiesTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.PropertiesTestModifier.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testPropertyDescription(Connection connection) throws Exception {
         List<Cube> cubes = connection.getCatalog().getCubes();
         Optional<Cube> optionalCube = cubes.stream().filter(c -> c.getName().equals("Foo")).findFirst();
@@ -374,10 +374,4 @@ class PropertiesTest {
     }
 
     /** Named bridge onto the FoodMart CSVs (for the {@code data =} supplier form). */
-    public static class FoodmartData implements DataSupplier {
-        @Override
-        public Map<String, URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 }

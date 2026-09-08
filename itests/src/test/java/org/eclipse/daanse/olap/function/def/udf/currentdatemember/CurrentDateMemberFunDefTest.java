@@ -29,22 +29,17 @@ import org.eclipse.daanse.rolap.testkit.junit.api.RolapContextTest;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.eclipse.daanse.rolap.SchemaModifiersEmf;
+import org.eclipse.daanse.test.FoodmartData;
 
 
 @RolapContextTest(FoodmartTestInstance.class)
 class CurrentDateMemberFunDefTest {
 
-    public static class FoodmartData implements DataSupplier {
-        @Override
-        public Map<String, URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 
     @Disabled //TODO: UserDefinedFunction
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.CurrentDateMemberUdfTestModifier1.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCurrentDateMemberUdf(Context<?> context) {
         //TODO: context redesign
         //Assertions.fail("Handle comment , Context<?> redesign nedded");

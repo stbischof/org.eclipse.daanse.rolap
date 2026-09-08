@@ -58,7 +58,7 @@ import org.junit.jupiter.api.parallel.ExecutionMode;
 class ExplicitRecognizerTest {
 
     @Test
-    @RolapContextTest(value = ExplicitRecognizerTestInstances.ExplicitAggExtraColsRequiringJoin.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = ExplicitRecognizerTestInstances.ExplicitAggExtraColsRequiringJoin.class)
     @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.USE_AGGREGATES, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.READ_AGGREGATES, value = "true", type = Boolean.class)
@@ -123,7 +123,7 @@ class ExplicitRecognizerTest {
     }
 
     @Test
-    @RolapContextTest(value = ExplicitRecognizerTestInstances.ExplicitForeignKey.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = ExplicitRecognizerTestInstances.ExplicitForeignKey.class)
     @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.USE_AGGREGATES, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.READ_AGGREGATES, value = "true", type = Boolean.class)
@@ -208,7 +208,7 @@ class ExplicitRecognizerTest {
     }
 
     @Test
-    @RolapContextTest(value = ExplicitRecognizerTestInstances.ExplicitAggOrdinalOnAggTable.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = ExplicitRecognizerTestInstances.ExplicitAggOrdinalOnAggTable.class)
     @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.USE_AGGREGATES, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.READ_AGGREGATES, value = "true", type = Boolean.class)
@@ -252,7 +252,7 @@ class ExplicitRecognizerTest {
     }
 
     @Test
-    @RolapContextTest(value = ExplicitRecognizerTestInstances.ExplicitAggCaptionOnAggTable.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = ExplicitRecognizerTestInstances.ExplicitAggCaptionOnAggTable.class)
     @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.USE_AGGREGATES, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.READ_AGGREGATES, value = "true", type = Boolean.class)
@@ -295,7 +295,7 @@ class ExplicitRecognizerTest {
 
     @Disabled //TODO need investigate
     @Test
-    @RolapContextTest(value = ExplicitRecognizerTestInstances.ExplicitAggNameColumnOnAggTable.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = ExplicitRecognizerTestInstances.ExplicitAggNameColumnOnAggTable.class)
     @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.USE_AGGREGATES, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.READ_AGGREGATES, value = "true", type = Boolean.class)
@@ -339,7 +339,7 @@ class ExplicitRecognizerTest {
     }
 
     @Test
-    @RolapContextTest(value = ExplicitRecognizerTestInstances.ExplicitAggPropertiesOnAggTable.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = ExplicitRecognizerTestInstances.ExplicitAggPropertiesOnAggTable.class)
     @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.USE_AGGREGATES, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.READ_AGGREGATES, value = "true", type = Boolean.class)
@@ -417,7 +417,7 @@ class ExplicitRecognizerTest {
     }
 
     @Test
-    @RolapContextTest(value = ExplicitRecognizerTestInstances.CountDistinctAllowableRollup.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = ExplicitRecognizerTestInstances.CountDistinctAllowableRollup.class)
     @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.USE_AGGREGATES, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.READ_AGGREGATES, value = "true", type = Boolean.class)
@@ -483,7 +483,7 @@ class ExplicitRecognizerTest {
     }
 
     @Test
-    @RolapContextTest(value = ExplicitRecognizerTestInstances.CountDisallowedRollup.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = ExplicitRecognizerTestInstances.CountDisallowedRollup.class)
     @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.USE_AGGREGATES, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.READ_AGGREGATES, value = "true", type = Boolean.class)

@@ -59,7 +59,7 @@ import org.eclipse.daanse.rolap.testkit.assertions.SqlAssert;
 import org.eclipse.daanse.rolap.testkit.assertions.SqlPattern;
 import org.eclipse.daanse.rolap.BatchTestCase;
 import org.eclipse.daanse.rolap.SchemaModifiersEmf;
-import org.eclipse.daanse.test.PropertiesTest.FoodmartData;
+import org.eclipse.daanse.test.FoodmartData;
 
 /**
  * Tests the expressions used for calculated members. Please keep in sync
@@ -109,7 +109,7 @@ import org.eclipse.daanse.test.PropertiesTest.FoodmartData;
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.TestCalculatedMembersModifier1.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
      void testCalculatedMemberInCubeWithSpace(Context<?> context) {
         /*
         ((BaseTestContext)context).update(SchemaUpdater.createSubstitutingCube(
@@ -491,7 +491,7 @@ import org.eclipse.daanse.test.PropertiesTest.FoodmartData;
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.TestCalculatedMembers3.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
      void testBracketInCubeCalcMemberName(Context<?> context) {
         final String cubeName = "Sales_BracketInCubeCalcMemberName";
         assertThatQuery(context.getConnectionWithDefaultRole(), "select {[Measures].[With a [bracket] inside it]} on columns,\n"
@@ -669,7 +669,7 @@ import org.eclipse.daanse.test.PropertiesTest.FoodmartData;
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.TestCalculatedMembers1.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
      void testQuoteInCalcMember(Context<?> context) {
         final String cubeName = "Sales_Bug1410383";
         assertThatQuery(context.getConnectionWithDefaultRole(),
@@ -893,7 +893,7 @@ import org.eclipse.daanse.test.PropertiesTest.FoodmartData;
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.TestCalculatedMembersModifier2.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
      void testCalcMemberCustomFormatterInSchema(Context<?> context) {
         // calc member defined in schema
         /*
@@ -935,7 +935,7 @@ import org.eclipse.daanse.test.PropertiesTest.FoodmartData;
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.TestCalculatedMembersModifier4.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
      void testCalcMemberCustomFormatterInSchemaNegative(Context<?> context) {
         // calc member defined in schema
         /*
@@ -963,7 +963,7 @@ import org.eclipse.daanse.test.PropertiesTest.FoodmartData;
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.TestCalculatedMembersModifier3.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
      void testStrToSetInCubeCalcMember(Context<?> context) {
         // calc member defined in schema
         /*
@@ -1486,7 +1486,7 @@ import org.eclipse.daanse.test.PropertiesTest.FoodmartData;
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.TestCalculatedMembers2.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
      void testCycleFalsePositive(Context<?> context) {
         //if (SystemWideProperties.instance().SsasCompatibleNaming) {
         if (true) {

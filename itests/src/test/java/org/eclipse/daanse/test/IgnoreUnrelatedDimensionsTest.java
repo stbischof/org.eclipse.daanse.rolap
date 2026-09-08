@@ -38,7 +38,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import org.eclipse.daanse.rolap.SchemaModifiersEmf;
-import org.eclipse.daanse.test.AccessControlTest.FoodmartData;
+import org.eclipse.daanse.test.FoodmartData;
 
 /**
  * Test case to

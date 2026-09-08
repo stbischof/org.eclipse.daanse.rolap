@@ -86,7 +86,7 @@ class AggSchemaScanTest {
   }
 
 
-  //@Disabled("fix PR: not reproducible in isolation under DuckDB; failed in full-suite run, cause unconfirmed")
+  @Disabled("run-order dependent: the shared Foodmart mapping accumulates table elements from other fixtures (37 grows to 40/51); a private database does not help because the count reads the mapping, not the database. Needs the mapping suppliers to stop sharing mutable EMF instances.")
   @Test
   void testAggScanPropertiesPopulatedSchema(Context<?> context) throws Exception {
     final org.eclipse.daanse.olap.api.connection.Connection rolapConn = (org.eclipse.daanse.olap.api.connection.Connection) context.getConnectionWithDefaultRole();

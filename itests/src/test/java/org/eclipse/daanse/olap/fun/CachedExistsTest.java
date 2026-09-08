@@ -56,6 +56,7 @@ import org.eclipse.daanse.rolap.mapping.model.provider.CatalogMappingSupplier;
 import org.eclipse.daanse.rolap.testkit.junit.api.DbScope;
 import org.eclipse.daanse.rolap.testkit.junit.api.RolapContextTest;
 import org.junit.jupiter.api.Test;
+import org.eclipse.daanse.test.FoodmartData;
 /**
  * Tests the CachedExists function.
  *
@@ -335,7 +336,7 @@ class CachedExistsTest{
 
 	@Test
 	@RolapContextTest(catalog = { CatalogSupplier.class, TestMondrian2704ModifierEmf.class },
-	        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+	        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testMondrian2704(Connection connection) {
     // Verifies second arg of CachedExists uses a tuple type
     	assertThatQuery(connection,
@@ -528,12 +529,6 @@ class CachedExistsTest{
     }
 
     /** Named bridge onto the FoodMart CSVs (for the {@code data =} supplier form). */
-    public static class FoodmartData implements org.eclipse.daanse.cwm.testkit.api.DataSupplier {
-        @Override
-        public Map<String, URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 
 }
 

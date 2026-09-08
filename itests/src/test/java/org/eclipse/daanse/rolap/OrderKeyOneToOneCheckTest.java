@@ -42,18 +42,13 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import org.eclipse.daanse.test.FoodmartData;
 
 //Disabled by reason log4j. log4j is not using any more
 @Disabled
 @RolapContextTest(FoodmartTestInstance.class)
 class OrderKeyOneToOneCheckTest {
 
-  public static class FoodmartData implements DataSupplier {
-    @Override
-    public Map<String, URL> csvResources() {
-      return new FoodmartTestInstance().dataSupplier().csvResources();
-    }
-  }
 
   //private TestAppender memberSourceAppender;
   //private TestAppender sqlReaderAppender;

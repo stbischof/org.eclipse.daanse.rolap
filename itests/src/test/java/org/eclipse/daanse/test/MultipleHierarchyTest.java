@@ -51,12 +51,6 @@ import org.eclipse.daanse.rolap.SchemaModifiersEmf;
 class MultipleHierarchyTest {
 
     /** Named bridge onto the FoodMart CSVs (for the data=-Supplier form). */
-    public static class FoodmartData implements org.eclipse.daanse.cwm.testkit.api.DataSupplier {
-        @Override
-        public java.util.Map<String, java.net.URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 
     private static final String timeWeekly = "[Time].[Weekly]";
     private static final String timeTime = "[Time].[Time]";
@@ -192,7 +186,7 @@ class MultipleHierarchyTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.MultipleHierarchyTestModifier1.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testProperty(Context<?> context) {
         /*
         ((BaseTestContext)context).update(SchemaUpdater.createSubstitutingCube(
@@ -364,7 +358,7 @@ query).returnsGrid(
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.MultipleHierarchyTestModifier2.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testDefaultNamedHierarchy(Context<?> context) {
         /*
         ((BaseTestContext)context).update(SchemaUpdater.createSubstitutingCube(

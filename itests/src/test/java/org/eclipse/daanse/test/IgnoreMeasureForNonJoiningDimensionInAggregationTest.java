@@ -313,7 +313,7 @@ class IgnoreMeasureForNonJoiningDimensionInAggregationTest
             + "Row #0: 3,956,666.91\n");
     }
 
-    @Disabled("fix PR: IGNORE_MEASURE_FOR_NON_JOINING_DIMENSION no longer suppresses the axis; query returns a value instead of an empty grid")
+    @Disabled("engine regression: ignoreMeasureForNonJoiningDimension=true no longer yields the empty grid; the aggregate over the non-joining dimension returns a value. Needs a fix in the aggregation path, not in this test.")
     @Test
     @RolapConfig(key = ConfigConstants.IGNORE_MEASURE_FOR_NON_JOINING_DIMENSION, value = "true", type = Boolean.class)
     void testNoTotalForMeasureWithCrossJoinOfJoiningAndNonJoiningDims(Connection connection) {
@@ -350,7 +350,7 @@ class IgnoreMeasureForNonJoiningDimensionInAggregationTest
             + "Row #0: 1,377,396.213\n");
     }
 
-    @Disabled("fix PR: IGNORE_MEASURE_FOR_NON_JOINING_DIMENSION no longer suppresses the axis; query returns a value instead of an empty grid")
+    @Disabled("engine regression: ignoreMeasureForNonJoiningDimension=true no longer yields the empty grid; the aggregate over the non-joining dimension returns a value. Needs a fix in the aggregation path, not in this test.")
     @Test
     @RolapConfig(key = ConfigConstants.IGNORE_MEASURE_FOR_NON_JOINING_DIMENSION, value = "true", type = Boolean.class)
     void testShouldNotTotalAMeasureWithANonJoiningDimension(Context<?> context) {

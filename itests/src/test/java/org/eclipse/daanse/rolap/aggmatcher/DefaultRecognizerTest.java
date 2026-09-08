@@ -44,6 +44,7 @@ import org.junit.jupiter.api.Test;
 
 import org.eclipse.daanse.rolap.SchemaModifiersEmf;
 import org.eclipse.daanse.rolap.testkit.assertions.SqlPattern;
+import org.eclipse.daanse.test.FoodmartData;
 
 @RolapContextTest(FoodmartTestInstance.class)
 class DefaultRecognizerTest {
@@ -61,7 +62,7 @@ class DefaultRecognizerTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.DefaultRecognizerTestModifier.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     @RolapConfig(key = ConfigConstants.GENERATE_FORMATTED_SQL, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.USE_AGGREGATES, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.READ_AGGREGATES, value = "true", type = Boolean.class)
@@ -196,11 +197,5 @@ class DefaultRecognizerTest {
     }
 
     /** Named bridge onto the FoodMart CSVs (for the {@code data =} supplier form). */
-    public static class FoodmartData implements org.eclipse.daanse.cwm.testkit.api.DataSupplier {
-        @Override
-        public java.util.Map<String, java.net.URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 
 }

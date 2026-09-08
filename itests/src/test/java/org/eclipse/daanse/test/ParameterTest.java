@@ -74,7 +74,7 @@ import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
 
-import org.eclipse.daanse.test.CaptionTest.FoodmartData;
+import org.eclipse.daanse.test.FoodmartData;
 
 /**
  * A <code>ParameterTest</code> is a test suite for functionality relating to
@@ -1257,7 +1257,7 @@ class ParameterTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestSchemaPropModifier.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testSchemaProp(Context<?> context) {
         /*
         class TestSchemaPropModifier extends PojoMappingModifier {
@@ -1287,7 +1287,7 @@ class ParameterTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestSchemaPropDupFailsModifier.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testSchemaPropDupFails(Context<?> context) {
         /*
         class TestSchemaPropDupFailsModifier extends PojoMappingModifier {
@@ -1361,7 +1361,7 @@ class ParameterTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestSchemaPropInvalidDefaultExpFailsModifier.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testSchemaPropInvalidDefaultExpFails(Context<?> context) {
         /*
         class TestSchemaPropInvalidDefaultExpFailsModifier extends PojoMappingModifier {
@@ -1394,7 +1394,7 @@ class ParameterTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, TestSchemaPropContextModifier.class },
-    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+    database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testSchemaPropContext(Context<?> context) {
         /*
         class TestSchemaPropContextModifier extends PojoMappingModifier {

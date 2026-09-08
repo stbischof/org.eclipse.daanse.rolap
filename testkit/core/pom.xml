@@ -34,6 +34,9 @@
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
           <argLine>-Xmx4g</argLine>
+          <systemPropertyVariables>
+            <daanse.test.db>duckdb</daanse.test.db>
+          </systemPropertyVariables>
         </configuration>
       </plugin>
     </plugins>
@@ -125,6 +128,12 @@
     <dependency>
       <groupId>org.eclipse.daanse</groupId>
       <artifactId>org.eclipse.daanse.jdbc.datasource.testkit.h2</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.eclipse.daanse</groupId>
+      <artifactId>org.eclipse.daanse.jdbc.datasource.testkit.duckdb</artifactId>
       <version>${revision}</version>
       <scope>test</scope>
     </dependency>

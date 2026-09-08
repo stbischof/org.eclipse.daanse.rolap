@@ -60,6 +60,7 @@ import org.eclipse.daanse.rolap.mapping.model.olap.dimension.hierarchy.level.Lev
 import org.eclipse.daanse.rolap.testkit.junit.api.RolapContextTest;
 import org.eclipse.daanse.rolap.testkit.junit.api.Roles;
 import org.junit.jupiter.api.Test;
+import org.eclipse.daanse.test.FoodmartData;
 /**
  * Unit test for {@link RolapCube}.
  *
@@ -438,10 +439,4 @@ class RolapCubeTest {
     }
 
     /** Named bridge onto the FoodMart CSVs (for the {@code data =} supplier form). */
-    public static class FoodmartData implements org.eclipse.daanse.cwm.testkit.api.DataSupplier {
-        @Override
-        public Map<String, URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 }

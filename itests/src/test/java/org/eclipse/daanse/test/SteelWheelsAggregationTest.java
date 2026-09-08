@@ -279,7 +279,7 @@ class SteelWheelsAggregationTest {
 
     @Test
     @RolapContextTest(catalog = { TestWithAggregationNoRestrictionsOnTopLevelCatalogSupplier.class },
-        database = SteelWheelsDatabaseSupplier.class, data = SteelWheelsData.class, dbScope = DbScope.PER_TEST)
+        database = SteelWheelsDatabaseSupplier.class, data = SteelWheelsData.class)
     @RolapConfig(key = ConfigConstants.USE_AGGREGATES, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.READ_AGGREGATES, value = "true", type = Boolean.class)
     void testWithAggregationNoRestrictionsOnTopLevel(Context<?> context) throws Exception {

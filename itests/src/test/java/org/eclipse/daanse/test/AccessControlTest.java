@@ -30,6 +30,7 @@ import static org.eclipse.daanse.rolap.testkit.assertions.MdxAssert.assertThatAx
 import static org.eclipse.daanse.rolap.testkit.assertions.MdxAssert.assertThatExpr;
 import static org.eclipse.daanse.rolap.testkit.assertions.MdxAssert.assertThatQuery;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -105,12 +106,6 @@ import org.eclipse.daanse.rolap.SchemaModifiersEmf;
 @Execution(ExecutionMode.SAME_THREAD)
 class AccessControlTest {
 
-    public static class FoodmartData implements DataSupplier {
-        @Override
-        public Map<String, URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 
     private static Optional<Cube> getCubeByNameFromArray(List<Cube> cubes, String name) {
         return cubes.stream().filter(c -> name.equals(c.getName())).findFirst();
@@ -172,7 +167,7 @@ class AccessControlTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier31.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testRestrictMeasures(Context<?> foodMartContext) {
         ConnectionProps props =new ConnectionProps(List.of("Role1"), true, Locale.getDefault(), Duration.ofSeconds(-1), Optional.empty(), Optional.empty(), Optional.empty());
     	Connection connection = foodMartContext.getConnectionWithDefaultRole();
@@ -211,7 +206,7 @@ class AccessControlTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier32.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testRestrictMeasuresHierarchy_InTwoRoles(Context<?> foodMartContext) {
         ConnectionProps props =new ConnectionProps(List.of("Administrator"), true, Locale.getDefault(), Duration.ofSeconds(-1), Optional.empty(), Optional.empty(), Optional.empty());
       Connection connection = foodMartContext.getConnection(props);
@@ -278,15 +273,20 @@ class AccessControlTest {
         assertEquals(3, hierarchyAccess.getBottomLevelDepth());
     }
 
-    @Disabled("fix PR: MemberNotFoundException now thrown eagerly during grant/catalog load, before throwsMessage() wraps the query")
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier34.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testRoleMemberAccessNonExistentMemberFails(Context<?> context) {
         ConnectionProps props =new ConnectionProps(List.of("Role1"), true, Locale.getDefault(), Duration.ofSeconds(-1), Optional.empty(), Optional.empty(), Optional.empty());
-        assertThatQuery(context.getConnection(props),
-            "select {[Store].[Store].Children} on 0 from [Sales]").throwsMessage(
-            "Member '[Store].[Store].[USA].[Non Existent]' not found");
+        // the grant on the non-existent member fails eagerly while the catalog
+        // loads for the connection, before any query runs
+        Throwable t = assertThrows(Exception.class, () -> assertThatQuery(context.getConnection(props),
+            "select {[Store].[Store].Children} on 0 from [Sales]").returnsGrid(""));
+        String expected = "Member '[Store].[Store].[USA].[Non Existent]' not found";
+        while (t != null && (t.getMessage() == null || !t.getMessage().contains(expected))) {
+            t = t.getCause();
+        }
+        assertNotNull(t, "no exception in the cause chain carries: " + expected);
     }
 
     @Test
@@ -560,7 +560,7 @@ class AccessControlTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier35.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian_1201_MultipleMembersInRoleAccessControl(Context<?> foodMartContext) {
         ConnectionProps props =new ConnectionProps(List.of("Role1"), true, Locale.getDefault(), Duration.ofSeconds(-1), Optional.empty(), Optional.empty(), Optional.empty());
         Connection connection = foodMartContext.getConnection(props);
@@ -642,7 +642,7 @@ class AccessControlTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier38.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian_2586_RaggedDimMembersShouldBeVisible(Context<?> foodMartContext) {
     //[Geography].[Country]
       ConnectionProps props =new ConnectionProps(List.of("Sales Ragged"), true, Locale.getDefault(), Duration.ofSeconds(-1), Optional.empty(), Optional.empty(), Optional.empty());
@@ -668,7 +668,7 @@ class AccessControlTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier36.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian_1201_CacheAwareOfRoleAccessControl(Context<?> foodMartContext) {
         ConnectionProps props =new ConnectionProps(List.of("Role1"), true, Locale.getDefault(), Duration.ofSeconds(-1), Optional.empty(), Optional.empty(), Optional.empty());
         Connection connection = foodMartContext.getConnection(props);
@@ -1092,19 +1092,19 @@ class AccessControlTest {
      * {@link AccessControlRollupInstances}.
      */
     @Test
-    @RolapContextTest(value = AccessControlRollupInstances.RollupBottomLevelFull.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AccessControlRollupInstances.RollupBottomLevelFull.class)
     void testRollupBottomLevelFull(Context<?> context) {
         rollupPolicyBottom(context, "74,748", "36,759", "266,773");
     }
 
     @Test
-    @RolapContextTest(value = AccessControlRollupInstances.RollupBottomLevelPartial.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AccessControlRollupInstances.RollupBottomLevelPartial.class)
     void testRollupBottomLevelPartial(Context<?> context) {
         rollupPolicyBottom(context, "72,739", "35,775", "264,764");
     }
 
     @Test
-    @RolapContextTest(value = AccessControlRollupInstances.RollupBottomLevelHidden.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AccessControlRollupInstances.RollupBottomLevelHidden.class)
     void testRollupBottomLevelHidden(Context<?> context) {
         rollupPolicyBottom(context, "", "", "");
     }
@@ -1196,19 +1196,19 @@ class AccessControlTest {
      * as {@link #testRollupBottomLevelFull}.
      */
     @Test
-    @RolapContextTest(value = AccessControlRollupInstances.GreatGrandchildInvisibleFull.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AccessControlRollupInstances.GreatGrandchildInvisibleFull.class)
     void testRollupPolicyGreatGrandchildInvisibleFull(Context<?> context) {
         rollupPolicyGreatGrandchildInvisible(context, "266,773", "74,748");
     }
 
     @Test
-    @RolapContextTest(value = AccessControlRollupInstances.GreatGrandchildInvisiblePartial.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AccessControlRollupInstances.GreatGrandchildInvisiblePartial.class)
     void testRollupPolicyGreatGrandchildInvisiblePartial(Context<?> context) {
         rollupPolicyGreatGrandchildInvisible(context, "266,767", "74,742");
     }
 
     @Test
-    @RolapContextTest(value = AccessControlRollupInstances.GreatGrandchildInvisibleHidden.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AccessControlRollupInstances.GreatGrandchildInvisibleHidden.class)
     void testRollupPolicyGreatGrandchildInvisibleHidden(Context<?> context) {
         rollupPolicyGreatGrandchildInvisible(context, "", "");
     }
@@ -1234,19 +1234,19 @@ class AccessControlTest {
      * as {@link #testRollupBottomLevelFull}.
      */
     @Test
-    @RolapContextTest(value = AccessControlRollupInstances.SimultaneousFull.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AccessControlRollupInstances.SimultaneousFull.class)
     void testRollupPolicySimultaneousFull(Context<?> foodMartContext) {
         rollupPolicySimultaneous(foodMartContext, "266,773", "74,748", "25,635");
     }
 
     @Test
-    @RolapContextTest(value = AccessControlRollupInstances.SimultaneousPartial.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AccessControlRollupInstances.SimultaneousPartial.class)
     void testRollupPolicySimultaneousPartial(Context<?> foodMartContext) {
         rollupPolicySimultaneous(foodMartContext, "72,631", "72,631", "25,635");
     }
 
     @Test
-    @RolapContextTest(value = AccessControlRollupInstances.SimultaneousHidden.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AccessControlRollupInstances.SimultaneousHidden.class)
     void testRollupPolicySimultaneousHidden(Context<?> foodMartContext) {
         rollupPolicySimultaneous(foodMartContext, "", "", "");
     }
@@ -1424,7 +1424,7 @@ class AccessControlTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier3.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testUnionOfUnionRole(Context<?> foodMartContext) {
         ConnectionProps props =new ConnectionProps(List.of("grandparent of USA manager"), true, Locale.getDefault(), Duration.ofSeconds(-1), Optional.empty(), Optional.empty(), Optional.empty());
         Connection connection = foodMartContext.getConnection(props);
@@ -1456,7 +1456,7 @@ class AccessControlTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier4.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testUnionRoleHasInaccessibleDescendants(Context<?> foodMartContext) throws Exception {
         ConnectionProps props =new ConnectionProps(List.of("Role1","Role2"), true, Locale.getDefault(), Duration.ofSeconds(-1), Optional.empty(), Optional.empty(), Optional.empty());
     	Connection connection = foodMartContext.getConnection(props);
@@ -1641,7 +1641,7 @@ class AccessControlTest {
      * as {@link #testRollupBottomLevelFull}.
      */
     @Test
-    @RolapContextTest(value = AccessControlRollupInstances.GoodmanPartial.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AccessControlRollupInstances.GoodmanPartial.class)
     void testGoodmanPartial(Context<?> foodMartContext) {
         // Note that total for [Store].[All Stores] and [Store].[USA] is sum
         // of visible children [Store].[CA] and [Store].[OR].[Portland].
@@ -1675,7 +1675,7 @@ class AccessControlTest {
     }
 
     @Test
-    @RolapContextTest(value = AccessControlRollupInstances.GoodmanFull.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AccessControlRollupInstances.GoodmanFull.class)
     void testGoodmanFull(Context<?> foodMartContext) {
         ConnectionProps props =new ConnectionProps(List.of("California manager"), true, Locale.getDefault(), Duration.ofSeconds(-1), Optional.empty(), Optional.empty(), Optional.empty());
         Connection connection = foodMartContext.getConnection(props);
@@ -1707,7 +1707,7 @@ class AccessControlTest {
     }
 
     @Test
-    @RolapContextTest(value = AccessControlRollupInstances.GoodmanHidden.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AccessControlRollupInstances.GoodmanHidden.class)
     void testGoodmanHidden(Context<?> foodMartContext) {
         ConnectionProps props =new ConnectionProps(List.of("California manager"), true, Locale.getDefault(), Duration.ofSeconds(-1), Optional.empty(), Optional.empty(), Optional.empty());
         Connection connection = foodMartContext.getConnection(props);
@@ -1747,7 +1747,7 @@ class AccessControlTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier7.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian402(Context<?> foodMartContext) {
         ConnectionProps props =new ConnectionProps(List.of("California manager"), true, Locale.getDefault(), Duration.ofSeconds(-1), Optional.empty(), Optional.empty(), Optional.empty());
     	Connection connection = foodMartContext.getConnection(props);
@@ -1762,7 +1762,7 @@ class AccessControlTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier8.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testPartialRollupParentChildHierarchy(Context<?> foodMartContext) {
         ConnectionProps props =new ConnectionProps(List.of("Buggy Role"), true, Locale.getDefault(), Duration.ofSeconds(-1), Optional.empty(), Optional.empty(), Optional.empty());
     	Connection connection = foodMartContext.getConnection(props);
@@ -2144,7 +2144,7 @@ class AccessControlTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier11.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugBiserver2491(Context<?> foodMartContext) {
         ConnectionProps props =new ConnectionProps(List.of("role2"), true, Locale.getDefault(), Duration.ofSeconds(-1), Optional.empty(), Optional.empty(), Optional.empty());
         Connection connection = foodMartContext.getConnection(props);
@@ -2190,7 +2190,7 @@ class AccessControlTest {
      * "Poor performance with large union role"</a>.
      */
     @Test
-    @RolapContextTest(value = AccessControlBugMondrian622Instance.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AccessControlBugMondrian622Instance.class)
     void testBugMondrian622(@Roles("Test") Connection connection) {
         final String cubeName = "Sales with multiple customers";
         executeQuery(connection, "select from [" + cubeName + "]");
@@ -2202,10 +2202,9 @@ class AccessControlTest {
      * "Incorrect handling of child/parent relationship with hierarchy
      * grants"</a>.
      */
-    @Disabled("fix PR: not reproducible in isolation under DuckDB; failed in full-suite run, cause unconfirmed")
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier14.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian694(@Roles("REG1") Connection connection) {
         // With bug MONDRIAN-694 returns 874.80, should return 79.20.
         // Test case is minimal: doesn't happen without the Crossjoin, or
@@ -2277,7 +2276,7 @@ class AccessControlTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier15.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     @RolapConfig(key = ConfigConstants.IGNORE_INVALID_MEMBERS, value = "true", type = Boolean.class)
     void testBugMondrian722(@Roles("CTO") Connection connection) {
         assertThatQuery(connection,
@@ -2312,7 +2311,7 @@ class AccessControlTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier16.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testCalcMemberLevelRole1(@Roles("Role1") Connection connection) {
         checkCalcMemberLevel(connection);
     }
@@ -2324,7 +2323,7 @@ class AccessControlTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier17.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian568(@Roles("Role1") Connection role1Connection,
             @Roles({"Role1", "Role2"}) Connection role1Role2Connection) {
         assertMemberAccess(
@@ -2367,7 +2366,7 @@ class AccessControlTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier18.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian935(@Roles("Role1") Connection connection) {
     	assertThatQuery(connection,
             "select [Measures] on 0,\n"
@@ -2386,7 +2385,7 @@ class AccessControlTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier19.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testDimensionGrant(@Roles("Role1") Connection connection, @Roles("Role2") Connection role2Connection,
             @Roles("Role3") Connection role3Connection) throws Exception {
     	assertThatAxis(connection, "Sales",
@@ -2493,7 +2492,7 @@ class AccessControlTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier20.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testMondrian1030(@Roles("Role1") Connection role1Connection, @Roles("Role2") Connection role2Connection,
             @Roles({"Role1", "Role2"}) Connection role1Role2Connection) throws Exception {
         final String mdx1 =
@@ -2662,7 +2661,7 @@ class AccessControlTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier21.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testBugMondrian1030_2(@Roles("Bacon") Connection connection) {
     	assertThatQuery(connection,
                 "select {[Measures].[Unit Sales]} on 0,\n"
@@ -2686,7 +2685,7 @@ class AccessControlTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier22.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testMondrian1091(@Roles("Role1") Connection connection) throws Exception {
     	assertThatQuery(connection,
             "select {[Store].Members} on columns from [Sales]").returnsGrid(
@@ -2748,7 +2747,7 @@ class AccessControlTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier23.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testMondrian1259(@Roles("Role1") Connection role1Connection, @Roles("Role2") Connection role2Connection)
             throws Exception {
         final String mdx =
@@ -2803,7 +2802,7 @@ class AccessControlTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier24.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testMondrian1295(Connection defaultConnection, @Roles("Admin") Connection connection) throws Exception {
         final String mdx =
             "With\n"
@@ -2850,7 +2849,7 @@ class AccessControlTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier25.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testMondrian936(@Roles("test") Connection connection) throws Exception {
         assertThatQuery(connection,
             "select {[Measures].[Unit Sales]} on columns, "
@@ -2905,7 +2904,7 @@ class AccessControlTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier26.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testMondrian1434Sales(@Roles("dev") Connection connection) {
         executeQuery(
     		connection,
@@ -2915,7 +2914,7 @@ class AccessControlTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier27.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testMondrian1434WarehouseAndSales(@Roles("dev") Connection connection) {
         executeQuery(
     		connection,
@@ -2933,7 +2932,7 @@ class AccessControlTest {
      */
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier28.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testMondrian1486(@Roles("Admin") Connection connection) throws Exception {
         final String mdx =
             "With\n"
@@ -2973,7 +2972,7 @@ class AccessControlTest {
     // test rebuilt the catalog for each combination in a loop.
 
     @Test
-    @RolapContextTest(value = AccessControlRollupInstances.WithNativeFullNonAllDefaultHasAll.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AccessControlRollupInstances.WithNativeFullNonAllDefaultHasAll.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_CROSS_JOIN, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_FILTER, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_NON_EMPTY, value = "true", type = Boolean.class)
@@ -2984,7 +2983,7 @@ class AccessControlTest {
     }
 
     @Test
-    @RolapContextTest(value = AccessControlRollupInstances.WithNativeFullNonAllDefaultNoAll.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AccessControlRollupInstances.WithNativeFullNonAllDefaultNoAll.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_CROSS_JOIN, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_FILTER, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_NON_EMPTY, value = "true", type = Boolean.class)
@@ -2995,7 +2994,7 @@ class AccessControlTest {
     }
 
     @Test
-    @RolapContextTest(value = AccessControlRollupInstances.WithNativeFullNoDefaultHasAll.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AccessControlRollupInstances.WithNativeFullNoDefaultHasAll.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_CROSS_JOIN, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_FILTER, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_NON_EMPTY, value = "true", type = Boolean.class)
@@ -3006,7 +3005,7 @@ class AccessControlTest {
     }
 
     @Test
-    @RolapContextTest(value = AccessControlRollupInstances.WithNativeFullNoDefaultNoAll.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AccessControlRollupInstances.WithNativeFullNoDefaultNoAll.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_CROSS_JOIN, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_FILTER, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_NON_EMPTY, value = "true", type = Boolean.class)
@@ -3017,7 +3016,7 @@ class AccessControlTest {
     }
 
     @Test
-    @RolapContextTest(value = AccessControlRollupInstances.WithNativePartialNonAllDefaultHasAll.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AccessControlRollupInstances.WithNativePartialNonAllDefaultHasAll.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_CROSS_JOIN, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_FILTER, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_NON_EMPTY, value = "true", type = Boolean.class)
@@ -3028,7 +3027,7 @@ class AccessControlTest {
     }
 
     @Test
-    @RolapContextTest(value = AccessControlRollupInstances.WithNativePartialNonAllDefaultNoAll.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AccessControlRollupInstances.WithNativePartialNonAllDefaultNoAll.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_CROSS_JOIN, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_FILTER, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_NON_EMPTY, value = "true", type = Boolean.class)
@@ -3039,7 +3038,7 @@ class AccessControlTest {
     }
 
     @Test
-    @RolapContextTest(value = AccessControlRollupInstances.WithNativePartialNoDefaultHasAll.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AccessControlRollupInstances.WithNativePartialNoDefaultHasAll.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_CROSS_JOIN, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_FILTER, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_NON_EMPTY, value = "true", type = Boolean.class)
@@ -3050,7 +3049,7 @@ class AccessControlTest {
     }
 
     @Test
-    @RolapContextTest(value = AccessControlRollupInstances.WithNativePartialNoDefaultNoAll.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AccessControlRollupInstances.WithNativePartialNoDefaultNoAll.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_CROSS_JOIN, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_FILTER, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_NON_EMPTY, value = "true", type = Boolean.class)
@@ -3061,7 +3060,7 @@ class AccessControlTest {
     }
 
     @Test
-    @RolapContextTest(value = AccessControlRollupInstances.WithNativeHiddenNonAllDefaultHasAll.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AccessControlRollupInstances.WithNativeHiddenNonAllDefaultHasAll.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_CROSS_JOIN, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_FILTER, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_NON_EMPTY, value = "true", type = Boolean.class)
@@ -3072,7 +3071,7 @@ class AccessControlTest {
     }
 
     @Test
-    @RolapContextTest(value = AccessControlRollupInstances.WithNativeHiddenNonAllDefaultNoAll.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AccessControlRollupInstances.WithNativeHiddenNonAllDefaultNoAll.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_CROSS_JOIN, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_FILTER, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_NON_EMPTY, value = "true", type = Boolean.class)
@@ -3083,7 +3082,7 @@ class AccessControlTest {
     }
 
     @Test
-    @RolapContextTest(value = AccessControlRollupInstances.WithNativeHiddenNoDefaultHasAll.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AccessControlRollupInstances.WithNativeHiddenNoDefaultHasAll.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_CROSS_JOIN, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_FILTER, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_NON_EMPTY, value = "true", type = Boolean.class)
@@ -3094,7 +3093,7 @@ class AccessControlTest {
     }
 
     @Test
-    @RolapContextTest(value = AccessControlRollupInstances.WithNativeHiddenNoDefaultNoAll.class, dbScope = DbScope.PER_TEST)
+    @RolapContextTest(value = AccessControlRollupInstances.WithNativeHiddenNoDefaultNoAll.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_CROSS_JOIN, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_FILTER, value = "true", type = Boolean.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_NON_EMPTY, value = "true", type = Boolean.class)
@@ -3160,7 +3159,7 @@ class AccessControlTest {
 
     @Test
     @RolapContextTest(catalog = { CatalogSupplier.class, SchemaModifiersEmf.AccessControlTestModifier30.class },
-            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+            database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testValidMeasureWithRestrictedCubes(@Roles("noBaseCubes") Connection connection) {
         //http://jira.pentaho.com/browse/MONDRIAN-1616
         assertThatQuery(connection,

@@ -43,16 +43,11 @@ import org.eclipse.daanse.rolap.testkit.junit.api.RolapConfig;
 import org.eclipse.daanse.rolap.testkit.junit.api.RolapContextTest;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import org.eclipse.daanse.test.FoodmartData;
 
 @RolapContextTest(FoodmartTestInstance.class)
 class FilterFunDefTest {
 
-    public static class FoodmartData implements DataSupplier {
-        @Override
-        public Map<String, URL> csvResources() {
-            return new FoodmartTestInstance().dataSupplier().csvResources();
-        }
-    }
 
     /**
      * EMF version of TestFilterWillTimeoutModifier
@@ -129,7 +124,7 @@ class FilterFunDefTest {
     @RolapConfig(key = ConfigConstants.QUERY_TIMEOUT, value = "3", type = Integer.class)
     @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_NON_EMPTY, value = "false", type = Boolean.class)
     @RolapContextTest(catalog = { CatalogSupplier.class, TestFilterWillTimeoutModifierEmf.class },
-        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class, dbScope = DbScope.PER_TEST)
+        database = FoodmartDatabaseSupplier.class, data = FoodmartData.class)
     void testFilterWillTimeout(Context<?> context) {
         try {
             executeQuery(context.getConnectionWithDefaultRole(), "select {"
