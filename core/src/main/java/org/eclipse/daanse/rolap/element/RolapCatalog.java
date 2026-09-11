@@ -33,7 +33,6 @@ package org.eclipse.daanse.rolap.element;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
-import java.sql.DriverManager;
 import java.text.MessageFormat;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -93,6 +92,7 @@ import org.eclipse.daanse.olap.api.type.NumericType;
 import org.eclipse.daanse.olap.api.type.StringType;
 import org.eclipse.daanse.olap.api.type.Type;
 import org.eclipse.daanse.olap.common.Util;
+import org.eclipse.daanse.olap.core.AbstractBasicContext;
 import org.eclipse.daanse.olap.exceptions.RoleUnionGrantsException;
 import org.eclipse.daanse.olap.exceptions.UnknownRoleException;
 import org.eclipse.daanse.olap.query.component.FormulaImpl;
@@ -248,7 +248,6 @@ public class RolapCatalog implements Catalog {
 		this.id = UUID.randomUUID().toString();
 		this.key = key;
 		rolapStarRegistry = new RolapStarRegistry(this, context);
-		DriverManager.drivers().forEach(System.out::println);
 		// the order of the next two lines is important
 		this.defaultRole = RoleImpl.createRootRole(this);
 
@@ -281,11 +280,26 @@ public class RolapCatalog implements Catalog {
 
 	protected void flushSegments() {
 		final Connection internalConnection = getInternalConnection();
-		if (internalConnection != null) {
-			final CacheControl cc = internalConnection.getCacheControl(null);
-			for (RolapCube cube : getCubeList()) {
-				cc.flush(cc.createMeasuresRegion(cube));
+		if (internalConnection == null) {
+			return;
+		}
+		final CacheControl cc;
+		try {
+			cc = internalConnection.getCacheControl(null);
+		} catch (OlapRuntimeException e) {
+			if (!AbstractBasicContext.SERVER_ALREADY_SHUTDOWN.equals(e.getMessage())) {
+				throw e;
 			}
+			// The context stops serving before it tears its catalog pool down, so
+			// a teardown-triggered cleanup arrives here with no aggregation
+			// manager left to flush through. Skipping is also what we want: the
+			// segments die with the in-JVM cache anyway, and a flush would delete
+			// them from an external cache that is meant to outlive this process.
+			LOGGER.debug("context already shut down; leaving the segments of catalog '{}' alone", getName());
+			return;
+		}
+		for (RolapCube cube : getCubeList()) {
+			cc.flush(cc.createMeasuresRegion(cube));
 		}
 	}
 
