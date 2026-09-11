@@ -102,7 +102,7 @@ class SegmentCacheTest {
         Thread.sleep(1000);
 
         OlapSegmentCacheManager  segmentCacheManager = ((AbstractBasicContext)connection.getContext())
-            .getAggregationManager().getCacheMgr();
+            .getAggregationManager().getSegmentCacheManager();
         ((SegmentCacheManager)segmentCacheManager).segmentCacheWorkers
             .add(testWorker);
 
@@ -130,7 +130,7 @@ class SegmentCacheTest {
         try {
             // Register our custom listener.
             segmentCacheManager = ((AbstractBasicContext)connection.getContext())
-                    .getAggregationManager().getCacheMgr();
+                    .getAggregationManager().getSegmentCacheManager();
                 ((SegmentCacheManager)segmentCacheManager).compositeCache
                 .addListener(listener);
 
@@ -159,7 +159,7 @@ class SegmentCacheTest {
             assertEquals("Unit Sales", deletedHeaders.get(0).measureName);
         } finally {
             segmentCacheManager = ((AbstractBasicContext)connection.getContext())
-                    .getAggregationManager().getCacheMgr();
+                    .getAggregationManager().getSegmentCacheManager();
             ((SegmentCacheManager)segmentCacheManager).compositeCache
                 .removeListener(listener);
             ((SegmentCacheManager)segmentCacheManager).segmentCacheWorkers

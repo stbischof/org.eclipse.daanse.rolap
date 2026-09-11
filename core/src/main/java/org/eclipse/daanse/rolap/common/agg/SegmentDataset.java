@@ -30,13 +30,12 @@
 package org.eclipse.daanse.rolap.common.agg;
 
 import java.util.List;
-import java.util.Map;
 import java.util.SortedSet;
 
 import org.eclipse.daanse.sql.model.type.BestFitColumnType;
 import org.eclipse.daanse.olap.key.CellKey;
 import org.eclipse.daanse.olap.spi.SegmentBody;
-import  org.eclipse.daanse.olap.util.Pair;
+import org.eclipse.daanse.olap.util.Pair;
 
 /**
  * A SegmentDataset holds the values in a segment.
@@ -44,7 +43,7 @@ import  org.eclipse.daanse.olap.util.Pair;
  * @author jhyde
  * @since 21 March, 2002
  */
-public interface SegmentDataset extends Iterable<Map.Entry<CellKey, Object>> {
+public interface SegmentDataset {
     /**
      * Returns the value at a given coordinate, as an {@link Object}.
      *
@@ -84,13 +83,6 @@ public interface SegmentDataset extends Iterable<Map.Entry<CellKey, Object>> {
      * @return Whether there is a value
      */
     boolean exists(CellKey pos);
-
-    /**
-     * Returns the number of bytes occupied by this dataset.
-     *
-     * @return number of bytes
-     */
-    double getBytes();
 
     void populateFrom(int[] pos, SegmentDataset data, CellKey key);
 

@@ -13,6 +13,7 @@
  */
 package org.eclipse.daanse.rolap.common.result;
 
+import org.eclipse.daanse.olap.spi.SegmentColumn;
 import static org.eclipse.daanse.rolap.common.util.SqlExpressionResolver.genericSql;
 
 import java.util.ArrayList;
@@ -21,11 +22,11 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
-import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Objects;
 import java.util.SortedSet;
 import java.util.concurrent.Future;
 
@@ -37,8 +38,9 @@ import org.eclipse.daanse.olap.common.Util;
 import org.eclipse.daanse.olap.key.BitKey;
 import org.eclipse.daanse.olap.spi.SegmentBody;
 import org.eclipse.daanse.olap.spi.SegmentHeader;
+import org.eclipse.daanse.olap.spi.SegmentPredicate;
+import org.eclipse.daanse.olap.spi.SegmentIdentity;
 import org.eclipse.daanse.rolap.common.EnumConvertor;
-import org.eclipse.daanse.rolap.common.agg.AggregationKey;
 import org.eclipse.daanse.rolap.common.agg.AggregationManager;
 import org.eclipse.daanse.rolap.common.agg.CellRequest;
 import org.eclipse.daanse.rolap.common.agg.ListColumnPredicate;
@@ -55,10 +57,10 @@ import org.eclipse.daanse.rolap.common.aggmatcher.AggStar;
 import org.eclipse.daanse.rolap.common.cache.SegmentCacheIndex;
 import org.eclipse.daanse.rolap.common.cache.SegmentCacheIndexImpl;
 import org.eclipse.daanse.rolap.common.star.RolapSqlExpression;
+import org.eclipse.daanse.rolap.common.star.BitKeyExplain;
 import org.eclipse.daanse.rolap.common.star.RolapStar;
 import org.eclipse.daanse.rolap.common.star.StarColumnPredicate;
 import org.eclipse.daanse.rolap.common.star.StarPredicate;
-import org.eclipse.daanse.rolap.element.RolapCatalog;
 import org.eclipse.daanse.rolap.element.RolapCube;
 import org.eclipse.daanse.rolap.element.RolapVirtualCube;
 import org.slf4j.Logger;
@@ -78,11 +80,12 @@ public class BatchLoader {
     private final SqlQueryCapabilities capabilities;
     private final RolapCube cube;
 
-    private final Map<AggregationKey, Batch> batches =
+    private final Map<BatchKey, Batch> batches =
         new HashMap<>();
 
-    private final Set<SegmentHeader> cacheHeaders =
-        new LinkedHashSet<>();
+    /** Headers we intend to serve from cache, grouped by segment identity. */
+    private final Map<SegmentIdentity, List<SegmentHeader>> cacheHeaders =
+        new LinkedHashMap<>();
 
     private final Map<SegmentHeader, Future<SegmentBody>> futures =
         new HashMap<>();
@@ -91,7 +94,7 @@ public class BatchLoader {
 
     private final Set<BitKey> rollupBitmaps = new HashSet<>();
 
-    private final Map<List, SegmentBuilder.SegmentConverter> converterMap =
+    private final Map<SegmentIdentity.FactKey, SegmentBuilder.SegmentConverter> converterMap =
         new HashMap<>();
 
     public BatchLoader(
@@ -115,13 +118,10 @@ public class BatchLoader {
     private void recordCellRequest2(final CellRequest request) {
         // If there is a segment matching these criteria, write it to the list
         // of found segments, and remove the cell request from the list.
-        final AggregationKey key = new AggregationKey(request);
-
-        final SegmentBuilder.SegmentConverterImpl converter =
-                new SegmentBuilder.SegmentConverterImpl(key, request);
+        final BatchKey key = new BatchKey(request);
 
         boolean success =
-            loadFromCaches(request, key, converter);
+            loadFromCaches(request, key);
         // Skip the batch if we already have a rollup for it.
         if (rollupBitmaps.contains(request.getConstrainedColumnsBitKey())) {
             return;
@@ -129,7 +129,11 @@ public class BatchLoader {
 
         // As a last resort, we load from SQL.
         if (!success) {
-            loadFromSql(request, key, converter);
+            if (BitKeyExplain.enabled()) {
+                BitKeyExplain.EXPLAIN.debug("no cached segment serves {} -> SQL",
+                    BitKeyExplain.explain(request.getMappedCellValues()));
+            }
+            loadFromSql(request, key);
         }
     }
 
@@ -139,53 +143,54 @@ public class BatchLoader {
      */
     private boolean loadFromCaches(
         final CellRequest request,
-        final AggregationKey key,
-        final SegmentBuilder.SegmentConverterImpl converter)
+        final BatchKey key)
     {
         if (cacheMgr.getContext().getConfig().disableCaching()) {
             // Caching is disabled. Return always false.
+            return false;
+        }
+        final RolapStar.Measure requestMeasure = request.getMeasure();
+        if (!requestMeasure.getStar().getCatalog().isCellCachingEnabled(requestMeasure.getCubeName())) {
+            // cells=off for this cube: neither read nor write its segments
             return false;
         }
 
         // Is request matched by one of the headers we intend to load?
         final Map<String, Comparable> mappedCellValues =
             request.getMappedCellValues();
-        final List<String> compoundPredicates =
-            request.getCompoundPredicateStrings();
 
-        for (SegmentHeader header : cacheHeaders) {
-            if (SegmentCacheIndexImpl.matches(
-                    header,
-                    mappedCellValues,
-                    compoundPredicates))
-            {
-                // It's likely that the header will be in the cache, so this
-                // request will be satisfied. If not, the header will be removed
-                // from the segment index, and we'll be back.
-                return true;
+        final List<SegmentHeader> sameIdentity =
+            cacheHeaders.get(request.segmentIdentity());
+        if (sameIdentity != null) {
+            for (SegmentHeader header : sameIdentity) {
+                if (SegmentCacheIndexImpl.matchesCoordinates(
+                        header, mappedCellValues))
+                {
+                    // It's likely that the header will be in the cache, so this
+                    // request will be satisfied. If not, the header will be
+                    // removed from the segment index, and we'll be back.
+                    return true;
+                }
             }
         }
         final RolapStar.Measure measure = request.getMeasure();
         final RolapStar star = measure.getStar();
-        final RolapCatalog catalog = star.getCatalog();
         final SegmentCacheIndex index =
             ((SegmentCacheIndexRegistry)cacheMgr.getIndexRegistry()).getIndex(star);
+        final SegmentIdentity identity =
+            request.segmentIdentity();
         final List<SegmentHeader> headersInCache =
-            index.locate(
-                catalog.getName(),
-                catalog.getChecksum(),
-                measure.getCubeName(),
-                measure.getName(),
-                star.getFactTable().getAlias(),
-                request.getConstrainedColumnsBitKey(),
-                mappedCellValues,
-                compoundPredicates);
+            index.locate(identity, mappedCellValues);
 
         // Ask for the first segment to be loaded from cache. (If it's no longer
         // in cache, we'll be back, and presumably we'll try the second
         // segment.)
 
         if (!headersInCache.isEmpty()) {
+            converterMap.put(
+                SegmentCacheIndexImpl.makeConverterKey(request),
+                new SegmentBuilder.StarSegmentConverter(
+                    measure, key.getCompoundPredicateList()));
             for (SegmentHeader headerInCache : headersInCache) {
                 final Future<SegmentBody> future =
                     index.getFuture(executionContext.getExecution(), headerInCache);
@@ -196,21 +201,15 @@ public class BatchLoader {
                     futures.put(headerInCache, future);
                 } else {
                     // Segment is in cache.
-                    cacheHeaders.add(headerInCache);
+                    cacheHeaders
+                        .computeIfAbsent(headerInCache.identity(), k -> new ArrayList<>())
+                        .add(headerInCache);
                 }
-
-                index.setConverter(
-                    headerInCache.schemaName,
-                    headerInCache.schemaChecksum,
-                    headerInCache.cubeName,
-                    headerInCache.rolapStarFactTableName,
-                    headerInCache.measureName,
-                    headerInCache.compoundPredicates,
-                    converter);
-
-                converterMap.put(
-                    SegmentCacheIndexImpl.makeConverterKey(request),
-                    converter);
+            }
+            if (BitKeyExplain.enabled()) {
+                BitKeyExplain.EXPLAIN.debug("serve {} from cached segment {}",
+                    BitKeyExplain.explain(mappedCellValues),
+                    BitKeyExplain.explain(headersInCache.get(0)));
             }
             return true;
         }
@@ -240,16 +239,13 @@ public class BatchLoader {
             // Don't even bother doing a segment lookup if we can't
             // rollup that measure.
             final List<List<SegmentHeader>> rollup =
-                index.findRollupCandidates(
-                    catalog.getName(),
-                    catalog.getChecksum(),
-                    measure.getCubeName(),
-                    measure.getName(),
-                    star.getFactTable().getAlias(),
-                    request.getConstrainedColumnsBitKey(),
-                    mappedCellValues,
-                    request.getCompoundPredicateStrings());
+                index.findRollupCandidates(identity, mappedCellValues);
             if (!rollup.isEmpty()) {
+                if (BitKeyExplain.enabled()) {
+                    BitKeyExplain.EXPLAIN.debug(
+                        "serve {} by ROLLING UP {} candidate set(s) in memory",
+                        BitKeyExplain.explain(mappedCellValues), rollup.size());
+                }
                 rollups.add(
                     new RollupInfo(
                         request,
@@ -296,9 +292,10 @@ public class BatchLoader {
                   }
               if (firstOkList != null) {
                   if (candidateListsIdx > 0) {
-                      // move good candidate list to first position
+                      // move the good candidate list to the front without
+                      // discarding the list currently there
                       rollupInfo.candidateLists.remove(candidateListsIdx);
-                      rollupInfo.candidateLists.set(0, firstOkList);
+                      rollupInfo.candidateLists.add(0, firstOkList);
                   }
                   return true;
               }
@@ -313,57 +310,67 @@ public class BatchLoader {
           SegmentHeader header,
           CellRequest request)
       {
-          BitKey bitKey = request.getConstrainedColumnsBitKey();
-          assert header.getConstrainedColumnsBitKey().cardinality()
-                >= bitKey.cardinality();
           BitKey headerBitKey = header.getConstrainedColumnsBitKey();
-          // get all constrained values for relevant bitKey positions
-          List<SortedSet<Comparable>> headerValues =
-              new ArrayList<>(bitKey.cardinality());
-          Map<Integer, Integer> valueIndexes = new HashMap<>();
-          int relevantCCIdx = 0;
-          int keyValuesIdx = 0;
-          for (int bitPos : headerBitKey) {
-              if (bitKey.get(bitPos)) {
-                  headerValues.add(
-                      header.getConstrainedColumns().get(relevantCCIdx).values);
-                  valueIndexes.put(bitPos, keyValuesIdx++);
-              }
-              relevantCCIdx++;
+          // hard, not assert: a candidate whose bits do not superset the
+          // request would let the cursor walk below skip request columns
+          // unchecked and claim coverage. Today's callers feed ancestorsOf
+          // results (supersets by construction) - this guards the NEXT
+          // caller and any future index defect.
+          if (!headerBitKey.isSuperSetOf(request.getConstrainedColumnsBitKey())) {
+              return false;
           }
           assert request.getConstrainedColumns().length
               == request.getSingleValues().length;
-          // match header constraints against request values
-          for (int i = 0; i < request.getConstrainedColumns().length; i++) {
-              RolapStar.Column col = request.getConstrainedColumns()[i];
-              Integer valueIdx = valueIndexes.get(col.getBitPosition());
-              if (headerValues.get(valueIdx) != null
-                  && !headerValues.get(valueIdx).contains(
-                      request.getSingleValues()[i]))
+          // two-cursor walk: header bit positions and the request's columns
+          // are both bit-ascending, so no per-call index array is needed
+          final RolapStar.Column[] requestColumns = request.getConstrainedColumns();
+          final Object[] singleValues = request.getSingleValues();
+          final List<SegmentColumn> headerColumns =
+              header.getConstrainedColumns();
+          int i = 0;
+          int relevantCCIdx = 0;
+          for (int bitPos = headerBitKey.nextSetBit(0); bitPos >= 0;
+                  bitPos = headerBitKey.nextSetBit(bitPos + 1)) {
+              if (i < requestColumns.length
+                  && requestColumns[i].getBitPosition() == bitPos)
               {
-                return false;
+                  SortedSet<Comparable> values = headerColumns.get(relevantCCIdx).values;
+                  if (values != null && !values.contains(singleValues[i])) {
+                      return false;
+                  }
+                  i++;
               }
+              relevantCCIdx++;
           }
-          return true;
+          // every request column must have been visited - a leftover means
+          // the walk desynchronized and nothing past it was checked
+          return i == requestColumns.length;
       }
 
     private void loadFromSql(
         final CellRequest request,
-        final AggregationKey key,
-        final SegmentBuilder.SegmentConverterImpl converter)
+        final BatchKey key)
     {
         // Finally, add to a batch. It will turn in to a SQL request.
         Batch batch = batches.get(key);
         if (batch == null) {
             batch = new Batch(request);
             batches.put(key, batch);
+            if (BitKeyExplain.enabled()) {
+                BitKeyExplain.EXPLAIN.debug("new batch {} for measure {}",
+                    BitKeyExplain.explain(
+                        request.getMeasure().getStar(),
+                        request.getConstrainedColumnsBitKey()),
+                    request.getMeasure().getName());
+            }
             converterMap.put(
                 SegmentCacheIndexImpl.makeConverterKey(request),
-                converter);
+                new SegmentBuilder.StarSegmentConverter(
+                    request.getMeasure(), key.getCompoundPredicateList()));
 
             if (LOGGER.isDebugEnabled()) {
                 StringBuilder buf = new StringBuilder(100);
-                buf.append("FastBatchingCellReader: bitkey=");
+                buf.append("BatchingCellReader: bitkey=");
                 buf.append(request.getConstrainedColumnsBitKey());
                 buf.append(Util.NL);
 
@@ -435,9 +442,12 @@ public class BatchLoader {
         // come from cache, and so forth) on the client's time. Some of the bets
         // may not come off, in which case, the client will send us another
         // request.
+        final List<SegmentHeader> allCacheHeaders = new ArrayList<>();
+        cacheHeaders.values().forEach(allCacheHeaders::addAll);
         return new LoadBatchResponse(
+            cacheMgr,
             cellRequests,
-            new ArrayList<>(cacheHeaders),
+            allCacheHeaders,
             rollups,
             converterMap,
             segmentMapFutures,
@@ -445,7 +455,7 @@ public class BatchLoader {
     }
 
     public static List<CompositeBatch> groupBatches(List<Batch> batchList) {
-        Map<AggregationKey, CompositeBatch> batchGroups =
+        Map<BatchKey, CompositeBatch> batchGroups =
             new HashMap<>();
         for (int i = 0; i < batchList.size(); i++) {
             for (int j = i + 1; j < batchList.size();) {
@@ -475,7 +485,7 @@ public class BatchLoader {
 
     private static void wrapNonBatchedBatchesWithCompositeBatches(
         List<Batch> batchList,
-        Map<AggregationKey, CompositeBatch> batchGroups)
+        Map<BatchKey, CompositeBatch> batchGroups)
     {
         for (Batch batch : batchList) {
             if (batchGroups.get(batch.batchKey) == null) {
@@ -485,7 +495,7 @@ public class BatchLoader {
     }
 
     public static void addToCompositeBatch(
-        Map<AggregationKey, CompositeBatch> batchGroups,
+        Map<BatchKey, CompositeBatch> batchGroups,
         Batch detailedBatch,
         Batch summaryBatch)
     {
@@ -588,7 +598,7 @@ public class BatchLoader {
         }
 
         SegmentLoader getSegmentLoader() {
-            return new SegmentLoader(detailedBatch.getCacheMgr());
+            return new SegmentLoader(detailedBatch.getSegmentCacheManager());
         }
     }
 
@@ -617,6 +627,7 @@ public class BatchLoader {
      * being loaded via SQL.
      */
     static class LoadBatchResponse {
+        private final SegmentCacheManager cacheMgr;
         /**
          * List of segments that are being loaded using SQL.
          *
@@ -647,18 +658,20 @@ public class BatchLoader {
          */
         final List<RollupInfo> rollups;
 
-        final Map<List, SegmentBuilder.SegmentConverter> converterMap;
+        final Map<SegmentIdentity.FactKey, SegmentBuilder.SegmentConverter> converterMap;
 
         final Map<SegmentHeader, Future<SegmentBody>> futures;
 
         LoadBatchResponse(
+            SegmentCacheManager cacheMgr,
             List<CellRequest> cellRequests,
             List<SegmentHeader> cacheSegments,
             List<RollupInfo> rollups,
-            Map<List, SegmentBuilder.SegmentConverter> converterMap,
+            Map<SegmentIdentity.FactKey, SegmentBuilder.SegmentConverter> converterMap,
             List<Future<Map<Segment, SegmentWithData>>> sqlSegmentMapFutures,
             Map<SegmentHeader, Future<SegmentBody>> futures)
         {
+            this.cacheMgr = cacheMgr;
             this.cellRequests = cellRequests;
             this.sqlSegmentMapFutures = sqlSegmentMapFutures;
             this.cacheSegments = cacheSegments;
@@ -671,25 +684,111 @@ public class BatchLoader {
             SegmentHeader header,
             SegmentBody body)
         {
-            final SegmentBuilder.SegmentConverter converter =
-                converterMap.get(
+            // reconstruction covers every structural predicate shape; the
+            // request-scoped map remains for Opaque compound predicates,
+            // which only the originating request can rebuild - and for
+            // headers whose requesting star is not resolvable yet (null
+            // star makes getConverter return null by design)
+            SegmentBuilder.SegmentConverter converter =
+                cacheMgr.getConverter(
+                    requestingStar(header), header);
+            if (converter == null) {
+                converter = converterMap.get(
                     SegmentCacheIndexImpl.makeConverterKey(header));
+            }
             return converter.convert(header, body);
+        }
+
+        /**
+         * The star of the request that asked for this header. Content-
+         * identical catalogs register separate stars over the same segment
+         * ids; resolving the star from the header alone picked whichever
+         * catalog was cached first - a converter bound to the WRONG star
+         * registered the segment into that catalog's working store while
+         * the query read its own and re-requested the same cells forever
+         * (or NPEd when the first matching catalog had not built the star
+         * yet).
+         */
+        private RolapStar requestingStar(SegmentHeader header) {
+            for (CellRequest request : cellRequests) {
+                RolapStar star = request.getMeasure().getStar();
+                if (star.getFactTable().getAlias()
+                        .equals(header.rolapStarFactTableName)
+                    && star.getCatalog().getChecksum()
+                        .equals(header.schemaChecksum)) {
+                    return star;
+                }
+            }
+            return cacheMgr.getStar(header);
+        }
+    }
+
+    /**
+     * Batch grouping key: star, dimensionality and compound predicates.
+     * Equality uses the canonical wire form — the same identity the segment
+     * index keys on; the runtime predicate list rides along for SQL.
+     */
+    public static final class BatchKey {
+        private final RolapStar star;
+        private final BitKey constrainedColumnsBitKey;
+        private final List<SegmentPredicate> compoundWire;
+        private final List<StarPredicate> compoundPredicateList;
+        private final int hash;
+
+        BatchKey(CellRequest request) {
+            this.star = request.getMeasure().getStar();
+            this.constrainedColumnsBitKey = request.getConstrainedColumnsBitKey();
+            this.compoundWire = request.getCompoundPredicates();
+            this.compoundPredicateList = request.getCompoundPredicateList();
+            this.hash = Objects.hash(star, constrainedColumnsBitKey, compoundWire);
+        }
+
+        RolapStar getStar() {
+            return star;
+        }
+
+        BitKey getConstrainedColumnsBitKey() {
+            return constrainedColumnsBitKey;
+        }
+
+        List<StarPredicate> getCompoundPredicateList() {
+            return compoundPredicateList;
+        }
+
+        @Override
+        public int hashCode() {
+            return hash;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            return obj instanceof BatchKey that
+                && star == that.star
+                && constrainedColumnsBitKey.equals(that.constrainedColumnsBitKey)
+                && compoundWire.equals(that.compoundWire);
+        }
+
+        @Override
+        public String toString() {
+            return star.getFactTable().getAlias() + " " + constrainedColumnsBitKey;
         }
     }
 
     public class Batch {
         // the CellRequest's constrained columns
         final RolapStar.Column[] columns;
+        private final Set<RolapStar.Measure> measureSet = new HashSet<>();
+        // resolved once per batch; see getAgg
+        private AggStar aggStar;
+        private final boolean[] aggRollup = {false};
+        private boolean aggResolved;
         final List<RolapStar.Measure> measuresList =
             new ArrayList<>();
         final Set<StarColumnPredicate>[] valueSets;
-        public final AggregationKey batchKey;
+        public final BatchKey batchKey;
         // string representation; for debug; set lazily in toString
         private String string;
         private int cellRequestCount;
-        private List<StarColumnPredicate[]> tuples =
-            new ArrayList<>();
 
         public Batch(CellRequest request) {
             columns = request.getConstrainedColumns();
@@ -697,7 +796,7 @@ public class BatchLoader {
             for (int i = 0; i < valueSets.length; i++) {
                 valueSets[i] = new HashSet<>();
             }
-            batchKey = new AggregationKey(request);
+            batchKey = new BatchKey(request);
         }
 
         @Override
@@ -720,16 +819,13 @@ public class BatchLoader {
         public final void add(CellRequest request) {
             ++cellRequestCount;
             final int valueCount = request.getNumValues();
-            final StarColumnPredicate[] tuple =
-                new StarColumnPredicate[valueCount];
             for (int j = 0; j < valueCount; j++) {
-                final StarColumnPredicate value = request.getValueAt(j);
-                valueSets[j].add(value);
-                tuple[j] = value;
+                valueSets[j].add(request.getValueAt(j));
             }
-            tuples.add(tuple);
             final RolapStar.Measure measure = request.getMeasure();
-            if (!measuresList.contains(measure)) {
+            // add() runs once per missed cell: the set carries the contains
+            // check, the list keeps the load order
+            if (measureSet.add(measure)) {
                 assert (measuresList.isEmpty())
                        || (measure.getStar()
                            == (measuresList.getFirst()).getStar())
@@ -755,7 +851,7 @@ public class BatchLoader {
             return batchKey.getConstrainedColumnsBitKey();
         }
 
-        public SegmentCacheManager getCacheMgr() {
+        public SegmentCacheManager getSegmentCacheManager() {
             return cacheMgr;
         }
 
@@ -811,7 +907,7 @@ public class BatchLoader {
                 // contains both types.
 
                 // See the test case testLoadDistinctSqlMeasure() in
-                //  mondrian.rolap.FastBatchingCellReaderTest
+                //  mondrian.rolap.BatchingCellReaderTest
 
                 List<RolapStar.Measure> distinctSqlMeasureList =
                     getDistinctSqlMeasures(measuresList);
@@ -821,7 +917,9 @@ public class BatchLoader {
                         cellRequestCount,
                         Collections.singletonList(measure),
                         columns,
-                        batchKey,
+                        batchKey.getStar(),
+                        batchKey.getConstrainedColumnsBitKey(),
+                        batchKey.getCompoundPredicateList(),
                         predicates,
                         groupingSetsCollector,
                         segmentFutures,
@@ -837,7 +935,9 @@ public class BatchLoader {
                     cellRequestCount,
                     measuresList,
                     columns,
-                    batchKey,
+                    batchKey.getStar(),
+                    batchKey.getConstrainedColumnsBitKey(),
+                    batchKey.getCompoundPredicateList(),
                     predicates,
                     groupingSetsCollector,
                     segmentFutures,
@@ -888,7 +988,9 @@ public class BatchLoader {
                     cellRequestCount,
                     distinctMeasuresList,
                     columns,
-                    batchKey,
+                    batchKey.getStar(),
+                    batchKey.getConstrainedColumnsBitKey(),
+                    batchKey.getCompoundPredicateList(),
                     predicates,
                     groupingSetsCollector,
                     segmentFutures,
@@ -903,8 +1005,11 @@ public class BatchLoader {
                 Set<StarColumnPredicate> valueSet = valueSets[j];
 
                 StarColumnPredicate predicate;
+                // valueSets entries are always initialized in the Batch
+                // constructor - a null here would be a construction bug
                 if (valueSet == null) {
-                    predicate = LiteralStarPredicate.FALSE;
+                    throw new IllegalStateException(
+                        "uninitialized value set for batch column");
                 } else {
                     ValueColumnPredicate[] values =
                         valueSet.toArray(
@@ -1029,75 +1134,31 @@ public class BatchLoader {
          *
          */
         public boolean canBatch(Batch other) {
-            return hasOverlappingBitKeys(other)
-                && constraintsMatch(other)
-                && hasSameMeasureList(other)
-                && !hasDistinctCountMeasure()
+            // cheap predicates first: haveSameValues is O(columns x sets)
+            // and runs inside the O(n^2) grouping pass
+            return !hasDistinctCountMeasure()
                 && !other.hasDistinctCountMeasure()
+                && hasSameCompoundPredicates(other)
+                && hasOverlappingBitKeys(other)
+                && hasSameMeasureList(other)
+                && haveSameClosureColumns(other)
                 && haveSameStarAndAggregation(other)
-                && haveSameClosureColumns(other);
+                && haveSameValues(other);
         }
 
         /**
-         * Returns whether the constraints on this Batch subsume the constraints
-         * on another Batch and therefore the other Batch can be subsumed into
-         * this one for GROUPING SETS purposes. Not symmetric.
-         *
-         * @param other Other batch
-         * @return Whether other batch can be subsumed into this one
+         * The composite batch runs ONE SQL with the detailed batch's
+         * compound predicate list, while every summary batch registers
+         * segment headers claiming its OWN compounds - merging across
+         * differing compounds would publish headers whose data was
+         * filtered by another batch's WHERE clause.
          */
-        private boolean constraintsMatch(Batch other) {
-            if (areBothDistinctCountBatches(other)) {
-                if (getConstrainedColumnsBitKey().equals(
-                        other.getConstrainedColumnsBitKey()))
-                {
-                    return hasSameCompoundPredicate(other)
-                        && haveSameValues(other);
-                } else {
-                    return hasSameCompoundPredicate(other)
-                        || (other.batchKey.getCompoundPredicateList().isEmpty()
-                            || equalConstraint(
-                                batchKey.getCompoundPredicateList(),
-                                other.batchKey.getCompoundPredicateList()))
-                        && haveSameValues(other);
-                }
-            } else {
-                return haveSameValues(other);
-            }
-        }
-
-        private boolean equalConstraint(
-            List<StarPredicate> predList1,
-            List<StarPredicate> predList2)
-        {
-            if (predList1.size() != predList2.size()) {
-                return false;
-            }
-            for (int i = 0; i < predList1.size(); i++) {
-                StarPredicate pred1 = predList1.get(i);
-                StarPredicate pred2 = predList2.get(i);
-                if (!pred1.equalConstraint(pred2)) {
-                    return false;
-                }
-            }
-            return true;
-        }
-
-        private boolean areBothDistinctCountBatches(Batch other) {
-            return this.hasDistinctCountMeasure()
-                && !this.hasNormalMeasures()
-                && other.hasDistinctCountMeasure()
-                && !other.hasNormalMeasures();
-        }
-
-        private boolean hasNormalMeasures() {
-            return getDistinctMeasureCount(measuresList)
-                !=  measuresList.size();
+        private boolean hasSameCompoundPredicates(Batch other) {
+            return batchKey.compoundWire.equals(other.batchKey.compoundWire);
         }
 
         private boolean hasSameMeasureList(Batch other) {
-            return this.measuresList.size() == other.measuresList.size()
-                   && this.measuresList.containsAll(other.measuresList);
+            return this.measureSet.equals(other.measureSet);
         }
 
         boolean hasOverlappingBitKeys(Batch other) {
@@ -1109,56 +1170,14 @@ public class BatchLoader {
             return getDistinctMeasureCount(measuresList) > 0;
         }
 
-        boolean hasSameCompoundPredicate(Batch other) {
-            final StarPredicate starPredicate = compoundPredicate();
-            final StarPredicate otherStarPredicate = other.compoundPredicate();
-            if (starPredicate == null && otherStarPredicate == null) {
-                return true;
-            } else if (starPredicate != null && otherStarPredicate != null) {
-                return starPredicate.equalConstraint(otherStarPredicate);
-            }
-            return false;
-        }
-
-        private StarPredicate compoundPredicate() {
-            StarPredicate predicate = null;
-            for (Set<StarColumnPredicate> valueSet : valueSets) {
-                StarPredicate orPredicate = null;
-                for (StarColumnPredicate starColumnPredicate : valueSet) {
-                    if (orPredicate == null) {
-                        orPredicate = starColumnPredicate;
-                    } else {
-                        orPredicate = orPredicate.or(starColumnPredicate);
-                    }
-                }
-                if (predicate == null) {
-                    predicate = orPredicate;
-                } else {
-                    predicate = predicate.and(orPredicate);
-                }
-            }
-            for (StarPredicate starPredicate
-                : batchKey.getCompoundPredicateList())
-            {
-                if (predicate == null) {
-                    predicate = starPredicate;
-                } else {
-                    predicate = predicate.and(starPredicate);
-                }
-            }
-            return predicate;
-        }
-
         boolean haveSameStarAndAggregation(Batch other) {
+            if (!getStar().equals(other.getStar())) {
+                return false;
+            }
             boolean[] rollup = {false};
             boolean[] otherRollup = {false};
-
-            boolean hasSameAggregation =
-                getAgg(rollup) == other.getAgg(otherRollup);
-            boolean hasSameRollupOption = rollup[0] == otherRollup[0];
-
-            boolean hasSameStar = getStar().equals(other.getStar());
-            return hasSameStar && hasSameAggregation && hasSameRollupOption;
+            return getAgg(rollup) == other.getAgg(otherRollup)
+                && rollup[0] == otherRollup[0];
         }
 
         /**
@@ -1190,15 +1209,24 @@ public class BatchLoader {
         } 
 
         /**
+         * Memoized per batch: the O(n²) batch grouping asks every pair, and
+         * findAgg walks all AggStars each time. The batch's columns and
+         * measures are complete before grouping starts.
+         *
          * @param rollup Out parameter
          * @return AggStar
          */
         private AggStar getAgg(boolean[] rollup) {
-            return AggregationManager.findAgg(
-                getStar(),
-                getConstrainedColumnsBitKey(),
-                makeMeasureBitKey(),
-                rollup);
+            if (!aggResolved) {
+                aggStar = AggregationManager.findAgg(
+                    getStar(),
+                    getConstrainedColumnsBitKey(),
+                    makeMeasureBitKey(),
+                    aggRollup);
+                aggResolved = true;
+            }
+            rollup[0] = aggRollup[0];
+            return aggStar;
         }
 
         private BitKey makeMeasureBitKey() {
@@ -1306,10 +1334,16 @@ public class BatchLoader {
             if (set1.size() != set2.size()) {
                 return set1.size() - set2.size();
             }
-            Iterator<T> iter2 = set2.iterator();
-            for (T v1 : set1) {
-                T v2 = iter2.next();
-                int c = Util.compareKey(v1, v2);
+            // HashSet iteration order is arbitrary: compare order-insensitive
+            // sorted views, or the comparator loses transitivity and sort()
+            // throws
+            List<T> list1 = new ArrayList<>(set1);
+            List<T> list2 = new ArrayList<>(set2);
+            Comparator<T> byKey = Util::compareKey;
+            list1.sort(byKey);
+            list2.sort(byKey);
+            for (int i = 0; i < list1.size(); i++) {
+                int c = Util.compareKey(list1.get(i), list2.get(i));
                 if (c != 0) {
                     return c;
                 }

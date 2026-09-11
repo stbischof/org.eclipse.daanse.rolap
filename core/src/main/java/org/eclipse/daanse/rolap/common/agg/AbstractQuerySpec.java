@@ -46,7 +46,6 @@ import org.eclipse.daanse.rolap.common.sqlbuild.QueryBuildContext;
 import org.eclipse.daanse.rolap.common.sqlbuild.StarPredicateTranslator;
 import org.eclipse.daanse.sql.statement.api.expression.Predicate;
 import org.eclipse.daanse.sql.statement.api.expression.SqlExpression;
-import org.eclipse.daanse.sql.statement.api.model.SelectStatement;
 import java.util.ArrayList;
 
 /**
@@ -55,7 +54,7 @@ import java.util.ArrayList;
  * @author jhyde
  * @author Richard M. Emberson
  */
-public abstract class AbstractQuerySpec implements QuerySpec {
+public abstract class AbstractQuerySpec {
     private final RolapStar star;
     protected final boolean countOnly;
 
@@ -82,7 +81,6 @@ public abstract class AbstractQuerySpec implements QuerySpec {
         return getStar().newQueryRecorder();
     }
 
-    @Override
 	public RolapStar getStar() {
         return star;
     }
@@ -137,6 +135,24 @@ public abstract class AbstractQuerySpec implements QuerySpec {
         }
     }
 
+    // the per-spec contract the concrete specs implement (formerly the
+    // QuerySpec interface; folded in - AbstractQuerySpec was its only user)
+    public abstract int getMeasureCount();
+
+    public abstract RolapStar.Measure getMeasure(int i);
+
+    public abstract String getMeasureAlias(int i);
+
+    public abstract RolapStar.Column[] getColumns();
+
+    public abstract String getColumnAlias(int i);
+
+    /**
+     * Returns the predicate on the ith column; if the column is
+     * unconstrained, {@link LiteralStarPredicate}(true).
+     */
+    public abstract StarColumnPredicate getColumnPredicate(int i);
+
     protected abstract boolean isAggregate();
 
     protected Map<RolapStar.Column, String> nonDistinctGenerateSql(QueryRecorder query)
@@ -168,17 +184,17 @@ public abstract class AbstractQuerySpec implements QuerySpec {
                 // Dialect-free path: the predicate carries its own column (renders to the same expr),
                 // so translate it to a builder Predicate instead of a raw dialect-rendered string.
                 // always-true predicate adds no restriction: skip it.
-                if (!org.eclipse.daanse.rolap.common.sqlbuild.StarPredicateTranslator.isAlwaysTrue(predicate)) {
+                if (!StarPredicateTranslator.isAlwaysTrue(predicate)) {
                     query.addWhere(
-                        org.eclipse.daanse.rolap.common.sqlbuild.StarPredicateTranslator.toPredicate(predicate));
+                        StarPredicateTranslator.toPredicate(predicate));
                 }
             } else {
                 // Fake-column case (predicate has no constrained column): substitute the star
                 // column's node and translate to the value-constraint predicate node (same
                 // IN/=/IS NULL forms).
-                if (!org.eclipse.daanse.rolap.common.sqlbuild.StarPredicateTranslator.isAlwaysTrue(predicate)) {
+                if (!StarPredicateTranslator.isAlwaysTrue(predicate)) {
                     query.addWhere(
-                        org.eclipse.daanse.rolap.common.sqlbuild.StarPredicateTranslator.toColumnPredicate(
+                        StarPredicateTranslator.toColumnPredicate(
                             predicate,
                             org.eclipse.daanse.rolap.common.sqlbuild.JoinPlanner.expressionFor(column),
                             column.getDatatype()));
@@ -256,7 +272,6 @@ public abstract class AbstractQuerySpec implements QuerySpec {
         return org.eclipse.daanse.rolap.common.sql.SqlQueryCapabilities.of(getStar().getDialect());
     }
 
-    @Override
 	public RenderedSql generateSql() {
         int k = getDistinctMeasureCount();
         final Dialect dialect = getStar().getDialect();
@@ -541,15 +556,15 @@ public abstract class AbstractQuerySpec implements QuerySpec {
             StarColumnPredicate predicate = getColumnPredicate(i);
             if (predicate.getConstrainedColumn() != null) {
                 // Dialect-free path (see nonDistinctGenerateSql): translate to a builder Predicate.
-                if (!org.eclipse.daanse.rolap.common.sqlbuild.StarPredicateTranslator.isAlwaysTrue(predicate)) {
+                if (!StarPredicateTranslator.isAlwaysTrue(predicate)) {
                     innerQuery.addWhere(
-                        org.eclipse.daanse.rolap.common.sqlbuild.StarPredicateTranslator.toPredicate(predicate));
+                        StarPredicateTranslator.toPredicate(predicate));
                 }
             } else {
                 // Fake-column case — the value-constraint predicate node (see nonDistinctGenerateSql).
-                if (!org.eclipse.daanse.rolap.common.sqlbuild.StarPredicateTranslator.isAlwaysTrue(predicate)) {
+                if (!StarPredicateTranslator.isAlwaysTrue(predicate)) {
                     innerQuery.addWhere(
-                        org.eclipse.daanse.rolap.common.sqlbuild.StarPredicateTranslator.toColumnPredicate(
+                        StarPredicateTranslator.toColumnPredicate(
                             predicate,
                             org.eclipse.daanse.rolap.common.sqlbuild.JoinPlanner.expressionFor(column),
                             column.getDatatype()));

@@ -18,6 +18,7 @@
  *   SmartCity Jena - initial
  */
 package org.eclipse.daanse.rolap.common.agg;
+import org.eclipse.daanse.olap.spi.body.DenseIntSegmentBody;
 
 import java.util.BitSet;
 import java.util.List;

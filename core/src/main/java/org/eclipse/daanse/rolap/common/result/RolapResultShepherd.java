@@ -56,7 +56,9 @@ import  org.eclipse.daanse.olap.util.Pair;
  * Monitor all executions for timeouts and resource limits as they run
  * in the background
  * Bubble exceptions to the user thread as fast as they happen.
- * Gracefully cancel all SQL statements and cleanup in the background.
+ * Detect cancels and timeouts and release the user thread; the SQL
+ * statements are canceled on the thread that observes the failure (the
+ * user thread's catch below), off the execution's state lock.
  *
  *
  * @author LBoudreau
@@ -143,9 +145,9 @@ public class RolapResultShepherd implements ResultShepherd {
      * The shepherd will wrap the Execution instance into a Future object
      * which can be monitored for exceptions. If any are encountered,
      * two things will happen. First, the user thread will be returned and
-     * the resulting exception will bubble up. Second, the execution thread
-     * will attempt to do a graceful stop of all running SQL statements and
-     * release all other resources gracefully in the background.
+     * the resulting exception will bubble up. Second, THIS user thread
+     * cancels the execution's SQL statements (see the catch below) before
+     * rethrowing - the timer thread itself never performs JDBC I/O.
      * @param execution An Execution instance.
      * @param callable A callable to monitor returning a Result instance.
      * @throws ResourceLimitExceededException if some resource limit specified
@@ -208,7 +210,7 @@ public class RolapResultShepherd implements ResultShepherd {
                 throw t;
             }
 
-            // Check for Mondrian exceptions in the exception chain.
+            // Check for engine exceptions in the exception chain.
             // we can throw these back as-is.
             final OlapRuntimeException m =
                 Util.getMatchingCause(

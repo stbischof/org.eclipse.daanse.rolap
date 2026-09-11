@@ -25,22 +25,21 @@
  */
 
 package org.eclipse.daanse.rolap.common.agg;
-import org.eclipse.daanse.olap.common.ExecutionConfig;
-import static org.eclipse.daanse.rolap.common.SqlStatement.javaDoubleOverflow;
 
-import java.io.Serializable;
+import org.eclipse.daanse.olap.api.monitor.event.CellCacheEvent;
+import org.eclipse.daanse.olap.common.ExecutionConfig;
+import static org.eclipse.daanse.rolap.common.SqlStatement.JAVA_DOUBLE_OVERFLOW;
+
 import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.SQLDataException;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.text.MessageFormat;
 import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -58,16 +57,16 @@ import org.eclipse.daanse.olap.api.exception.OlapRuntimeException;
 import org.eclipse.daanse.olap.api.execution.Execution;
 import org.eclipse.daanse.olap.api.execution.Execution.Purpose;
 import org.eclipse.daanse.olap.api.execution.ExecutionContext;
+import org.eclipse.daanse.olap.api.execution.GuardedStatement;
 import org.eclipse.daanse.olap.api.execution.ExecutionMetadata;
 import org.eclipse.daanse.olap.api.result.NullValue;
 import org.eclipse.daanse.olap.common.Util;
 import org.eclipse.daanse.olap.exceptions.ResourceLimitExceededException;
 import org.eclipse.daanse.olap.key.BitKey;
 import org.eclipse.daanse.olap.spi.SegmentBody;
-import org.eclipse.daanse.olap.spi.SegmentColumn;
 import org.eclipse.daanse.olap.spi.SegmentHeader;
-import  org.eclipse.daanse.olap.util.CancellationChecker;
-import  org.eclipse.daanse.olap.util.Pair;
+import org.eclipse.daanse.olap.util.CancellationChecker;
+import org.eclipse.daanse.olap.util.Pair;
 import org.eclipse.daanse.sql.statement.api.render.RenderedSql;
 import org.eclipse.daanse.rolap.common.RolapUtil;
 import org.eclipse.daanse.rolap.common.SqlStatement;
@@ -80,20 +79,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * 
- * The SegmentLoader queries database and loads the data into the given set of segments.
+ * The SegmentLoader queries the database and loads the data into the given
+ * set of segments: a segment of a measure, where columns are constrained to
+ * values. Each constraint can be null (don't constrain) or carry several
+ * values (e.g. State in {"CA", "OR", "WA"}).
  *
- *
- * 
- * It reads a segment of measure, where columns are constrained to values. Each
- * entry in values can be null, meaning don't constrain, or can have several values. For example,
- * getSegment({Unit_sales}, {Region, State, Year}, {"West"},
- * {"CA", "OR", "WA"}, null}) returns sales in states CA, OR and WA in the Western region, for all years.
- *
- *
- * 
- * It will also look at the SystemWideProperties#SegmentCache property and make usage of the SegmentCache provided
- * as an SPI.
+ * Loaded segments go to the manager's composite cache: the local in-memory
+ * store and every attached external SegmentCache.
  *
  * @author Thiyagu, LBoudreau
  * @since 24 May 2007
@@ -102,7 +94,7 @@ public class SegmentLoader {
   private static final Logger LOGGER = LoggerFactory.getLogger(SegmentLoader.class);
 
   private final SegmentCacheManager cacheMgr;
-    private final static String segmentFetchLimitExceeded = "Number of cell results to be read exceeded limit of ({0,number})";
+    private static final String SEGMENT_FETCH_LIMIT_EXCEEDED = "Number of cell results to be read exceeded limit of ({0,number})";
 
     /**
    * Creates a SegmentLoader.
@@ -118,23 +110,19 @@ public class SegmentLoader {
    * Loads data for all the segments of the GroupingSets. If the grouping sets list contains more than one Grouping Set
    * then data is loaded using the GROUP BY GROUPING SETS sql. Else if only one grouping set is passed in the list data
    * is loaded without using GROUP BY GROUPING SETS sql. If the database does not support grouping sets
-   * mondrian.spi.Dialect#supportsGroupingSets() then grouping sets list should always have only one element in
+   * ({@code Dialect#supportsGroupingSets}) then the grouping sets list should always have only one element in
    * it.
    *
-   * 
    * For example, if list has 2 grouping sets with columns A, B, C and B, C respectively, then the SQL will be
    * "GROUP BY GROUPING SETS ((A, B, C), (B, C))".
    *
-   * 
    * Else if the list has only one grouping set then sql would be without grouping sets.
    *
-   * 
    * The groupingSets list should be topological order, with more detailed higher-level grouping sets
    * occurring first. In other words, the first element of the list should always be the detailed grouping set (default
    * grouping set), followed by grouping sets which can be rolled-up on this detailed grouping set. In the example (A,
    * B, C) is the detailed grouping set and (B, C) is rolled-up using the detailed.
    *
-   * 
    * Grouping sets are removed from the {@code groupingSets} list as they are loaded.
    *
    *
@@ -152,9 +140,13 @@ public class SegmentLoader {
     if ( !cacheMgr.getContext().getConfig().disableCaching() ) {
       for ( GroupingSet groupingSet : groupingSets ) {
         for ( Segment segment : groupingSet.getSegments() ) {
+          if ( !segment.star.getCatalog().isCellCachingEnabled( segment.getHeader().cubeName ) ) {
+            // cells=off: publishSegment never calls loadSucceeded for this
+            // cube, so a load slot would leave every peek waiting forever
+            continue;
+          }
           final SegmentCacheIndex index = ((SegmentCacheIndexRegistry)cacheMgr.getIndexRegistry()).getIndex( segment.star );
-          index.add( segment.getHeader(), new SegmentBuilder.StarSegmentConverter( segment.measure,
-              compoundPredicateList ), true );
+          index.add( segment.getHeader(), true );
           // Make sure that we are registered as a client of
           // the segment by invoking getFuture.
           index.getFuture( ExecutionContext.current().getExecution(), segment.getHeader() ) ;
@@ -220,7 +212,7 @@ public class SegmentLoader {
 
       RowList rows = processData( stmt, axisContainsNull, axisValueSets, groupingSetsList );
 
-      boolean sparse = setAxisDataAndDecideSparseUse( axisValueSets, axisContainsNull, groupingSetsList, rows,
+      boolean[] sparse = setAxisDataAndDecideSparseUse( axisValueSets, axisContainsNull, groupingSetsList, rows,
           sparseSegmentCountThreshold, sparseSegmentDensityThreshold);
 
       final Map<BitKey, GroupingSetsList.Cohort> groupingDataSetsMap =
@@ -246,28 +238,9 @@ public class SegmentLoader {
     }
   }
 
-  /**
-   * Called when a segment has been loaded from SQL, to put into the segment index and the external cache.
-   *
-   * @param header
-   *          Segment header
-   * @param body
-   *          Segment body
-   */
-  private void cacheSegment( RolapStar star, SegmentHeader header, SegmentBody body ) {
-    // Write the segment into external cache.
-    //
-    // It would be a mistake to do this from the cacheMgr -- because the
-    // calls may take time. The cacheMgr's actions must all be quick. We
-    // are a worker, so we have plenty of time.
-    //
-    // Also note that we push the segments to external cache after we have
-    // called cacheMgr.loadSucceeded. That call will allow the current
-    // query to proceed.
-    if ( !cacheMgr.getContext().getConfig().disableCaching() ) {
-      cacheMgr.compositeCache.put( header, body );
-      cacheMgr.loadSucceeded( star, header, body );
-    }
+  /** Publishes a segment loaded from SQL: slot release, events, cache put. */
+  private void publishSegment( RolapStar star, SegmentHeader header, SegmentBody body ) {
+    cacheMgr.cacheLoaded( star, header, body, CellCacheEvent.Source.SQL );
   }
 
   private boolean setFailOnStillLoadingSegments( Map<Segment, SegmentWithData> segmentMap,
@@ -292,7 +265,7 @@ public class SegmentLoader {
    * Loads data to the datasets. If the grouping sets is used, dataset is fetched from groupingDataSetMap using grouping
    * bit keys of the row data. If grouping sets is not used, data is loaded on to nonGroupingDataSets.
    */
-  private void loadDataToDataSets( GroupingSetsList groupingSetsList, RowList rows,
+  void loadDataToDataSets( GroupingSetsList groupingSetsList, RowList rows,
       Map<BitKey, GroupingSetsList.Cohort> groupingDataSetMap ) {
     int arity = groupingSetsList.getDefaultColumns().length;
     SegmentAxis[] axes = groupingSetsList.getDefaultAxes();
@@ -347,37 +320,54 @@ public class SegmentLoader {
     }
   }
 
-  private boolean setAxisDataAndDecideSparseUse( SortedSet<Comparable>[] axisValueSets, boolean[] axisContainsNull,
+  /**
+   * Builds all axes and decides the representation per grouping set, index-
+   * parallel to {@code groupingSetsList.getGroupingSets()}: each set's
+   * possible-value count comes from its own axes and its actual count from
+   * the rows carrying its grouping bit key — a coarse rollup cohort can be
+   * dense while the detail cohort in the same load is sparse.
+   */
+  boolean[] setAxisDataAndDecideSparseUse( SortedSet<Comparable>[] axisValueSets, boolean[] axisContainsNull,
       GroupingSetsList groupingSetsList, RowList rows, int sparseSegmentCountThreshold,
                                                  double sparseSegmentDensityThreshold) {
     SegmentAxis[] axes = groupingSetsList.getDefaultAxes();
     RolapStar.Column[] allColumns = groupingSetsList.getDefaultColumns();
-    // Figure out size of dense array, and allocate it, or use a sparse
-    // array if appropriate.
-    boolean sparse = false;
-    int n = 1;
     for ( int i = 0; i < axes.length; i++ ) {
       SortedSet<Comparable> valueSet = axisValueSets[i];
       axes[i] = new SegmentAxis( groupingSetsList.getDefaultPredicates()[i], valueSet, axisContainsNull[i] );
-      int size = axes[i].getKeys().length;
       setAxisDataToGroupableList( groupingSetsList, valueSet, axisContainsNull[i], allColumns[i] );
+    }
+    if ( !groupingSetsList.useGroupingSets() ) {
+      return new boolean[] {
+          decideSparse( axes, rows.size(), sparseSegmentCountThreshold, sparseSegmentDensityThreshold ) };
+    }
+    final Map<BitKey, Integer> rowCounts = rows.groupingKeyCounts();
+    final List<GroupingSet> groupingSets = groupingSetsList.getGroupingSets();
+    final List<BitKey> bitKeys = groupingSetsList.getRollupColumnsBitKeyList();
+    final boolean[] sparse = new boolean[groupingSets.size()];
+    for ( int i = 0; i < groupingSets.size(); i++ ) {
+      sparse[i] = decideSparse( groupingSets.get( i ).getAxes(), rowCounts.getOrDefault( bitKeys.get( i ), 0 ),
+          sparseSegmentCountThreshold, sparseSegmentDensityThreshold );
+    }
+    return sparse;
+  }
+
+  /**
+   * Density decision for one axis set: dense-size overflow or the threshold
+   * formula. Overridable so tests can force a representation per cohort.
+   */
+  protected boolean decideSparse( SegmentAxis[] axes, int actualCount, int sparseSegmentCountThreshold,
+      double sparseSegmentDensityThreshold ) {
+    int n = 1;
+    for ( SegmentAxis axis : axes ) {
+      int size = axis.getKeys().length;
       int previous = n;
       n *= size;
       if ( ( n < previous ) || ( n < size ) ) {
-        // Overflow has occurred.
-        n = Integer.MAX_VALUE;
-        sparse = true;
+        return true;
       }
     }
-    return useSparse( sparse, n, rows, sparseSegmentCountThreshold, sparseSegmentDensityThreshold );
-  }
-
-  public boolean useSparse( boolean sparse, int n, RowList rows, int sparseSegmentCountThreshold,
-                     double sparseSegmentDensityThreshold) {
-    sparse = sparse || useSparse( n, rows.size(),
-        sparseSegmentCountThreshold,
-        sparseSegmentDensityThreshold);
-    return sparse;
+    return useSparse( n, actualCount, sparseSegmentCountThreshold, sparseSegmentDensityThreshold );
   }
 
   private void setDataToSegments( GroupingSetsList groupingSetsList, Map<BitKey, GroupingSetsList.Cohort> datasetsMap,
@@ -409,16 +399,16 @@ public class SegmentLoader {
 
         // Send a message to the agg manager. It will place the segment
         // in the index.
-        cacheSegment( segment.star, header, body );
+        publishSegment( segment.star, header, body );
       }
     }
   }
 
-  private Map<BitKey, GroupingSetsList.Cohort> createDataSetsForGroupingSets( GroupingSetsList groupingSetsList,
-      boolean sparse, List<BestFitColumnType> types ) {
+  Map<BitKey, GroupingSetsList.Cohort> createDataSetsForGroupingSets( GroupingSetsList groupingSetsList,
+      boolean[] sparse, List<BestFitColumnType> types ) {
     if ( !groupingSetsList.useGroupingSets() ) {
       final GroupingSetsList.Cohort datasets =
-          createDataSets( sparse, groupingSetsList.getDefaultSegments(), groupingSetsList.getDefaultAxes(), types );
+          createDataSets( sparse[0], groupingSetsList.getDefaultSegments(), groupingSetsList.getDefaultAxes(), types );
       return Collections.singletonMap( BitKey.EMPTY, datasets );
     }
     Map<BitKey, GroupingSetsList.Cohort> datasetsMap = new HashMap<>();
@@ -427,7 +417,7 @@ public class SegmentLoader {
     for ( int i = 0; i < groupingSets.size(); i++ ) {
       GroupingSet groupingSet = groupingSets.get( i );
       GroupingSetsList.Cohort cohort =
-          createDataSets( sparse, groupingSet.getSegments(), groupingSet.getAxes(), types );
+          createDataSets( sparse[i], groupingSet.getSegments(), groupingSet.getAxes(), types );
       datasetsMap.put( groupingColumnsBitKeyList.get( i ), cohort );
     }
     return datasetsMap;
@@ -472,7 +462,6 @@ public class SegmentLoader {
   /**
    * Creates and executes a SQL statement to retrieve the set of cells specified by a GroupingSetsList.
    *
-   * 
    * This method may be overridden in tests.
    *
    * @param cellRequestCount
@@ -496,32 +485,75 @@ public class SegmentLoader {
     );
     final ExecutionContext executionContext = ExecutionContext.current().createChild(metadata, Optional.empty());
 
+    // cells=off segments are never index-registered (load() skips them):
+    // they must not count against the abort check - the query itself is
+    // their interested party - and an all-uncached load registers its
+    // statement on the execution context like a disableCaching load.
+    // Without this the caching callback aborted every cells=off query as
+    // "no interested party left" and the cube was unqueryable.
+    boolean anySegmentCached = false;
+    boolean anySegmentUncached = false;
+    for ( Segment seg : groupingSetsList.getDefaultSegments() ) {
+      if ( seg.star.getCatalog().isCellCachingEnabled( seg.getHeader().cubeName ) ) {
+        anySegmentCached = true;
+      } else {
+        anySegmentUncached = true;
+      }
+    }
+    final boolean useCachingCallback =
+        !cacheMgr.getContext().getConfig().disableCaching() && anySegmentCached;
+    final boolean mixedBatch = useCachingCallback && anySegmentUncached;
+
     // When caching is enabled, we must register the SQL statement
     // in the index. We don't want to cancel SQL statements that are shared
     // across threads unless it is safe.
-    final Consumer<Statement>  callbackWithCaching = new Consumer<> () {
+    final Consumer<GuardedStatement> callbackWithCaching = new Consumer<> () {
       @Override
-	public void accept( final Statement stmt ) {
+	public void accept( final GuardedStatement stmt ) {
+        if ( mixedBatch ) {
+          // the uncached side has no index slot, so ExecutionContext.cancel
+          // could never reach this JDBC statement: register it on the
+          // context TOO (close() unregisters unconditionally). Runs on the
+          // SQL thread, before the actor round-trip below.
+          executionContext.registerStatement( stmt );
+        }
         cacheMgr.execute( new CacheCommand<Void>() {
           @Override
 		public Void call() throws Exception {
             boolean atLeastOneActive = false;
+            // a dead query is nobody's interested party: without this, the
+            // constant "uncached counts as active" kept a cancelled mixed
+            // batch's SQL burning until it finished on its own
+            boolean queryAlive = true;
+            try {
+              executionContext.checkCancelOrTimeout();
+            } catch ( RuntimeException cancelledOrTimedOut ) {
+              queryAlive = false;
+            }
             for ( Segment seg : groupingSetsList.getDefaultSegments() ) {
+              if ( !seg.star.getCatalog().isCellCachingEnabled( seg.getHeader().cubeName ) ) {
+                // never registered - the (live) query is the interested party
+                atLeastOneActive |= queryAlive;
+                continue;
+              }
               final SegmentCacheIndex index = ((SegmentCacheIndexRegistry)cacheMgr.getIndexRegistry()).getIndex( seg.star );
               // Make sure to check if the segment still
               // exists in the index. It could have been
               // removed by a cancellation request since
               // then.
-              if ( index.contains( seg.getHeader() ) ) {
+              // isRegistered, not contains: a segment a flush flagged for
+              // removal-after-load has no interested party left - counting
+              // it as active kept the SQL running just to feed the
+              // late-put ghost
+              if ( index.isRegistered( seg.getHeader() ) ) {
                 index.linkSqlStatement( seg.getHeader(), stmt );
                 atLeastOneActive = true;
               }
-              if ( !atLeastOneActive ) {
-                // There are no segments to load.
-                // Throw this so that the segment thread
-                // knows to stop.
-                throw new AbortException();
-              }
+            }
+            if ( !atLeastOneActive ) {
+              // Every segment of this load is gone from the index
+              // (cancelled or flushed): tell the segment thread to stop.
+              throw new AbortException();
             }
             return null;
           }
@@ -535,19 +567,15 @@ public class SegmentLoader {
     };
 
     // When using no cache, we register the SQL statement directly
-    // with the execution instance for cleanup.
-    final Consumer<Statement> callbackNoCaching = new Consumer<>() {
-        @Override
-		public void accept(final Statement stmt) {
-            executionContext.registerStatement(stmt);
-        }
-    };
+    // with the execution instance for cleanup - the default callback.
+    final Consumer<GuardedStatement> callbackNoCaching =
+        RolapUtil.getDefaultCallback( executionContext );
 
     try {
       return RolapUtil.executeQuery( star.getContext(), pair.sql(), pair.columnTypes(), 0, 0, executionContext, -1, -1,
           // Only one of the two callbacks are required, depending if we
           // cache the segments or not.
-          cacheMgr.getContext().getConfig().disableCaching() ? callbackNoCaching : callbackWithCaching );
+          useCachingCallback ? callbackWithCaching : callbackNoCaching );
     } catch ( Throwable t ) {
       if ( Util.getMatchingCause( t, AbortException.class ) != null ) {
         return null;
@@ -580,6 +608,13 @@ public class SegmentLoader {
     final RowList processedRows = new RowList( processedTypes, 100 );
 
     Execution execution = ExecutionContext.current().getExecution();
+    final boolean[] numeric = new boolean[measureCount];
+    {
+      int k = 0;
+      for ( Segment segment : segments ) {
+        numeric[k++] = segment.measure.getDatatype().isNumeric();
+      }
+    }
     while ( rawRows.next() ) {
       // Check if the MDX query was canceled.
       CancellationChecker.checkCancelOrTimeout( ++stmt.rowCount, execution );
@@ -657,16 +692,16 @@ public class SegmentLoader {
             break;
           case DECIMAL:
             final BigDecimal decimal = rawRows.getBigDecimal( columnIndex + 1 );
-            if ( decimal == null && rawRows.wasNull() ) {
+            if ( decimal == null ) {
               if ( !groupingSetsList.useGroupingSets() || !isAggregateNull( rawRows, groupingColumnStartIndex,
                   groupingSetsList, axisIndex ) ) {
                 axisContainsNull[axisIndex] = true;
               }
               processedRows.setNull( columnIndex, true );
             } else {
-              final double val = rawRows.getBigDecimal( columnIndex + 1 ).doubleValue();
+              final double val = decimal.doubleValue();
               if ( val == Double.NEGATIVE_INFINITY || val == Double.POSITIVE_INFINITY ) {
-                throw new SQLDataException(MessageFormat.format(javaDoubleOverflow, rawRows.getMetaData().getColumnName(
+                throw new SQLDataException(MessageFormat.format(JAVA_DOUBLE_OVERFLOW, rawRows.getMetaData().getColumnName(
                     columnIndex + 1 ) ));
               }
               axisValueSets[axisIndex].add( val );
@@ -679,11 +714,6 @@ public class SegmentLoader {
       }
 
       // pre-compute which measures are numeric
-      final boolean[] numeric = new boolean[measureCount];
-      int k = 0;
-      for ( Segment segment : segments ) {
-        numeric[k++] = segment.measure.getDatatype().isNumeric();
-      }
 
       // get the measure
       for ( int i = 0; i < measureCount; i++, columnIndex++ ) {
@@ -739,13 +769,12 @@ public class SegmentLoader {
             break;
           case DECIMAL:
             final BigDecimal decimal = rawRows.getBigDecimal( columnIndex + 1 );
-            if ( decimal == null && rawRows.wasNull() ) {
-              // processedRows.setDouble( columnIndex, 0 );
+            if ( decimal == null ) {
               processedRows.setNull( columnIndex, true );
             } else {
-              final double val = rawRows.getBigDecimal( columnIndex + 1 ).doubleValue();
+              final double val = decimal.doubleValue();
               if ( val == Double.NEGATIVE_INFINITY || val == Double.POSITIVE_INFINITY ) {
-                throw new SQLDataException(MessageFormat.format(javaDoubleOverflow, rawRows.getMetaData().getColumnName(
+                throw new SQLDataException(MessageFormat.format(JAVA_DOUBLE_OVERFLOW, rawRows.getMetaData().getColumnName(
                     columnIndex + 1 ) ));
               }
               processedRows.setDouble( columnIndex, val );
@@ -757,7 +786,7 @@ public class SegmentLoader {
       }
 
       if ( groupingSetsList.useGroupingSets() ) {
-        processedRows.setObject( columnIndex, getRollupBitKey( groupingSetsList.getRollupColumns().size(), rawRows,
+        processedRows.setGroupingKey( columnIndex, getRollupBitKey( groupingSetsList.getRollupColumns().size(), rawRows,
             columnIndex ) );
       }
     }
@@ -767,7 +796,7 @@ public class SegmentLoader {
   private void checkResultLimit( int currentCount ) {
     final int limit = ExecutionConfig.current().resultLimit();
     if ( limit > 0 && currentCount > limit ) {
-      throw new ResourceLimitExceededException(MessageFormat.format(segmentFetchLimitExceeded, limit ));
+      throw new ResourceLimitExceededException(MessageFormat.format(SEGMENT_FETCH_LIMIT_EXCEEDED, limit ));
     }
   }
 
@@ -796,12 +825,9 @@ public class SegmentLoader {
   }
 
   ResultSet loadData( SqlStatement stmt, GroupingSetsList groupingSetsList ) throws SQLException {
-    int arity = groupingSetsList.getDefaultColumns().length;
-    int measureCount = groupingSetsList.getDefaultSegments().size();
-    int groupingFunctionsCount = groupingSetsList.getRollupColumns().size();
-    List<BestFitColumnType> types = stmt.guessTypes();
-    assert arity + measureCount + groupingFunctionsCount == types.size();
-
+    assert groupingSetsList.getDefaultColumns().length
+        + groupingSetsList.getDefaultSegments().size()
+        + groupingSetsList.getRollupColumns().size() == stmt.guessTypes().size();
     return stmt.getResultSet();
   }
 
@@ -852,36 +878,11 @@ public class SegmentLoader {
   }
 
   /**
-   * This is a private abstraction wrapper to perform rollups. It allows us to rollup from a mix of segments coming from
-   * either the local cache or the external one.
-   */
-  abstract class SegmentRollupWrapper {
-    abstract BitKey getConstrainedColumnsBitKey();
-
-    abstract SegmentColumn[] getConstrainedColumns();
-
-    abstract SegmentDataset getDataset();
-
-    abstract Object[] getValuesForColumn( SegmentColumn cc );
-
-    abstract org.eclipse.daanse.olap.spi.SegmentColumn getHeader();
-
-    @Override
-	public int hashCode() {
-      return getHeader().hashCode();
-    }
-
-    @Override
-	public boolean equals( Object obj ) {
-      return getHeader().equals( obj );
-    }
-  }
-
-  /**
    * Collection of rows, each with a set of columns of type Object, double, or int. Native types are not boxed.
    */
   public static class RowList {
     private final Column[] columns;
+    private final Map<BitKey, Integer> groupingKeyCounts = new HashMap<>();
     private int rowCount = 0;
     private int capacity = 0;
     private int currentRow = -1;
@@ -924,6 +925,20 @@ public class SegmentLoader {
 
     public void setObject( int column, Object value ) {
       columns[column].setObject( currentRow, value );
+    }
+
+    /**
+     * Writes the row's grouping bit key AND tallies it: the per-set
+     * density decision reads the tally instead of re-walking every row.
+     */
+    public void setGroupingKey( int column, BitKey key ) {
+      setObject( column, key );
+      groupingKeyCounts.merge( key, 1, Integer::sum );
+    }
+
+    /** Rows per grouping bit key, tallied while the rows were written. */
+    public Map<BitKey, Integer> groupingKeyCounts() {
+      return groupingKeyCounts;
     }
 
     void setDouble( int column, double value ) {
@@ -971,13 +986,6 @@ public class SegmentLoader {
     }
 
     /**
-     * Moves to after the last row.
-     */
-    public void last() {
-      currentRow = rowCount;
-    }
-
-    /**
      * Moves forward one row, or returns false if at the last row.
      *
      * @return whether moved forward
@@ -985,19 +993,6 @@ public class SegmentLoader {
     public boolean next() {
       if ( currentRow < rowCount - 1 ) {
         ++currentRow;
-        return true;
-      }
-      return false;
-    }
-
-    /**
-     * Moves backward one row, or returns false if at the first row.
-     *
-     * @return whether moved backward
-     */
-    public boolean previous() {
-      if ( currentRow > 0 ) {
-        --currentRow;
         return true;
       }
       return false;
@@ -1229,10 +1224,6 @@ public class SegmentLoader {
         longs[row] = value;
       }
 
-      public long getLong( int row ) {
-        return longs[row];
-      }
-
       @Override
 	public boolean isNull( int row ) {
         return longs[row] == 0 && nullIndicators != null && nullIndicators.get( row );
@@ -1296,30 +1287,5 @@ public class SegmentLoader {
       }
     }
 
-    public interface Handler {
-    }
-  }
-
-  private static class BooleanComparator implements Comparator<Object>, Serializable {
-    public static final BooleanComparator INSTANCE = new BooleanComparator();
-
-    private BooleanComparator() {
-      assert Comparable.class.isAssignableFrom( Boolean.class );
-    }
-
-    @Override
-	public int compare( Object o1, Object o2 ) {
-      if ( o1 instanceof Boolean ) {
-        boolean b1 = (Boolean) o1;
-        if ( o2 instanceof Boolean ) {
-          boolean b2 = (Boolean) o2;
-          return b1 == b2 ? 0 : ( b1 ? 1 : -1 );
-        } else {
-          return -1;
-        }
-      } else {
-        return ( (Comparable) o1 ).compareTo( o2 );
-      }
-    }
   }
 }

@@ -41,11 +41,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * An AggStar's version of the {@link QuerySpec}.
+ * An AggStar's version of the the query-spec contract.
  *
  * When/if the {@link AggStar} code is merged into {@link RolapStar}
- * (or RolapStar is merged into AggStar}, then this, indeed, can implement the
- * {@link QuerySpec} interface.
+ * (or RolapStar is merged into AggStar), then this, indeed, can implement the
+ * the query-spec contract interface.
  *
  * @author Richard M. Emberson
  */

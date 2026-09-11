@@ -26,21 +26,25 @@
 
 package org.eclipse.daanse.rolap.common;
 
+import org.eclipse.daanse.olap.api.execution.Statement;
 import static org.eclipse.daanse.rolap.common.util.SqlExpressionResolver.genericSql;
 
 import java.io.PrintWriter;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.UndeclaredThrowableException;
 import java.text.MessageFormat;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.concurrent.Callable;
 
@@ -68,11 +72,13 @@ import org.eclipse.daanse.rolap.common.constraint.ChildByNameConstraint;
 import org.eclipse.daanse.rolap.common.constraint.DefaultMemberChildrenConstraint;
 import org.eclipse.daanse.rolap.common.constraint.DefaultTupleConstraint;
 import org.eclipse.daanse.rolap.common.member.MemberCache;
+import org.eclipse.daanse.olap.api.element.Hierarchy;
 import org.eclipse.daanse.rolap.common.member.MemberReader;
 import org.eclipse.daanse.rolap.common.member.SmartMemberReader;
 import org.eclipse.daanse.rolap.common.sql.MemberChildrenConstraint;
 import org.eclipse.daanse.rolap.common.star.RolapStar;
 import org.eclipse.daanse.rolap.element.RolapCube;
+import org.eclipse.daanse.rolap.element.RolapCubeHierarchy;
 import org.eclipse.daanse.rolap.element.RolapCubeLevel;
 import org.eclipse.daanse.rolap.element.RolapCubeMember;
 import org.eclipse.daanse.rolap.element.RolapHierarchy;
@@ -81,10 +87,22 @@ import org.eclipse.daanse.rolap.element.RolapMemberBase;
 import org.eclipse.daanse.rolap.element.RolapStoredMeasure;
 
 /**
- * Implementation of {@link CacheControl} API.
+ * Implementation of the {@link CacheControl} API.
  *
- * @author jhyde
- * @since Sep 27, 2006
+ * "Flush" means three different things here, by target:
+ * cell regions ({@code flush(CellRegion)}) invalidate the segment
+ * indexes AND wait (bounded by one {@link FlushDeadline} per operation)
+ * on the external stores' removals; member sets
+ * ({@code flush(MemberSet)}) only invalidate in-JVM member and native
+ * tuple caches - no store I/O; {@code flushSchemaCache()} discards the
+ * catalog pool wholesale.
+ *
+ * Lock order around MEMBER_CACHE_LOCK: {@code flush(MemberSet)} drops
+ * the lock BEFORE its cell flush (store waits must not run under it);
+ * {@code execute(MemberEditCommand)} keeps its cell flush INSIDE the
+ * lock deliberately - a flush failure must fail the edit before commit.
+ * Both are bounded by the single per-operation FlushDeadline, created
+ * once the lock is held.
  */
 public class CacheControlImpl implements CacheControl {
     private final Connection connection;
@@ -98,8 +116,8 @@ public class CacheControlImpl implements CacheControl {
      * lock here.
      *
      * NOTE: static member is a little too wide a scope for this lock,
-     * because in theory a JVM can contain multiple independent instances of
-     * mondrian.
+     * because in theory a JVM can contain multiple independent engine
+     * instances.
      */
     private static final Object MEMBER_CACHE_LOCK = new Object();
     private final static String cacheFlushRegionMustContainMembers =
@@ -234,19 +252,54 @@ public class CacheControlImpl implements CacheControl {
         return new MemberCellRegion(measures, false);
     }
 
+    /**
+     * One store-wait budget for a WHOLE flush or member-edit operation.
+     * Previously every store wait (the per-manager flush in
+     * AggregationManager) started a fresh 30s deadline, so a member edit
+     * multiplied the MEMBER_CACHE_LOCK hold time by
+     * regions x cubes x union-parts x 2 managers against a hung store.
+     */
+    public static final class FlushDeadline {
+        private final long deadlineNanos;
+
+        private FlushDeadline(Duration budget) {
+            this.deadlineNanos = System.nanoTime() + budget.toNanos();
+        }
+
+        /** Default budget for one operation. */
+        public static FlushDeadline standard() {
+            return new FlushDeadline(Duration.ofSeconds(30));
+        }
+
+        /** At least one nanosecond, so bounded waits never block forever. */
+        public long remainingNanos() {
+            return Math.max(1L, deadlineNanos - System.nanoTime());
+        }
+    }
+
     @Override
 	public void flush(final CellRegion region) {
         // Create ExecutionImpl for flush operation
-        final org.eclipse.daanse.olap.api.execution.Statement statement = connection.getInternalStatement();
+        final Statement statement = connection.getInternalStatement();
         final ExecutionImpl execution = new ExecutionImpl(statement,
             ExecuteDurationUtil.executeDurationValue(connection.getContext()));
 
         ExecutionContext.where(execution.asContext(), () -> {
-            flushInternal(region);
+            flushInternal(region, FlushDeadline.standard());
         });
     }
 
-    private void flushInternal(CellRegion region) {
+    /** As {@link #flush(CellRegion)}, under a caller-owned budget. */
+    private void flushWithDeadline(final CellRegion region, FlushDeadline deadline) {
+        final Statement statement = connection.getInternalStatement();
+        final ExecutionImpl execution = new ExecutionImpl(statement,
+            ExecuteDurationUtil.executeDurationValue(connection.getContext()));
+        ExecutionContext.where(execution.asContext(), () -> {
+            flushInternal(region, deadline);
+        });
+    }
+
+    private void flushInternal(CellRegion region, FlushDeadline deadline) {
         if (region instanceof EmptyCellRegion) {
             return;
         }
@@ -264,7 +317,7 @@ public class CacheControlImpl implements CacheControl {
         final UnionCellRegion union = normalize((CellRegionImpl) region);
         for (CellRegionImpl cellRegion : union.regions) {
             // Figure out the bits.
-            flushNonUnion(cellRegion);
+            flushNonUnion(cellRegion, deadline);
         }
     }
 
@@ -274,6 +327,12 @@ public class CacheControlImpl implements CacheControl {
      * @param cellRegionList List of cell regions
      */
     protected void flushRegionList(List<CellRegion> cellRegionList) {
+        // ONE budget for the whole list: fresh per-call deadlines
+        // multiplied the wait by the region and cube count
+        flushRegionList(cellRegionList, FlushDeadline.standard());
+    }
+
+    private void flushRegionList(List<CellRegion> cellRegionList, FlushDeadline deadline) {
         final CellRegion cellRegion;
         switch (cellRegionList.size()) {
         case 0:
@@ -289,13 +348,14 @@ public class CacheControlImpl implements CacheControl {
         }
         if (!containsMeasures(cellRegion)) {
             for (RolapCube cube : ((AbstractRolapConnection)connection).getCatalog().getCubeList()) {
-                flush(
+                flushWithDeadline(
                     createCrossjoinRegion(
                         createMeasuresRegion(cube),
-                        cellRegion));
+                        cellRegion),
+                    deadline);
             }
         } else {
-            flush(cellRegion);
+            flushWithDeadline(cellRegion, deadline);
         }
     }
 
@@ -333,7 +393,7 @@ public class CacheControlImpl implements CacheControl {
     }
 
 
-    protected void flushNonUnion(CellRegion region) {
+    protected void flushNonUnion(CellRegion region, FlushDeadline deadline) {
         throw new UnsupportedOperationException();
     }
 
@@ -486,8 +546,11 @@ public class CacheControlImpl implements CacheControl {
                 @Override
 				public void visit(MemberRangeCellRegion region) {
                     if (region.level.getDimension().isMeasures()) {
-                        // FIXME: don't allow range on measures dimension
-                        assert false : "ranges on measures dimension";
+                        // hard throw, not assert: with -da (the production
+                        // default) the assert was a silent pass-through and
+                        // the malformed region flushed nothing predictable
+                        throw new IllegalArgumentException(
+                            "ranges on the measures dimension are not supported");
                     }
                 }
             };
@@ -563,7 +626,24 @@ public class CacheControlImpl implements CacheControl {
                 }
             };
         ((CellRegionImpl) region).accept(visitor);
-        return list.toArray(SegmentColumn[]::new);
+        // A union region visits each part separately; merge same-column
+        // entries into one (value union, wildcard wins), otherwise a
+        // two-part flush on one level intersects with neither part.
+        final Map<String, SegmentColumn> merged = new LinkedHashMap<>();
+        for (SegmentColumn column : list) {
+            merged.merge(column.columnExpression, column, (a, b) -> {
+                if (a.values == null || b.values == null) {
+                    return new SegmentColumn(a.columnExpression, -1, null);
+                }
+                final Set<Comparable> union = new HashSet<>(a.values);
+                union.addAll(b.values);
+                final Comparable[] keys = union.toArray(new Comparable[0]);
+                Arrays.sort(keys, RolapUtil.SqlNullSafeComparator.instance);
+                return new SegmentColumn(
+                    a.columnExpression, -1, new ArraySortedSet(keys));
+            });
+        }
+        return merged.values().toArray(SegmentColumn[]::new);
     }
 
     public static List<RolapStar> getStarList(CellRegion region) {
@@ -594,10 +674,11 @@ public class CacheControlImpl implements CacheControl {
 
 		AbstractBasicContext abc = (AbstractBasicContext) connection.getContext();
         final OlapSegmentCacheManager manager =
-                abc.getAggregationManager().getCacheMgr(this.connection);
+                ((org.eclipse.daanse.rolap.common.agg.AggregationManager) abc
+                        .getAggregationManager()).peekSegmentCacheManager(this.connection);
 
         // Create ExecutionImpl for printCacheState operation
-        final org.eclipse.daanse.olap.api.execution.Statement statement = connection.getInternalStatement();
+        final Statement statement = connection.getInternalStatement();
         final ExecutionImpl execution = new ExecutionImpl(statement,
             ExecuteDurationUtil.executeDurationValue(connection.getContext()));
 
@@ -658,10 +739,8 @@ public class CacheControlImpl implements CacheControl {
     @Override
 	public void flush(MemberSet memberSet) {
         // REVIEW How is flush(s) different to executing createDeleteCommand(s)?
+        final List<CellRegion> cellRegionList = new ArrayList<>();
         synchronized (MEMBER_CACHE_LOCK) {
-            // firstly clear all cache associated with native sets
-            ((AbstractRolapConnection)connection).getCatalog().getNativeRegistry().flushAllNativeSetCache();
-            final List<CellRegion> cellRegionList = new ArrayList<>();
             ((MemberSetPlus) memberSet).accept(
                 new MemberSetVisitorImpl() {
                     @Override
@@ -672,17 +751,16 @@ public class CacheControlImpl implements CacheControl {
            );
             // STUB: flush the set: another visitor
 
-            // finally, flush cells now invalid
-            flushRegionList(cellRegionList);
+            // native tuple lists of the flushed hierarchies are stale now
+            ((AbstractRolapConnection) connection).getCatalog().getNativeRegistry()
+                .flushAllNativeSetCache();
         }
-    }
-
-    @Override
-	public void printCacheState(PrintWriter pw, MemberSet set)
-    {
-        synchronized (MEMBER_CACHE_LOCK) {
-            pw.println("need to implement printCacheState"); // TODO:
-        }
+        // finally, flush cells now invalid - OUTSIDE the member lock: the
+        // cell flush waits on external store futures, and the lock guards
+        // member-cache edits, not store I/O (queries never take it; only
+        // sibling member operations do, and those must not queue behind a
+        // slow or hung store)
+        flushRegionList(cellRegionList);
     }
 
     @Override
@@ -855,7 +933,17 @@ public class CacheControlImpl implements CacheControl {
                 new StringBuilder("Member cache control operations are not allowed unless ")
                 .append("property ").append("daanse.rolap.EnableRolapCubeMemberCache").append(" is false").toString());
         }
+        // The cell flush below runs INSIDE this lock because commit() must
+        // come after it (a flush failure leaves the un-edited, consistent
+        // state behind). The store waits inside the flush share ONE budget
+        // for the whole member edit (regions x cubes x union parts used to
+        // multiply fresh 30s deadlines), so a hung store cannot hold the
+        // member lock beyond it.
         synchronized (MEMBER_CACHE_LOCK) {
+            // started AFTER the lock was won: a long wait for a sibling
+            // edit must not consume the store-wait budget before any store
+            // was asked - the flush then "succeeded" with zero confirmation
+            final FlushDeadline editDeadline = FlushDeadline.standard();
             // Make sure that an ExecutionContext is bound,
             // since some operations might require DB access.
             Execution execution;
@@ -899,7 +987,7 @@ public class CacheControlImpl implements CacheControl {
                                 crossList.add((CellRegionImpl) memberRegion);
                                 final CellRegion crossRegion =
                                     new CrossjoinCellRegion(crossList);
-                                flush(crossRegion);
+                                flushWithDeadline(crossRegion, editDeadline);
                             } catch (UndeclaredThrowableException e) {
                                 if (e.getCause()
                                     instanceof InvocationTargetException ite)
@@ -934,6 +1022,13 @@ public class CacheControlImpl implements CacheControl {
         }
     }
 
+    /**
+     * Null when the hierarchy's reader does not cache (members=off) - and
+     * execute(MemberEditCommand) guarantees exactly that (it throws while
+     * any using cube caches members of the hierarchy), so the edit
+     * commands' cache mutations never run in a legal configuration today.
+     * They survive as the specification of a future members=on edit path.
+     */
     private static MemberCache getMemberCache(RolapMember member) {
         final MemberReader memberReader =
             member.getHierarchy().getMemberReader();
@@ -953,11 +1048,12 @@ public class CacheControlImpl implements CacheControl {
         private final List<Member> memberList;
         private final Dimension dimension;
 
+        // descendants is accepted but not represented: a member cell
+        // region constrains on the listed members only (inherited gap)
         MemberCellRegion(List<Member> memberList, boolean descendants) {
             assert !memberList.isEmpty();
             this.memberList = memberList;
             this.dimension = (memberList.getFirst()).getDimension();
-//            discard(descendants);
         }
 
         @Override
@@ -975,9 +1071,6 @@ public class CacheControlImpl implements CacheControl {
             visitor.visit(this);
         }
 
-        public List<Member> getMemberList() {
-            return memberList;
-        }
     }
 
     /**
@@ -1152,9 +1245,6 @@ public class CacheControlImpl implements CacheControl {
             return Util.commaList("Crossjoin", components);
         }
 
-        public List<CellRegion> getComponents() {
-            return Util.cast(components);
-        }
     }
 
     private static class UnionCellRegion implements CellRegionImpl {
@@ -1265,6 +1355,8 @@ public class CacheControlImpl implements CacheControl {
         void execute(final List<CellRegion> cellRegionList);
 
         void commit();
+
+        /** Adds the shared hierarchies this command touches to {@code out}. */
     }
 
     /**
@@ -1409,6 +1501,10 @@ public class CacheControlImpl implements CacheControl {
             this.members = new ArrayList<>(members);
             stripMemberList(this.members);
             this.descendants = descendants;
+            // NOTE: derived from the UNSTRIPPED parameter members - can be a
+            // RolapCubeHierarchy while this.members are shared; every consumer
+            // re-derives via sharedHierarchy(...), do not trust this field raw
+
             this.hierarchy =
                 members.isEmpty()
                     ? null
@@ -1617,6 +1713,10 @@ public class CacheControlImpl implements CacheControl {
     /**
      * Command consisting of a set of commands executed in sequence.
      */
+    /** Shared hierarchies referenced by a member set, without loading members. */
+
+    /** Members loaded through a cube can report the cube hierarchy; unwrap it. */
+
     private static class CompoundCommand implements MemberEditCommandPlus {
         private final List<MemberEditCommandPlus> commandList;
 
@@ -1642,6 +1742,7 @@ public class CacheControlImpl implements CacheControl {
                 command.commit();
             }
         }
+
     }
 
     /**
@@ -1686,6 +1787,7 @@ public class CacheControlImpl implements CacheControl {
                 throw new OlapRuntimeException(e);
             }
         }
+
     }
 
     /**
@@ -1721,6 +1823,7 @@ public class CacheControlImpl implements CacheControl {
                 throw new OlapRuntimeException(e);
             }
         }
+
     }
 
     /**
@@ -1762,6 +1865,7 @@ public class CacheControlImpl implements CacheControl {
                 throw new OlapRuntimeException(e);
             }
         }
+
     }
 
     /**
@@ -1807,13 +1911,17 @@ public class CacheControlImpl implements CacheControl {
                 // Change member's properties.
                 member = stripMember(member);
                 final MemberCache memberCache = getMemberCache(member);
+                if (memberCache == null) {
+                    continue;
+                }
                 final Object cacheKey =
                     memberCache.makeKey(
                         member.getParentMember(),
                         member.getKey());
                 final RolapMember cacheMember = memberCache.getMember(cacheKey);
                 if (cacheMember == null) {
-                    return;
+                    // this member is not cached; the next one may be
+                    continue;
                 }
                 for (Map.Entry<String, Object> entry
                     : propertyValues.entrySet())
@@ -1822,6 +1930,7 @@ public class CacheControlImpl implements CacheControl {
                 }
             }
         }
+
     }
 
     private static RolapMember stripMember(RolapMember member) {
@@ -1853,6 +1962,9 @@ public class CacheControlImpl implements CacheControl {
             @Override
 			public Boolean call() throws Exception {
                 final MemberCache memberCache = getMemberCache(member);
+                if (memberCache == null) {
+                    return true;
+                }
                 final MemberChildrenConstraint memberConstraint =
                     new ChildByNameConstraint(
                         new IdImpl.NameSegmentImpl(member.getName()));
@@ -1864,20 +1976,25 @@ public class CacheControlImpl implements CacheControl {
                         previousParent,
                         DefaultMemberChildrenConstraint.instance());
                 if (childrenList != null) {
-                    // A list existed before. Let's splice it.
-                    childrenList.remove(member);
+                    // replace, never mutate: readers iterate the cached list
+                    // outside any shared lock
+                    final List<RolapMember> spliced =
+                        new ArrayList<>(childrenList);
+                    spliced.remove(member);
                     memberCache.putChildren(
                         previousParent,
                         DefaultMemberChildrenConstraint.instance(),
-                        childrenList);
+                        spliced);
                 }
 
-                // Now make sure there is no constrained cache entry
-                // for this member's parent.
-                memberCache.putChildren(
-                    previousParent,
-                    memberConstraint,
-                    null);
+                // The old parent's NAMED-children entry may still list the
+                // moved member. putChildren(parent, constraint, null) was a
+                // silent no-op (the cache ignores null lists), and
+                // MemberCache has no named-children removal primitive -
+                // this gap is documented rather than papered over. The
+                // whole command is unreachable in legal configurations
+                // (see getMemberCache), so it records the members=on
+                // specification, not live behavior.
 
                 // Let's update the level members cache.
                 final List<RolapMember> levelMembers =
@@ -1886,14 +2003,16 @@ public class CacheControlImpl implements CacheControl {
                             member.getLevel(),
                             DefaultTupleConstraint.instance());
                 if (levelMembers != null) {
-                    levelMembers.remove(member);
+                    final List<RolapMember> remaining =
+                        new ArrayList<>(levelMembers);
+                    remaining.remove(member);
                     memberCache.putChildren(
                         member.getLevel(),
                         DefaultTupleConstraint.instance(),
-                        childrenList);
+                        remaining);
                 }
 
-                // Remove the member itself. The MemberCacheHelper takes care of
+                // Remove the member itself. The MemberCacheImpl takes care of
                 // removing the member's children as well.
                 final Object key =
                     memberCache.makeKey(previousParent, member.getKey());
@@ -1927,6 +2046,9 @@ public class CacheControlImpl implements CacheControl {
             @Override
 			public Boolean call() throws Exception {
                 final MemberCache memberCache = getMemberCache(member);
+                if (memberCache == null) {
+                    return true;
+                }
                 final MemberChildrenConstraint memberConstraint =
                     new ChildByNameConstraint(
                         new IdImpl.NameSegmentImpl(member.getName()));
@@ -1937,19 +2059,21 @@ public class CacheControlImpl implements CacheControl {
                     memberCache.getChildrenFromCache(
                         parent,
                         DefaultMemberChildrenConstraint.instance());
-                if (childrenList == null) {
-                    // There was no cached list. We can ignore.
-                } else {
+                if (childrenList != null) {
                     // A list existed before. We can save a SQL query.
-                    // Might be immutable. Let's append to it.
-                    if (childrenList.isEmpty()) {
-                        childrenList = new ArrayList<>();
-                    }
-                    childrenList.add(member);
+                    // Replace, never mutate: readers hold the old list.
+                    final List<RolapMember> extended =
+                        new ArrayList<>(childrenList);
+                    extended.add(member);
+                    // under the SAME constraint the list was read with -
+                    // writing the full sibling list under the ChildByName
+                    // constraint poisoned the named-children cache while
+                    // the wildcard entry stayed stale (deleteMember does
+                    // this correctly)
                     memberCache.putChildren(
                         parent,
-                        memberConstraint,
-                        childrenList);
+                        DefaultMemberChildrenConstraint.instance(),
+                        extended);
                 }
 
                 final List<RolapMember> levelMembers =
@@ -1958,13 +2082,14 @@ public class CacheControlImpl implements CacheControl {
                             member.getLevel(),
                             DefaultTupleConstraint.instance());
                 if (levelMembers != null) {
-                    // There was already a cached list.
-                    // Let's append to it.
-                    levelMembers.add(member);
+                    // There was already a cached list. Replace, never mutate.
+                    final List<RolapMember> extended =
+                        new ArrayList<>(levelMembers);
+                    extended.add(member);
                     memberCache.putChildren(
                         member.getLevel(),
                         DefaultTupleConstraint.instance(),
-                        levelMembers);
+                        extended);
                 }
 
                 // Now add the member itself into cache
@@ -1995,4 +2120,5 @@ public class CacheControlImpl implements CacheControl {
         memberCache.removeMember(key);
         cellRegionList.add(createMemberRegion(member, false));
     }
+
 }

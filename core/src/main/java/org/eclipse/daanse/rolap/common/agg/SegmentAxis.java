@@ -26,7 +26,6 @@
 
 package org.eclipse.daanse.rolap.common.agg;
 
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -35,8 +34,8 @@ import java.util.Set;
 import java.util.SortedSet;
 
 import org.eclipse.daanse.olap.common.Util;
-import  org.eclipse.daanse.olap.util.ArraySortedSet;
-import  org.eclipse.daanse.olap.util.Pair;
+import org.eclipse.daanse.olap.util.ArraySortedSet;
+import org.eclipse.daanse.olap.util.Pair;
 import org.eclipse.daanse.rolap.common.star.StarColumnPredicate;
 
 /**
@@ -58,12 +57,10 @@ public class SegmentAxis {
     private final Set<Object> predicateValues;
 
     /**
-     * Map holding the position of each key value.
-     *
-     * TODO: Hold keys in a sorted array, then deduce ordinal by doing
-     * binary search.
+     * Position of each key value; built on first lookup — many axes
+     * (cache-hit conversions among them) are never read.
      */
-    private final Map<Comparable, Integer> mapKeyToOffset;
+    private Map<Comparable, Integer> mapKeyToOffset;
 
     /**
      * Actual key values retrieved.
@@ -87,20 +84,9 @@ public class SegmentAxis {
             predicate instanceof LiteralStarPredicate
             && ((LiteralStarPredicate) predicate).getValue();
         this.predicateValues = predicateValueSet(predicate);
-        if (keys.length == 0) {
-            // Optimize the case where axis is empty. Not that infrequent:
-            // it records that mondrian has looked in the database and found
-            // nothing.
-            this.keys = NO_COMPARABLES;
-            this.mapKeyToOffset = Collections.emptyMap();
-        } else {
-            this.keys = keys;
-            mapKeyToOffset =
-                new HashMap<>(keys.length * 3 / 2);
-            for (int i = 0; i < keys.length; i++) {
-                mapKeyToOffset.put(keys[i], i);
-            }
-        }
+        // an empty axis records that the database was asked and returned
+        // nothing — common enough to shortcut
+        this.keys = keys.length == 0 ? NO_COMPARABLES : keys;
         assert predicate != null;
         assert safe || isSorted(keys);
     }
@@ -201,7 +187,15 @@ public class SegmentAxis {
         if (keys.length == 1) {
             return keys[0].equals(key) ? 0 : -1;
         }
-        Integer ordinal = mapKeyToOffset.get(key);
+        Map<Comparable, Integer> map = mapKeyToOffset;
+        if (map == null) {
+            map = new HashMap<>(keys.length * 3 / 2);
+            for (int i = 0; i < keys.length; i++) {
+                map.put(keys[i], i);
+            }
+            mapKeyToOffset = map;
+        }
+        final Integer ordinal = map.get(key);
         if (ordinal == null) {
             return -1;
         }
@@ -225,21 +219,6 @@ public class SegmentAxis {
                 : predicate.evaluate(key));
     }
 
-    /**
-     * Returns how many of this SegmentAxis's keys match a given constraint.
-     *
-     * @param predicate Predicate
-     * @return How many keys match constraint
-     */
-    public int getMatchCount(StarColumnPredicate predicate) {
-        int matchCount = 0;
-        for (Object key : keys) {
-            if (predicate.evaluate(key)) {
-                ++matchCount;
-            }
-        }
-        return matchCount;
-    }
 
     @SuppressWarnings({"unchecked"})
     public Pair<SortedSet<Comparable>, Boolean> getValuesAndIndicator() {

@@ -43,10 +43,6 @@ public class RolapSqlExpression implements org.eclipse.daanse.olap.api.sql.SqlEx
         return sqls;
     }
 
-    public void setSqls(List<org.eclipse.daanse.olap.api.SqlStatement> sqls) {
-        this.sqls = sqls;
-    }
-
     @Override
     public SortingDirection getSortingDirection() {
         return sortingDirection;

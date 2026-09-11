@@ -28,9 +28,10 @@
 
 package org.eclipse.daanse.rolap.common.star;
 
-import static org.eclipse.daanse.rolap.common.util.SqlExpressionResolver.genericSql;
-
+import java.util.Objects;
+import java.util.Optional;
 import org.eclipse.daanse.rolap.common.util.SqlExpressionResolver;
+
 import static org.eclipse.daanse.rolap.common.util.JoinUtil.getLeftAlias;
 import static org.eclipse.daanse.rolap.common.util.JoinUtil.getRightAlias;
 import static org.eclipse.daanse.rolap.common.util.JoinUtil.left;
@@ -39,46 +40,37 @@ import static org.eclipse.daanse.rolap.common.util.JoinUtil.right;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.lang.ref.SoftReference;
-import java.sql.Connection;
-import java.sql.DatabaseMetaData;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.LinkedList;
 import java.util.List;
-import java.util.ListIterator;
 import java.util.Map;
-import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
 
 import javax.sql.DataSource;
 
+import org.eclipse.daanse.rolap.mapping.model.database.source.InlineTableSource;
+import org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource;
+import org.eclipse.daanse.rolap.mapping.model.database.source.SqlSelectSource;
+import org.eclipse.daanse.rolap.mapping.model.database.source.TableSource;
 import org.eclipse.daanse.sql.dialect.api.Dialect;
 import org.eclipse.daanse.sql.model.type.BestFitColumnType;
 import org.eclipse.daanse.sql.model.type.Datatype;
 import org.eclipse.daanse.olap.api.Context;
 import org.eclipse.daanse.olap.api.aggregator.Aggregator;
-import org.eclipse.daanse.olap.api.cache.OlapSegmentCacheManager;
 import org.eclipse.daanse.olap.api.element.Member;
 import org.eclipse.daanse.olap.api.exception.OlapRuntimeException;
-import org.eclipse.daanse.olap.api.execution.ExecutionContext;
 import org.eclipse.daanse.olap.api.sql.SqlExpression;
 import org.eclipse.daanse.olap.common.Util;
-import org.eclipse.daanse.olap.core.AbstractBasicContext;
 import org.eclipse.daanse.olap.element.PropertyBase;
 import org.eclipse.daanse.olap.key.BitKey;
+import org.eclipse.daanse.olap.spi.SegmentIdentity;
 import org.eclipse.daanse.rolap.common.RolapAggregationManager;
 import org.eclipse.daanse.rolap.common.RolapStatisticsCache;
 import org.eclipse.daanse.rolap.common.Utils;
-import org.eclipse.daanse.rolap.common.agg.Aggregation;
-import org.eclipse.daanse.rolap.common.agg.AggregationKey;
-import org.eclipse.daanse.rolap.common.agg.AggregationManager;
 import org.eclipse.daanse.rolap.common.agg.CellRequest;
-import org.eclipse.daanse.rolap.common.agg.SegmentCacheManager;
 import org.eclipse.daanse.rolap.common.agg.SegmentWithData;
 import org.eclipse.daanse.rolap.common.aggmatcher.AggStar;
 import org.eclipse.daanse.rolap.common.sql.QueryRecorder;
@@ -92,11 +84,9 @@ import org.eclipse.daanse.rolap.element.RolapLevel;
 import org.eclipse.daanse.rolap.element.RolapProperty;
 import org.eclipse.daanse.rolap.element.RolapStoredMeasure;
 import org.eclipse.daanse.rolap.mapping.model.database.source.JoinSource;
-import org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.eclipse.daanse.rolap.mapping.model.database.source.SourceFactory;
 import org.eclipse.daanse.rolap.mapping.model.database.source.SourceFactory;
 /**
  * A RolapStar is a star schema. It is the means to read cell
@@ -130,22 +120,19 @@ public class RolapStar {
 
 
     /**
-     * If true, then database aggregation information is cached, otherwise
-     * it is flushed after each query.
- */
-    private boolean cacheAggregations;
-
-    /**
      * Partially ordered list of AggStars associated with this RolapStar's fact
      * table.
  */
-    private final List<AggStar> aggStars = new LinkedList<>();
+    // copy-on-write: the agg loader replaces the list wholesale, queries
+    // iterate a stable snapshot
+    private volatile List<AggStar> aggStars = List.of();
 
 
     // temporary model, should eventually use RolapStar.Table and
-    // RolapStar.Column
-    private StarNetworkNode factNode;
-    private Map<String, StarNetworkNode> nodeLookup =
+    // RolapStar.Column. Alias memory of getUniqueRelation: written only
+    // during the single-threaded catalog build (RolapCubeHierarchy ctors)
+    private final StarNetworkNode factNode;
+    private final Map<String, StarNetworkNode> nodeLookup =
         new HashMap<>();
 
     private final RolapStatisticsCache statisticsCache;
@@ -160,9 +147,8 @@ public class RolapStar {
     protected RolapStar(
         final RolapCatalog catalog,
         final Context context,
-        final org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource fact)
+        final RelationalSource fact)
     {
-        this.cacheAggregations = true;
         this.catalog = catalog;
         this.context = context;
         this.factTable = new RolapStar.Table(this, fact, null, null);
@@ -185,43 +171,36 @@ public class RolapStar {
      * Returns {@link org.eclipse.daanse.olap.api.result.NullValue#INSTANCE}
      * if a segment contains the cell and the cell's value is null.
      *
-     * If pinSet is not null, pins the segment that holds it
-     * into the local cache. pinSet ensures that a segment is
-     * only pinned once.
      *
      * @param request Cell request
      *
-     * @param pinSet Set into which to pin the segment; or null
      *
      * @return Cell value, or
      * {@link org.eclipse.daanse.olap.api.result.NullValue#INSTANCE} if the
      * cell value is null, or null if the cell is not in any segment in the
      * local cache.
  */
-    public Object getCellFromCache(
-        CellRequest request,
-        RolapAggregationManager.PinSet pinSet)
-    {
-        // REVIEW: Is it possible to optimize this so not every cell lookup
-        // causes an AggregationKey to be created?
-        AggregationKey aggregationKey = new AggregationKey(request);
-
-        final Bar bar = localBars.get();
-        for (SegmentWithData segment : Util.GcIterator.over(bar.segmentRefs)) {
-            if (!segment.getConstrainedColumnsBitKey().equals(
-                    request.getConstrainedColumnsBitKey()))
-            {
-                continue;
-            }
-
-            if (!segment.matches(aggregationKey, request.getMeasure())) {
+    public Object getCellFromCache(CellRequest request) {
+        final Bar bar = bar();
+        final List<SoftReference<SegmentWithData>> refs =
+            bar.segmentRefs.get(request.getConstrainedColumnsBitKey());
+        if (refs == null) {
+            return null;
+        }
+        final SegmentIdentity identity = request.segmentIdentity();
+        for (SegmentWithData segment : Util.GcIterator.over(refs)) {
+            if (!segment.matches(identity, request.getMeasure())) {
                 continue;
             }
 
             Object o = segment.getCellValue(request.getSingleValues());
             if (o != null) {
-                if (pinSet != null) {
-                    ((AggregationManager.PinSetImpl) pinSet).add(segment);
+                // per-cell: only at TRACE, the finest audit dial
+                if (BitKeyExplain.EXPLAIN.isTraceEnabled()) {
+                    BitKeyExplain.EXPLAIN.trace(
+                        "working store hit {} from segment {}",
+                        BitKeyExplain.explain(request.getMappedCellValues()),
+                        BitKeyExplain.explain(segment.getHeader()));
                 }
                 return o;
             }
@@ -230,39 +209,77 @@ public class RolapStar {
         return null;
     }
 
-    public Object getCellFromAllCaches(final CellRequest request, org.eclipse.daanse.olap.api.connection.Connection rolapConnection) {
-        // First, try the local/thread cache.
-        Object result = getCellFromCache(request, null);
-        if (result != null) {
-            return result;
+    /** This thread's working store; emptied when the cache generation moved. */
+    private Bar bar() {
+        final Bar bar = localBars.get();
+        final long generation = cacheGeneration;
+        if (bar.generation != generation) {
+            bar.segmentRefs.clear();
+            bar.generation = generation;
         }
-        // Now ask the segment cache manager.
-        return getCellFromExternalCache(request, rolapConnection);
+        return bar;
     }
 
-    private Object getCellFromExternalCache(CellRequest request, org.eclipse.daanse.olap.api.connection.Connection rolapConnection) {
-    	AbstractBasicContext abc = (AbstractBasicContext) ExecutionContext.current().getExecution().getDaanseStatement().getDaanseConnection().getContext();
-    	final OlapSegmentCacheManager segmentCacheManager = abc.getAggregationManager()
-                .getCacheMgr(rolapConnection);
-        final SegmentWithData segment = ((SegmentCacheManager)segmentCacheManager).peek(request);
-        if (segment == null) {
-            return null;
-        }
-        return segment.getCellValue(request.getSingleValues());
+    /** Invalidates every thread's working store on its next access. */
+    public void invalidateWorkingStores() {
+        cacheGeneration++;
     }
 
+    /** Empties only the calling thread's working store (per-query hygiene). */
+    public void clearWorkingStore() {
+        localBars.remove();
+    }
+
+    /**
+     * Whether this star caches aggregates. One star can back several cubes; a
+     * single cube that declares cache=false turns caching off for all of them.
+     * The per-cube cache policy replaces this flag in a later step.
+     */
+    private boolean cacheAggregations = true;
+
+    public void setCacheAggregations(boolean cacheAggregations) {
+        // only ever changes from true to false
+        this.cacheAggregations = cacheAggregations;
+        clearCachedAggregations(false);
+    }
+
+    public boolean isCacheAggregations() {
+        return this.cacheAggregations;
+    }
+
+    boolean isCacheDisabled() {
+        return context.getConfig().disableCaching();
+    }
+
+    /**
+     * Empties the calling thread's working store when caching is off.
+     *
+     * @param forced clears regardless of the caching settings
+     */
+    public void clearCachedAggregations(boolean forced) {
+        if (forced || !cacheAggregations || isCacheDisabled()) {
+            LOGGER.debug("RolapStar.clearCachedAggregations: catalog={}, star={}", catalog.getName(),
+                    getFactTable().getAlias());
+            clearWorkingStore();
+        }
+    }
+
+    /** Registers a converted segment in this thread's working store. */
     public void register(SegmentWithData segment) {
-        localBars.get().segmentRefs.add(
-            new SoftReference<>(segment));
+        final List<SoftReference<SegmentWithData>> refs = bar().segmentRefs
+            .computeIfAbsent(segment.getConstrainedColumnsBitKey(), k -> new ArrayList<>());
+        for (SoftReference<SegmentWithData> ref : refs) {
+            if (ref.get() == segment) {
+                return;
+            }
+        }
+        refs.add(new SoftReference<>(segment));
     }
 
     public RolapStatisticsCache getStatisticsCache() {
         return statisticsCache;
     }
 
-    public void remove() {
-        localBars.remove();
-    }
     /**
      * DEBUG-PRINT SHIM: renders a plain-column {@code expression} to its quoted string. Producers
      * building executable SQL must use the node channel ({@code JoinPlanner.expressionFor}) —
@@ -284,37 +301,35 @@ public class RolapStar {
     }
 
     /**
-     * Temporary. Contains the local cache for a particular thread. Because
-     * it is accessed via a thread-local, the data structures can be accessed
-     * without acquiring locks.
-     *
+     * The query working store of one thread: converted segments, grouped by
+     * their constrained-columns bit key. Thread-local, so no locks; cleared
+     * around every query execution and when the cache generation moves.
  */
     public static class Bar {
-        /** Holds all thread-local aggregations of this star. */
-
-
-        // Accessed only through the thread-local localBars, so there is no
-        // concurrency and a plain HashMap suffices. It also gives equals-based
-        // lookup: Caffeine weakKeys() compared keys by identity, and because a
-        // fresh AggregationKey is built per batch (BatchLoader), lookups missed
-        // and the aggregation reuse this cache exists for never happened.
-        private final Map<AggregationKey, Aggregation> aggregations = new HashMap<>();
-
-        private final List<SoftReference<SegmentWithData>> segmentRefs =
-            new ArrayList<>();
+        private long generation;
+        private final Map<BitKey, List<SoftReference<SegmentWithData>>> segmentRefs =
+            new HashMap<>();
     }
 
     private final ThreadLocal<Bar> localBars = ThreadLocal.withInitial(Bar::new);
 
+    /**
+     * Bumped by the cache manager actor whenever the shared index drops or
+     * replaces a header of this star (flush, external delete). Single
+     * writer; working stores compare and discard, so a running query stops
+     * serving flushed segments.
+     */
+    private volatile long cacheGeneration;
+
     private static class StarNetworkNode {
         private StarNetworkNode parent;
-        private org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource origRel;
+        private RelationalSource origRel;
         private String foreignKey;
         private String joinKey;
 
         private StarNetworkNode(
             StarNetworkNode parent,
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource origRel,
+            RelationalSource origRel,
             String foreignKey,
             String joinKey)
         {
@@ -326,7 +341,7 @@ public class RolapStar {
 
         private boolean isCompatible(
             StarNetworkNode compatibleParent,
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource rel,
+            RelationalSource rel,
             String compatibleForeignKey,
             String compatibleJoinKey)
         {
@@ -337,25 +352,25 @@ public class RolapStar {
         }
     }
 
-    protected org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource cloneRelation(
-        org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource rel,
+    protected RelationalSource cloneRelation(
+        RelationalSource rel,
         String possibleName)
     {
-        if (rel instanceof org.eclipse.daanse.rolap.mapping.model.database.source.TableSource tbl) {
+        if (rel instanceof TableSource tbl) {
         	String aliasOrName = tbl.getAlias() == null ? tbl.getTable().getName() : tbl.getAlias();
-        	org.eclipse.daanse.rolap.mapping.model.database.source.TableSource q = SourceFactory.eINSTANCE.createTableSource();
+        	TableSource q = SourceFactory.eINSTANCE.createTableSource();
         	q.setAlias(possibleName);
         	q.setTable(PojoUtil.getPhysicalTable(tbl.getTable()));
         	q.getOptimizationHints().addAll(tableQueryOptimizationHints(tbl.getOptimizationHints()));
         	q.setSqlWhereExpression(sql(tbl.getSqlWhereExpression(), possibleName, aliasOrName));
         	return q;
-        } else if (rel instanceof org.eclipse.daanse.rolap.mapping.model.database.source.SqlSelectSource view) {
-        	org.eclipse.daanse.rolap.mapping.model.database.source.SqlSelectSource sqlSelectQuery = SourceFactory.eINSTANCE.createSqlSelectSource();
+        } else if (rel instanceof SqlSelectSource view) {
+        	SqlSelectSource sqlSelectQuery = SourceFactory.eINSTANCE.createSqlSelectSource();
         	sqlSelectQuery.setAlias(possibleName);
         	sqlSelectQuery.setSql(view.getSql());
             return sqlSelectQuery;
-        } else if (rel instanceof org.eclipse.daanse.rolap.mapping.model.database.source.InlineTableSource inlineTable) {
-        	org.eclipse.daanse.rolap.mapping.model.database.source.InlineTableSource inlineTableQuery = SourceFactory.eINSTANCE.createInlineTableSource();
+        } else if (rel instanceof InlineTableSource inlineTable) {
+        	InlineTableSource inlineTableQuery = SourceFactory.eINSTANCE.createInlineTableSource();
         	inlineTableQuery.setAlias(possibleName);
         	inlineTableQuery.setTable(PojoUtil.getInlineTable(inlineTable.getTable()));
             return inlineTableQuery;
@@ -386,19 +401,6 @@ public class RolapStar {
             return List.of();
     }
 
-    protected org.eclipse.daanse.rolap.mapping.model.database.source.TableQueryOptimizationHint tableQueryOptimizationHint(
-    		org.eclipse.daanse.rolap.mapping.model.database.source.TableQueryOptimizationHint tableQueryOptimizationHint
-        ) {
-            if (tableQueryOptimizationHint != null) {
-                String value = tableQueryOptimizationHint.getValue();
-                String type = tableQueryOptimizationHint.getType();
-                org.eclipse.daanse.rolap.mapping.model.database.source.TableQueryOptimizationHint tableQueryOptimizationHintr = SourceFactory.eINSTANCE.createTableQueryOptimizationHint();
-                tableQueryOptimizationHintr.setValue(value);
-                tableQueryOptimizationHintr.setType(type);
-                return tableQueryOptimizationHintr;
-            }
-            return null;
-        }
 	/**
      * Generates a unique relational join to the fact table via re-aliasing
      * Relations
@@ -413,8 +415,8 @@ public class RolapStar {
      * @param primaryKeyTable the join table of the relation
      * @return if necessary a new relation that has been re-aliased
  */
-    public org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource getUniqueRelation(
-        org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource rel,
+    public RelationalSource getUniqueRelation(
+        RelationalSource rel,
         String factForeignKey,
         String primaryKey,
         String primaryKeyTable)
@@ -423,9 +425,9 @@ public class RolapStar {
             factNode, rel, factForeignKey, primaryKey, primaryKeyTable);
     }
 
-    private org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource getUniqueRelation(
+    private RelationalSource getUniqueRelation(
         StarNetworkNode parent,
-        org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relOrJoin,
+        RelationalSource relOrJoin,
         String foreignKey,
         String joinKey,
         String joinKeyTable)
@@ -433,7 +435,7 @@ public class RolapStar {
         if (relOrJoin == null) {
             return null;
         } else if (!(relOrJoin instanceof org.eclipse.daanse.rolap.mapping.model.database.source.JoinSource)
-                   && relOrJoin instanceof org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource rel) {
+                   && relOrJoin instanceof RelationalSource rel) {
             int val = 0;
             String newAlias =
                 joinKeyTable != null ? joinKeyTable : RelationUtil.getAlias(rel);
@@ -441,7 +443,7 @@ public class RolapStar {
                 StarNetworkNode node = nodeLookup.get(newAlias);
                 if (node == null) {
                     if (val != 0) {
-                        rel = (org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource)
+                        rel = (RelationalSource)
                             cloneRelation(rel, newAlias);
                     }
                     node =
@@ -460,8 +462,8 @@ public class RolapStar {
             if (left(join) instanceof org.eclipse.daanse.rolap.mapping.model.database.source.JoinSource) {
                 throw new OlapRuntimeException(illegalLeftDeepJoin);
             }
-            final org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource left;
-            final org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource right;
+            final RelationalSource left;
+            final RelationalSource right;
             if (getLeftAlias(join).equals(joinKeyTable)) {
                 // first manage left then right
                 left =
@@ -469,7 +471,7 @@ public class RolapStar {
                         parent, left(join), foreignKey,
                         joinKey, joinKeyTable);
                 parent = nodeLookup.get(
-                    RelationUtil.getAlias(((org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource) left)));
+                    RelationUtil.getAlias(((RelationalSource) left)));
                 right =
                     getUniqueRelation(
                         parent, right(join), join.getLeft().getKey() != null ? join.getLeft().getKey().getName() : null,
@@ -481,7 +483,7 @@ public class RolapStar {
                         parent, right(join), foreignKey,
                         joinKey, joinKeyTable);
                 parent = nodeLookup.get(
-                    RelationUtil.getAlias(((org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource) right)));
+                    RelationUtil.getAlias(((RelationalSource) right)));
                 left =
                     getUniqueRelation(
                         parent, left(join), join.getRight().getKey() != null ? join.getRight().getKey().getName() : null,
@@ -495,12 +497,12 @@ public class RolapStar {
                 org.eclipse.daanse.rolap.mapping.model.database.source.JoinSource joinNew = SourceFactory.eINSTANCE.createJoinSource();
 
                 org.eclipse.daanse.rolap.mapping.model.database.source.JoinedQueryElement leftElement = SourceFactory.eINSTANCE.createJoinedQueryElement();
-                leftElement.setAlias(left instanceof org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation ? RelationUtil.getAlias(relation) : null);
+                leftElement.setAlias(left instanceof RelationalSource relation ? RelationUtil.getAlias(relation) : null);
                 leftElement.setKey(PojoUtil.getColumn(join.getLeft().getKey()));
                 leftElement.setSource(PojoUtil.copy(left));
 
                 org.eclipse.daanse.rolap.mapping.model.database.source.JoinedQueryElement rightElement = SourceFactory.eINSTANCE.createJoinedQueryElement();
-                rightElement.setAlias(right instanceof org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation ? RelationUtil.getAlias(relation) : null);
+                rightElement.setAlias(right instanceof RelationalSource relation ? RelationUtil.getAlias(relation) : null);
                 rightElement.setKey(PojoUtil.getColumn(join.getRight().getKey()));
                 rightElement.setSource(PojoUtil.copy(right));
                 
@@ -535,7 +537,7 @@ public class RolapStar {
      * i.e., this star has some aggstars, then those aggstars are cleared.
  */
     public void prepareToLoadAggregates() {
-        aggStars.clear();
+        aggStars = List.of();
     }
 
     /**
@@ -549,42 +551,21 @@ public class RolapStar {
         // Add it before the first AggStar which is larger, if there is one.
         boolean chooseAggregateByVolume = catalog.getInternalConnection().getContext().getConfig().chooseAggregateByVolume();
         long size = aggStar.getSize(chooseAggregateByVolume);
-        ListIterator<AggStar> lit = aggStars.listIterator();
-        while (lit.hasNext()) {
-            AggStar as = lit.next();
-            if (as.getSize(chooseAggregateByVolume) >= size) {
-                lit.previous();
-                lit.add(aggStar);
-                return;
+        List<AggStar> next = new ArrayList<>(aggStars);
+        int position = next.size();
+        for (int i = 0; i < next.size(); i++) {
+            if (next.get(i).getSize(chooseAggregateByVolume) >= size) {
+                position = i;
+                break;
             }
         }
-
-        // There is no larger star. Add at the end of the list.
-        aggStars.add(aggStar);
-    }
-
-    /**
-     * Clears the list of agg stars.
- */
-    void clearAggStarList() {
-        aggStars.clear();
-    }
-
-    /**
-     * Reorder the list of aggregate stars. This should be called if the
-     * algorithm used to order the AggStars has been changed.
- */
-    public void reOrderAggStarList() {
-        List<AggStar> oldList = new ArrayList<>(aggStars);
-        aggStars.clear();
-        for (AggStar aggStar : oldList) {
-            addAggStar(aggStar);
-        }
+        next.add(position, aggStar);
+        aggStars = List.copyOf(next);
     }
 
     /**
      * Returns this RolapStar's aggregate table AggStars, ordered in ascending
-     * order of size.
+     * order of size. The list is an immutable snapshot.
  */
     public List<AggStar> getAggStars() {
         return aggStars;
@@ -615,97 +596,6 @@ public class RolapStar {
         return context.getDialect();
     }
 
-    /**
-     * Sets whether to cache database aggregation information; if false, cache
-     * is flushed after each query.
-     *
-     * This method is called only by the RolapCube and is only called if
-     * caching is to be turned off. Note that the same RolapStar can be
-     * associated with more than on RolapCube. If any one of those cubes has
-     * caching turned off, then caching is turned off for all of them.
-     *
-     * @param cacheAggregations Whether to cache database aggregation
- */
-    public void setCacheAggregations(boolean cacheAggregations) {
-        // this can only change from true to false
-        this.cacheAggregations = cacheAggregations;
-        clearCachedAggregations(false);
-    }
-
-    /**
-     * Returns whether the this RolapStar cache aggregates.
-     *
-     * @see #setCacheAggregations(boolean)
- */
-    public boolean isCacheAggregations() {
-        return this.cacheAggregations;
-    }
-
-    boolean isCacheDisabled() {
-        return context.getConfig().disableCaching();
-    }
-
-    /**
-     * Clears the aggregate cache. This only does something if aggregate caching
-     * is disabled (see {@link #setCacheAggregations(boolean)}).
-     *
-     * @param forced If true, clears cached aggregations regardless of any other
-     *   settings.  If false, clears only cache from the current thread
- */
-    public void clearCachedAggregations(boolean forced) {
-        if (forced || !cacheAggregations || isCacheDisabled()) {
-            if (LOGGER.isDebugEnabled()) {
-                StringBuilder buf = new StringBuilder(100);
-                buf.append("RolapStar.clearCachedAggregations: schema=");
-                buf.append(catalog.getName());
-                buf.append(", star=");
-                buf.append(getFactTable().getAlias());
-                LOGGER.debug(buf.toString());
-            }
-
-            // Clear aggregation cache for the current thread context.
-            localBars.get().aggregations.clear();
-            localBars.get().segmentRefs.clear();
-        }
-    }
-
-    /**
-     * Looks up an aggregation or creates one if it does not exist in an
-     * atomic (synchronized) operation.
-     *
-     * When a new aggregation is created, it is marked as thread local.
-     *
-     * @param aggregationKey this is the constrained column bitkey
- */
-    public Aggregation lookupOrCreateAggregation(
-        AggregationKey aggregationKey)
-    {
-        Aggregation aggregation = lookupSegment(aggregationKey);
-        if (aggregation != null) {
-            return aggregation;
-        }
-
-        aggregation =
-            new Aggregation(
-                aggregationKey, context.getConfig().maxConstraints());
-
-        localBars.get().aggregations.put(
-            aggregationKey, aggregation);
-
-
-        return aggregation;
-    }
-
-    /**
-     * Looks for an existing aggregation over a given set of columns, in the
-     * local segment cache, returning null if there is none.
-     *
-     * Must be called from synchronized context.
-     *
- */
-    public Aggregation lookupSegment(AggregationKey aggregationKey) {
-        return localBars.get().aggregations.get(aggregationKey);
-    }
 
 
 
@@ -908,6 +798,7 @@ public class RolapStar {
 
         /** this has a unique value per star */
         private final int bitPosition;
+        private String genericSqlCache;
         /**
          * The estimated cardinality of the column.
          * {@link Integer#MIN_VALUE} means unknown.
@@ -942,7 +833,7 @@ public class RolapStar {
             this.table = table;
             this.expression = expression;
             assert expression == null
-                || genericSql(expression) != null;
+                || SqlExpressionResolver.genericSql(expression) != null;
             this.datatype = datatype;
             this.internalType = internalType;
             this.bitPosition = bitPosition;
@@ -984,16 +875,17 @@ public class RolapStar {
                 return false;
             }
             // Note: both columns have to be from the same table
+            // name may be null (fake columns)
             return
                 other.table == this.table
                 && Objects.equals(other.expression, this.expression)
                 && other.datatype == this.datatype
-                && other.name.equals(this.name);
+                && Objects.equals(other.name, this.name);
         }
 
         @Override
 		public int hashCode() {
-            int h = name.hashCode();
+            int h = Objects.hashCode(name);
             h = Util.hash(h, table);
             return h;
         }
@@ -1033,6 +925,16 @@ public class RolapStar {
 
         public SqlExpression getExpression() {
             return expression;
+        }
+
+        /** Generic SQL of this column's expression; constant, computed once. */
+        public String genericSql() {
+            String sql = genericSqlCache;
+            if (sql == null && expression != null) {
+                sql = SqlExpressionResolver.genericSql(expression);
+                genericSqlCache = sql;
+            }
+            return sql;
         }
 
         /**
@@ -1182,7 +1084,7 @@ public class RolapStar {
  */
     public static class Table {
         private final RolapStar star;
-        private final org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation;
+        private final RelationalSource relation;
         private final List<Column> columnList;
         private final Table parent;
         private List<Table> children;
@@ -1191,7 +1093,7 @@ public class RolapStar {
 
         private Table(
             RolapStar star,
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation,
+            RelationalSource relation,
             Table parent,
             Condition joinCondition)
         {
@@ -1256,7 +1158,7 @@ public class RolapStar {
             List<Column> l = new ArrayList<>();
             for (Column column : getColumns()) {
                 if (column.getExpression() instanceof org.eclipse.daanse.rolap.element.RolapColumn columnExpr) {
-                    if (java.util.Objects.equals(columnExpr.getName(), columnName)) {
+                    if (Objects.equals(columnExpr.getName(), columnName)) {
                         l.add(column);
                     }
                 } else if (column.getExpression() != null && column.getExpression().toString().equals(columnName))
@@ -1270,7 +1172,7 @@ public class RolapStar {
         public Column lookupColumn(String columnName) {
             for (Column column : getColumns()) {
                 if (column.getExpression() instanceof org.eclipse.daanse.rolap.element.RolapColumn columnExpr) {
-                    if (java.util.Objects.equals(columnExpr.getName(), columnName)) {
+                    if (Objects.equals(columnExpr.getName(), columnName)) {
                         return column;
                     }
                 } else if (column.getExpression() != null)
@@ -1278,7 +1180,7 @@ public class RolapStar {
                     if (column.getExpression().toString().equals(columnName)) {
                         return column;
                     }
-                } else if (java.util.Objects.equals(column.getName(), columnName)) {
+                } else if (Objects.equals(column.getName(), columnName)) {
                     return column;
                 }
             }
@@ -1313,28 +1215,35 @@ public class RolapStar {
             return null;
         }
 
-        public boolean containsColumn(Column column) {
-            return getColumns().contains(column);
-        }
-
         /**
          * Look up a {@link Measure} by its name.
          * Returns null if not found.
  */
         public Measure lookupMeasureByName(String cubeName, String name) {
+            // called per converted header: positive hits are memoized;
+            // misses are not (a measure may still be added during build)
+            String key = cubeName + '\u0000' + name;
+            Measure cached = measuresByName.get(key);
+            if (cached != null) {
+                return cached;
+            }
             for (Column column : getColumns()) {
                 if (column instanceof Measure measure && measure.getName().equals(name)
                         && measure.getCubeName().equals(cubeName)) {
+                        measuresByName.putIfAbsent(key, measure);
                         return measure;
                 }
             }
             return null;
         }
 
+        private final java.util.concurrent.ConcurrentHashMap<String, Measure> measuresByName =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
         public RolapStar getStar() {
             return star;
         }
-        public org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource getRelation() {
+        public RelationalSource getRelation() {
             return relation;
         }
 
@@ -1361,7 +1270,7 @@ public class RolapStar {
          * been given an alias.
  */
         public String getTableName() {
-            if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.TableSource t) {
+            if (relation instanceof TableSource t) {
                 return t.getTable().getName();
             } else {
                 return null;
@@ -1369,15 +1278,33 @@ public class RolapStar {
         }
 
         public org.eclipse.daanse.cwm.model.cwm.resource.relational.NamedColumnSet getTable() {
-            if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.TableSource t) {
+            if (relation instanceof TableSource t) {
                 return t.getTable();
             } else {
                 return null;
             }
         }
 
-        public synchronized void makeMeasure(RolapBaseCubeMeasure measure) {
-            // Remove assertion to allow cube to be recreated
+        public void makeMeasure(RolapBaseCubeMeasure measure) {
+          // the lock lives on the STAR: this mutates star-wide state (the
+          // bit-position counter and the column list), and two tables of one
+          // star would otherwise be different monitors
+          synchronized (star) {
+            // look up an equal measure before constructing one: the Column
+            // constructor draws a bit position, which must stay unique; a
+            // recreated cube maps to the existing star measure.
+            for (Column column : getColumns()) {
+                if (column instanceof Measure existing
+                        && existing.getTable() == this
+                        && Objects.equals(existing.getExpression(), measure.getDaanseDefExpression())
+                        && existing.getDatatype() == measure.getDatatype()
+                        && existing.getName().equals(measure.getName())
+                        && existing.getCubeName().equals(measure.getCube().getName())
+                        && existing.getAggregator() == measure.getAggregator()) {
+                    measure.setStarMeasure(existing); // reverse mapping
+                    return;
+                }
+            }
             RolapStar.Measure starMeasure = new RolapStar.Measure(
                 measure.getName(),
                 measure.getCube().getName(),
@@ -1385,22 +1312,9 @@ public class RolapStar {
                 this,
                 measure.getDaanseDefExpression(),
                 measure.getDatatype());
-
             measure.setStarMeasure(starMeasure); // reverse mapping
-
-            if (containsColumn(starMeasure)) {
-                decrementColumnCount();
-            } else {
-                addColumn(starMeasure);
-            }
-        }
-
-        /**
-         * Decrements the column counter; used if a newly
-         * created column is found to already exist.
- */
-        private int decrementColumnCount() {
-            return star.columnCount--;
+            addColumn(starMeasure);
+          }
         }
 
         /**
@@ -1413,7 +1327,19 @@ public class RolapStar {
          * @param level Level
          * @param parentColumn Parent column
  */
-        public synchronized Column makeColumns(
+        public Column makeColumns(
+            RolapCube cube,
+            RolapCubeLevel level,
+            Column parentColumn,
+            String usagePrefix)
+        {
+          // star-wide state, same lock as makeMeasure
+          synchronized (star) {
+            return makeColumnsLocked(cube, level, parentColumn, usagePrefix);
+          }
+        }
+
+        private Column makeColumnsLocked(
             RolapCube cube,
             RolapCubeLevel level,
             Column parentColumn,
@@ -1656,7 +1582,7 @@ public class RolapStar {
  */
         public synchronized Table addJoin(
             RolapCube cube,
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relationOrJoin,
+            RelationalSource relationOrJoin,
             RolapStar.Condition joinCondition)
         {
             if (relationOrJoin instanceof org.eclipse.daanse.rolap.mapping.model.database.source.JoinSource join) {
@@ -1665,7 +1591,7 @@ public class RolapStar {
                 String leftAlias = getLeftAlias(join);
                 if (leftAlias == null) {
                     // REVIEW: is cast to Relation valid?
-                    leftAlias = RelationUtil.getAlias(((org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource) left(join)));
+                    leftAlias = RelationUtil.getAlias(((RelationalSource) left(join)));
                     if (leftAlias == null) {
                         throw Util.newError(
                             "missing leftKeyAlias in " + relationOrJoin);
@@ -1683,11 +1609,11 @@ public class RolapStar {
                     if (right(join) instanceof org.eclipse.daanse.rolap.mapping.model.database.source.JoinSource joinright) {
                         // REVIEW: is cast to Relation valid?
                         rightAlias =
-                            RelationUtil.getAlias(((org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource) left(joinright)));
+                            RelationUtil.getAlias(((RelationalSource) left(joinright)));
                     } else {
                         // REVIEW: is cast to Relation valid?
                         rightAlias =
-                            RelationUtil.getAlias(((org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource) right(join)));
+                            RelationUtil.getAlias(((RelationalSource) right(join)));
                     }
                     if (rightAlias == null) {
                         throw Util.newError(
@@ -1701,7 +1627,7 @@ public class RolapStar {
                     cube, right(join), joinCondition);
 
             } else if (relationOrJoin != null) {
-                org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relationInner = relationOrJoin;
+                RelationalSource relationInner = relationOrJoin;
                 RolapStar.Table starTable =
                     findChild(relationInner, joinCondition);
                 if (starTable == null) {
@@ -1723,7 +1649,7 @@ public class RolapStar {
          * if there is none.
  */
         public Table findChild(
-        		org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation,
+        		RelationalSource relation,
             Condition joinCondition)
         {
             for (Table child : getChildren()) {
@@ -1774,7 +1700,7 @@ public class RolapStar {
         }
 
         public boolean equalsTableName(String tableName) {
-            return (this.relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.TableSource mt && mt.getTable().getName().equals(tableName));
+            return (this.relation instanceof TableSource mt && mt.getTable().getName().equals(tableName));
         }
 
         /**
@@ -1918,47 +1844,7 @@ public class RolapStar {
             }
         }
 
-        /**
-         * Returns whether this table has a column with the given name.
- */
-        public boolean containsColumn(String columnName) {
-            if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.JoinSource) {
-                // todo: Deal with join.
-                return false;
-            } else if (relation != null) {
-                return containsColumn(
-                    RelationUtil.getAlias((relation)),
-                    columnName);
-            } else {
-                return false;
-            }
-        }
-
-        private boolean containsColumn(String tableName, String columnName) {
-            Connection jdbcConnection;
-            try {
-                jdbcConnection = star.context.getDataSource().getConnection();
-            } catch (SQLException e1) {
-                throw Util.newInternal(
-                    e1, "Error while creating connection from data source");
-            }
-            try {
-                final DatabaseMetaData metaData = jdbcConnection.getMetaData();
-                final ResultSet columns =
-                    metaData.getColumns(null, null, tableName, columnName);
-                return columns.next();
-            } catch (SQLException e) {
-                throw Util.newInternal(
-                    new StringBuilder("Error while retrieving metadata for table '").append(tableName)
-                        .append("', column '").append(columnName).append("'").toString());
-            } finally {
-                try {
-                    jdbcConnection.close();
-                } catch (SQLException e) {
-                    // ignore
-                }
-            }
-        }
+    
 
     }
 
@@ -1997,20 +1883,20 @@ public class RolapStar {
         }
 
         /** The left side as a {@link JoinColumn} when it is a plain column reference, else empty. */
-        public java.util.Optional<JoinColumn> leftColumn() {
+        public Optional<JoinColumn> leftColumn() {
             return asColumn(left);
         }
 
         /** The right side as a {@link JoinColumn} when it is a plain column reference, else empty. */
-        public java.util.Optional<JoinColumn> rightColumn() {
+        public Optional<JoinColumn> rightColumn() {
             return asColumn(right);
         }
 
-        private static java.util.Optional<JoinColumn> asColumn(SqlExpression expr) {
+        private static Optional<JoinColumn> asColumn(SqlExpression expr) {
             if (expr instanceof org.eclipse.daanse.rolap.element.RolapColumn rc) {
-                return java.util.Optional.of(new JoinColumn(rc.getTable(), rc.getName()));
+                return Optional.of(new JoinColumn(rc.getTable(), rc.getName()));
             }
-            return java.util.Optional.empty();
+            return Optional.empty();
         }
         /** The {@code left = right} condition rendered with only a {@link Dialect}. */
         public String toString(Dialect dialect) {

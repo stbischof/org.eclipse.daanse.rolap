@@ -30,17 +30,20 @@ package org.eclipse.daanse.rolap.common.agg;
 import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.BitSet;
-import java.util.HashMap;
-import java.util.HashSet;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Callable;
+import java.util.WeakHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.eclipse.daanse.olap.api.agg.OlapAggregationManager;
 import org.eclipse.daanse.olap.api.cache.CacheControl;
 import org.eclipse.daanse.olap.api.cache.OlapSegmentCacheManager;
 import org.eclipse.daanse.olap.api.connection.Connection;
+import org.eclipse.daanse.olap.api.result.Scenario;
 import org.eclipse.daanse.olap.api.element.OlapElement;
 import org.eclipse.daanse.olap.api.execution.ExecutionContext;
 import org.eclipse.daanse.olap.common.Util;
@@ -58,11 +61,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * RolapAggregationManager manages all {@link Aggregation}s
- * in the system. It is a singleton class.
- *
- * @author jhyde
- * @since 30 August, 2001
+ * One per context (NOT a singleton): the facade over the segment-cache
+ * machinery. Owns the shared {@link SegmentCacheManager}, the weak map of
+ * per-connection session OVERLAYS (writeback isolation), builds the
+ * {@link org.eclipse.daanse.olap.api.cache.CacheControl} whose flushes
+ * fan out over shared manager plus every overlay, and hosts the static
+ * SQL-generation entry points (generateSql, findAgg). It manages no
+ * {@link Aggregation} instances - those are per-batch throwaways.
  */
 public class AggregationManager extends RolapAggregationManager implements OlapAggregationManager{
 
@@ -73,13 +78,19 @@ public class AggregationManager extends RolapAggregationManager implements OlapA
 
     private final SegmentCacheManager cacheMgr;
 
-    private RolapContext context;
+    // thread-free per-session overlays; alive only while the session has
+    // pending writeback changes, dropped on commit/rollback or close.
+    // Weak keys: an abandoned connection cannot pin its overlay (and through
+    // it catalog and segment index); a silent GC drop loses only the
+    // overlay's local store
+    private final Map<Connection, SegmentCacheManager> sessionOverlays =
+        Collections.synchronizedMap(new WeakHashMap<>());
+
 
     /**
      * Creates the AggregationManager.
  */
     public AggregationManager(RolapContext context) {
-        this.context = context;
         this.cacheMgr = new SegmentCacheManager(context);
     }
 
@@ -93,14 +104,17 @@ public class AggregationManager extends RolapAggregationManager implements OlapA
     }
 
     /**
-     * Called by FastBatchingCellReader.load where the
-     * RolapStar creates an Aggregation if needed.
+     * Loads the segments of one batch: builds the batch's Aggregation,
+     * optimizes the column predicates and hands the load to the
+     * SegmentLoader.
      *
      * @param cacheMgr Cache manager
      * @param cellRequestCount Number of missed cells that led to this request
      * @param measures Measures to load
      * @param columns this is the CellRequest's constrained columns
-     * @param aggregationKey this is the CellRequest's constraint key
+     * @param star the requests' star
+     * @param constrainedColumnsBitKey the constrained columns
+     * @param compoundPredicateList compound member predicates
      * @param predicates Array of constraints on each column
      * @param groupingSetsCollector grouping sets collector
      * @param segmentFutures List of futures into which each statement will
@@ -111,15 +125,17 @@ public class AggregationManager extends RolapAggregationManager implements OlapA
         int cellRequestCount,
         List<RolapStar.Measure> measures,
         RolapStar.Column[] columns,
-        AggregationKey aggregationKey,
+        RolapStar star,
+        BitKey constrainedColumnsBitKey,
+        List<StarPredicate> compoundPredicateList,
         StarColumnPredicate[] predicates,
         GroupingSetsCollector groupingSetsCollector,
         List<Future<Map<Segment, SegmentWithData>>> segmentFutures,
         boolean optimizePredicates)
     {
-        RolapStar star = measures.getFirst().getStar();
-        Aggregation aggregation =
-            star.lookupOrCreateAggregation(aggregationKey);
+        Aggregation aggregation = new Aggregation(
+            star, constrainedColumnsBitKey, compoundPredicateList,
+            cacheMgr.getContext().getConfig().maxConstraints());
 
         // try to eliminate unnecessary constraints
         // for Oracle: prevent an IN-clause with more than 1000 elements
@@ -127,6 +143,43 @@ public class AggregationManager extends RolapAggregationManager implements OlapA
         aggregation.load(
             cacheMgr, cellRequestCount, columns, measures, predicates,
             groupingSetsCollector, segmentFutures);
+    }
+
+    /**
+     * Awaits the flush store operations under a bounded overall budget and
+     * returns the failure count. Member-edit flushes run while holding
+     * MEMBER_CACHE_LOCK, and a hung store must not hold that lock forever -
+     * the ops still complete asynchronously, the balance just stops
+     * accounting. A FALSE result means "this store held nothing under that
+     * id" (workers degrade and log their own store failures) - only an
+     * exceptional completion is an unreported failure. The index is already
+     * updated, so a failed store op leaves the old entry behind.
+     */
+    private static int awaitFlushStoreOperations(List<Future<Boolean>> futures,
+            CacheControlImpl.FlushDeadline deadline) {
+        int failed = 0;
+        for (int i = 0; i < futures.size(); i++) {
+            try {
+                futures.get(i).get(
+                    deadline.remainingNanos(),
+                    TimeUnit.NANOSECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                failed += futures.size() - i;
+                LOGGER.warn("interrupted awaiting flush store operations");
+                break;
+            } catch (TimeoutException e) {
+                LOGGER.warn(
+                    "{} of {} flush store operations still pending after "
+                    + "the flush deadline budget; they continue asynchronously",
+                    futures.size() - i, futures.size());
+                break;
+            } catch (ExecutionException e) {
+                failed++;
+                LOGGER.warn("flush store operation failed", e.getCause());
+            }
+        }
+        return failed;
     }
 
     /**
@@ -141,77 +194,147 @@ public class AggregationManager extends RolapAggregationManager implements OlapA
         Connection connection,
         final PrintWriter pw)
     {
-        return new CacheControlImpl(connection) {
-            @Override
-			protected void flushNonUnion(final CellRegion region) {
-                SegmentCacheManager segmentCacheManager = (SegmentCacheManager)getCacheMgr(connection);
-                final SegmentCacheManager.FlushResult result =
-                    segmentCacheManager.execute(
-                        new SegmentCacheManager.FlushCommand(
-                            ExecutionContext.current(),
-                            segmentCacheManager,
-                            region,
-                            this));
-                final List<Future<Boolean>> futures =
-                    new ArrayList<>();
-                for (Callable<Boolean> task : result.tasks) {
-                    futures.add(segmentCacheManager.cacheExecutor.submit(task));
-                }
-                for (Future<Boolean> future : futures) {
-                	Util.safeGet(future, "Flush cache");
-//                    discard();
-                }
-            }
+        return new FlushingCacheControl(connection, pw);
+    }
 
-            @Override
-			public void flush(final CellRegion region) {
-                if (pw != null) {
-                    pw.println("Cache state before flush:");
-                    printCacheState(pw, region);
-                    pw.println();
-                }
-                super.flush(region);
-                if (pw != null) {
-                    pw.println("Cache state after flush:");
-                    printCacheState(pw, region);
-                    pw.println();
-                }
-            }
+    /**
+     * The cache-control handed to callers: cell flushes fan out to the
+     * SHARED manager first and then to EVERY session overlay (a foreign
+     * writeback session otherwise kept serving the flushed region until
+     * commit), store waits are deadline-bounded, and tracing goes to the
+     * caller's PrintWriter off the actor.
+     */
+    private final class FlushingCacheControl extends CacheControlImpl {
 
-            @Override
-			public void trace(final String message) {
-                if (pw != null) {
-                    pw.println(message);
+        private final Connection flushingConnection;
+        private final PrintWriter pw;
+
+        private FlushingCacheControl(Connection connection, PrintWriter pw) {
+            super(connection);
+            this.flushingConnection = connection;
+            this.pw = pw;
+        }
+
+        @Override
+        protected void flushNonUnion(final CellRegion region, final CacheControlImpl.FlushDeadline deadline) {
+            // administrative flush: ALWAYS against the shared manager -
+            // routed through the session's overlay it was silently
+            // invisible to every other session (and to the external
+            // stores). The overlay is flushed additionally, and it must
+            // run even when the shared flush throws - otherwise the
+            // session keeps serving the flushed cells from its overlay.
+            // Throwable, not RuntimeException: an AssertionError out of
+            // the actor must not skip the overlay flush either - the
+            // session would keep serving the flushed cells
+            Throwable sharedFailure = null;
+            try {
+                flushOn(cacheMgr, region, deadline);
+            } catch (RuntimeException | Error e) {
+                sharedFailure = e;
+            }
+            // EVERY session overlay, not only the flushing
+            // connection's: a foreign writeback session kept
+            // serving the flushed region from its overlay until
+            // commit. Snapshot under the monitor, flush outside
+            // (overlay flushes are memory-only and cheap).
+            List<SegmentCacheManager> overlays;
+            synchronized (sessionOverlays) {
+                overlays = new ArrayList<>(sessionOverlays.values());
+            }
+            // the peek covers only the race window between the
+            // snapshot above and now: synchronizedMap's computeIfAbsent
+            // DOES lock the same monitor as the snapshot, but an overlay
+            // born after the block exits and before flushOn runs would
+            // otherwise miss this flush
+            SegmentCacheManager own = peekSegmentCacheManager(flushingConnection);
+            if (own != cacheMgr && !overlays.contains(own)) {
+                overlays.add(own);
+            }
+            // per-overlay try: one failing overlay must not skip the
+            // remaining ones, and never MASK the shared failure - the
+            // administrator must see that the shared stores kept the
+            // region; every later failure rides along as suppressed.
+            // Throwable, not RuntimeException: an AssertionError out of
+            // an overlay used to displace the recorded shared failure.
+            Throwable failure = sharedFailure;
+            for (SegmentCacheManager overlay : overlays) {
+                try {
+                    flushOn(overlay, region, deadline);
+                } catch (RuntimeException | Error overlayFailure) {
+                    if (failure == null) {
+                        failure = overlayFailure;
+                    } else {
+                        failure.addSuppressed(overlayFailure);
+                    }
                 }
             }
-
-            @Override
-			public boolean isTraceEnabled() {
-                return pw != null;
+            if (failure instanceof RuntimeException runtimeException) {
+                throw runtimeException;
             }
-        };
+            if (failure instanceof Error error) {
+                throw error;
+            }
+        }
+
+        private void flushOn(SegmentCacheManager segmentCacheManager, CellRegion region,
+                CacheControlImpl.FlushDeadline deadline) {
+            final SegmentCacheManager.FlushResult result =
+                segmentCacheManager.execute(
+                    new SegmentCacheManager.FlushCommand(
+                        ExecutionContext.current(),
+                        segmentCacheManager,
+                        region,
+                        this));
+            for (String message : result.traceMessages) {
+                // buffered on the actor, printed here: the actor never
+                // blocks on the caller's PrintWriter
+                trace(message);
+            }
+            final List<Future<Boolean>> futures =
+                new ArrayList<>();
+            for (var task : result.tasks) {
+                // enqueues the sequenced operation; ordering per segment
+                // id happens inside the manager
+                futures.add(task.get());
+            }
+            int failed = awaitFlushStoreOperations(futures, deadline);
+            if (failed > 0) {
+                LOGGER.warn("{} of {} flush store operations failed; "
+                    + "stale entries may remain in external caches until expiry",
+                    failed, futures.size());
+            }
+        }
+
+        @Override
+        public void flush(final CellRegion region) {
+            if (pw != null) {
+                pw.println("Cache state before flush:");
+                printCacheState(pw, region);
+                pw.println();
+            }
+            super.flush(region);
+            if (pw != null) {
+                pw.println("Cache state after flush:");
+                printCacheState(pw, region);
+                pw.println();
+            }
+        }
+
+        @Override
+        public void trace(final String message) {
+            if (pw != null) {
+                pw.println(message);
+            }
+        }
+
     }
 
     @Override
 	public Object getCellFromCache(CellRequest request) {
-        return getCellFromCache(request, null);
-    }
-
-    @Override
-	public Object getCellFromCache(CellRequest request, PinSet pinSet) {
-        // NOTE: This method used to check both local (thread/statement) cache
-        // and global cache (segments in JVM, shared between statements). Now it
-        // only looks in local cache. This can be done without acquiring any
-        // locks, because the local cache is thread-local. If a segment that
-        // matches this cell-request in global cache, a call to
-        // SegmentCacheManager will copy it into local cache.
+        // Only the local (thread/statement) working store answers here; a
+        // global-cache match reaches it via the SegmentCacheManager copy.
         final RolapStar.Measure measure = request.getMeasure();
-        return measure.getStar().getCellFromCache(request, pinSet);
-    }
-
-    public Object getCellFromAllCaches(CellRequest request, Connection rolapConnection) {
-        final RolapStar.Measure measure = request.getMeasure();
-        return measure.getStar().getCellFromAllCaches(request, rolapConnection);
+        return measure.getStar().getCellFromCache(request);
     }
 
     @Override
@@ -377,15 +500,13 @@ public class AggregationManager extends RolapAggregationManager implements OlapA
         // whose measure BitKey is a superset of the measure BitKey,
         // whose level BitKey is an exact match and the aggregate table
         // can NOT have any foreign keys.
-        assert rollup != null;
         if (rollup == null) {
             throw new IllegalArgumentException("rollup should be not null");
         }
         BitKey fullBitKey = levelBitKey.or(measureBitKey);
 
-        // a levelBitKey with all parent bits set.
-        final BitKey expandedLevelBitKey = expandLevelBitKey(
-            star, levelBitKey.copy());
+        // a levelBitKey with all parent bits set; the input stays untouched
+        final BitKey expandedLevelBitKey = expandLevelBitKey(star, levelBitKey);
 
         // The AggStars are already ordered from smallest to largest so
         // we need only find the first one and return it.
@@ -444,7 +565,9 @@ public class AggregationManager extends RolapAggregationManager implements OlapA
                 if (combinedLevelBitKey == null) {
                     combinedLevelBitKey = rollableLevelBitKey;
                 } else {
-                    // TODO use '&=' to remove unnecessary copy
+                    // and() copies on purpose: combinedLevelBitKey starts as
+                    // a reference to a measure's own bit key, which published
+                    // keys must never mutate
                     combinedLevelBitKey =
                         combinedLevelBitKey.and(rollableLevelBitKey);
                 }
@@ -500,17 +623,20 @@ public class AggregationManager extends RolapAggregationManager implements OlapA
     }
 
     /**
-     * Sets the bits for parent columns.
- */
+     * Returns a copy of levelBitKey with the bits of all parent columns
+     * set. The argument is never mutated — it is typically the batch's
+     * shared, published request key (see the BitKey contract).
+     */
     private static BitKey expandLevelBitKey(
         RolapStar star, BitKey levelBitKey)
     {
-        int bitPos = levelBitKey.nextSetBit(0);
+        BitKey expanded = levelBitKey.copy();
+        int bitPos = expanded.nextSetBit(0);
         while (bitPos >= 0) {
-            levelBitKey = setParentsBitKey(star, levelBitKey, bitPos);
-            bitPos = levelBitKey.nextSetBit(bitPos + 1);
+            expanded = setParentsBitKey(star, expanded, bitPos);
+            bitPos = expanded.nextSetBit(bitPos + 1);
         }
-        return levelBitKey;
+        return expanded;
     }
 
     private static BitKey setParentsBitKey(
@@ -525,52 +651,79 @@ public class AggregationManager extends RolapAggregationManager implements OlapA
     }
 
     @Override
-	public PinSet createPinSet() {
-        return new PinSetImpl();
+    public Runnable orphanCleanup() {
+        // delegates to the shared manager's context-free subset; session
+        // overlays share its executors and die with their connections
+        return cacheMgr.orphanCleanup();
     }
 
     @Override
     public void shutdown() {
-        // Send a shutdown command and wait for it to return.
-        cacheMgr.shutdown();
-        // Now we can cleanup.
-        for (SegmentCacheWorker worker : cacheMgr.segmentCacheWorkers) {
-            worker.shutdown();
+        synchronized (sessionOverlays) {
+            for (SegmentCacheManager sessionOverlay : sessionOverlays.values()) {
+                sessionOverlay.shutdown();
+            }
+            sessionOverlays.clear();
         }
+        // stops the actor and executors, tears down the local store and
+        // detaches external caches without touching their shared content
+        cacheMgr.shutdown();
     }
 
-    /**
-     * Implementation of {@link org.eclipse.daanse.rolap.common.RolapAggregationManager.PinSet}
-     * using a {@link HashSet}.
- */
-    public static class PinSetImpl
-        extends HashSet<Segment>
-        implements RolapAggregationManager.PinSet
-    {
-    }
-
-    //TODO: Free SegmentCacheManager if connection closed
-
-	private Map<Connection, SegmentCacheManager> segCachStore = new HashMap<>();
 
 	@Override
-	public OlapSegmentCacheManager getCacheMgr(Connection connection) {
-		if (connection == null || !connection.getContext()
-		        .getConfig().enableSessionCaching()) {
+	public OlapSegmentCacheManager getSegmentCacheManager(Connection connection) {
+		// Writeback isolation must NOT depend on the perf opt-in: with the
+		// flag at its default (false), uncommitted session values were
+		// published into the SHARED stores under ordinary header ids -
+		// cluster-wide via Redis - and survived a rollback. Pending
+		// writeback forces the overlay; the flag additionally gives every
+		// connection one (its documented meaning).
+		boolean isolate = connection != null
+				&& (connection.getContext().getConfig().enableSessionCaching()
+					|| hasPendingWriteback(connection));
+		if (!isolate) {
+			// PURE getter: the old reap-on-read side effect tore down
+			// another running statement's overlay mid-query (two
+			// statements per connection are normal for XMLA sessions) -
+			// the reader's composite cache emptied under it and the
+			// reloaded values silently came from the restored fact.
+			// Overlays are reaped at transaction boundaries
+			// (commit/rollback) and on connection close instead.
 			return cacheMgr;
-		} else {
-			if (!segCachStore.containsKey(connection)) {
-				SegmentCacheManager connBasedCacheMgr = new SegmentCacheManager(context);
-				segCachStore.put(connection, connBasedCacheMgr);
-			}
+		}
+		return sessionOverlays.computeIfAbsent(connection,
+				c -> SegmentCacheManager.sessionOverlay(cacheMgr));
+	}
 
-			return segCachStore.get(connection);
+	private static boolean hasPendingWriteback(Connection connection) {
+		Scenario scenario = connection.getScenario();
+		return scenario != null && scenario.hasPendingChanges();
+	}
 
+	/**
+	 * Read-only view for diagnostics, flush routing and cancel sweeps:
+	 * the session's overlay if one EXISTS, else the shared manager -
+	 * never creates one (unlike the routing getter, which builds an
+	 * overlay for a pending-writeback connection on first use).
+	 */
+	@Override
+	public SegmentCacheManager peekSegmentCacheManager(Connection connection) {
+		SegmentCacheManager sessionOverlay =
+				connection == null ? null : sessionOverlays.get(connection);
+		return sessionOverlay != null ? sessionOverlay : cacheMgr;
+	}
+
+	@Override
+	public void removeSegmentCacheManager(Connection connection) {
+		SegmentCacheManager sessionOverlay = sessionOverlays.remove(connection);
+		if (sessionOverlay != null) {
+			sessionOverlay.shutdown();
 		}
 	}
 
     @Override
-    public OlapSegmentCacheManager getCacheMgr() {
+    public OlapSegmentCacheManager getSegmentCacheManager() {
         return this.cacheMgr;
     }
 }

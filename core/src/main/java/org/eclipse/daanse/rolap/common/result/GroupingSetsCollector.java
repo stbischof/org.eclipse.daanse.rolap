@@ -54,9 +54,23 @@ public class GroupingSetsCollector {
     }
 
     public void add(GroupingSet aggInfo) {
-        assert groupingSets.isEmpty()
-            || groupingSets.getFirst().getColumns().length
-            >= aggInfo.getColumns().length;
+        // SUBSET containment, not a count: everything downstream fills a
+        // rollup set's axes only for columns matching the first (detailed)
+        // set - an unmatched column leaves a null axis that decideSparse
+        // dereferences. Structurally guaranteed by the batch composition
+        // today (detailedBatch first, transitive canBatch relations); a
+        // data-shape guard must hold in production too, so throw, never
+        // assert.
+        if (!groupingSets.isEmpty()) {
+            var detailed = java.util.Set.of(groupingSets.getFirst().getColumns());
+            for (var column : aggInfo.getColumns()) {
+                if (!detailed.contains(column)) {
+                    throw new IllegalStateException(
+                        "grouping set adds column " + column
+                            + " missing from the detailed set");
+                }
+            }
+        }
         groupingSets.add(aggInfo);
     }
 

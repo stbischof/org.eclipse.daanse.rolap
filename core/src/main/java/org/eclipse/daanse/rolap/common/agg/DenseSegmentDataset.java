@@ -29,9 +29,6 @@
 
 package org.eclipse.daanse.rolap.common.agg;
 
-import java.util.Iterator;
-import java.util.Map;
-import java.util.NoSuchElementException;
 
 import org.eclipse.daanse.olap.key.CellKey;
 
@@ -71,42 +68,12 @@ abstract class DenseSegmentDataset implements SegmentDataset {
         return axisMultipliersInner;
     }
 
-    @Override
-	public final double getBytes() {
-        // assume a slot, key, and value are each 4 bytes
-        return getSize() * 12d;
-    }
-
-    @Override
-	public Iterator<Map.Entry<CellKey, Object>> iterator() {
-        return new DenseSegmentDatasetIterator();
-    }
-
     protected abstract Object getObject(int i);
 
     protected final int getOffset(int[] keys) {
         return CellKey.Generator.getOffset(keys, axisMultipliers);
     }
 
-    protected final int getOffset(Object[] keys) {
-        int offset = 0;
-outer:
-        for (int i = 0; i < keys.length; i++) {
-            SegmentAxis axis = axes[i];
-            Object[] ks = axis.getKeys();
-            final int axisLength = ks.length;
-            offset *= axisLength;
-            Object value = keys[i];
-            for (int j = 0; j < axisLength; j++) {
-                if (ks[j].equals(value)) {
-                    offset += j;
-                    continue outer;
-                }
-            }
-            return -1; // not found
-        }
-        return offset;
-    }
 
     @Override
 	public Object getObject(CellKey pos) {
@@ -125,73 +92,4 @@ outer:
 
     protected abstract int getSize();
 
-    /**
-     * Iterator over a DenseSegmentDataset.
-     *
-     * This is a 'cheap' implementation
-     * which doesn't allocate a new Entry every step: it just returns itself.
-     * The Entry must therefore be used immediately, before calling
-     * {@link #next()} again.
-     */
-    private class DenseSegmentDatasetIterator implements
-        Iterator<Map.Entry<CellKey, Object>>,
-        Map.Entry<CellKey, Object>
-    {
-        private final int last = getSize() - 1;
-        private int i = -1;
-        private final int[] ordinals;
-
-        DenseSegmentDatasetIterator() {
-            ordinals = new int[axes.length];
-            ordinals[ordinals.length - 1] = -1;
-        }
-
-        @Override
-		public boolean hasNext() {
-            return i < last;
-        }
-
-        @Override
-		public Map.Entry<CellKey, Object> next() {
-            if(!hasNext()){
-                throw new NoSuchElementException();
-            }
-            ++i;
-            int k = ordinals.length - 1;
-            while (k >= 0) {
-                if (ordinals[k] < axes[k].getKeys().length - 1) {
-                    ++ordinals[k];
-                    break;
-                } else {
-                    ordinals[k] = 0;
-                    --k;
-                }
-            }
-            return this;
-        }
-
-        // implement Iterator
-        @Override
-		public void remove() {
-            throw new UnsupportedOperationException();
-        }
-
-        // implement Entry
-        @Override
-		public CellKey getKey() {
-            return CellKey.Generator.newCellKey(ordinals);
-        }
-
-        // implement Entry
-        @Override
-		public Object getValue() {
-            return getObject(i);
-        }
-
-        // implement Entry
-        @Override
-		public Object setValue(Object value) {
-            throw new UnsupportedOperationException();
-        }
-    }
 }

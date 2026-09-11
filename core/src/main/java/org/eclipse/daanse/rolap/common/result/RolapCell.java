@@ -112,8 +112,6 @@ import org.slf4j.Logger;
  */
 public class RolapCell implements Cell {
     /**
-     * @see mondrian.util.Bug#olap4jUpgrade Use
-     * {@link mondrian.xmla.XmlaConstants}.ActionType.DRILLTHROUGH when present
  */
     private static final int MDACTION_TYPE_DRILLTHROUGH = 0x100;
 
@@ -686,19 +684,6 @@ public class RolapCell implements Cell {
                     }
                 }
                 return null;
-// To option when backColor belongs to real measure
-//                Object backColor = null;
-//                //final RolapEvaluator rolapEvaluator = (RolapEvaluator)result.getEvaluator(pos);
-//                final RolapEvaluator rolapEvaluator = (RolapEvaluator)result.getRootEvaluator();
-//                final int savepoint = rolapEvaluator.savepoint();
-//                try {
-//                    result.populateEvaluator(rolapEvaluator, pos);
-//                    org.apache.log4j.Logger LOGGER = org.apache.log4j.Logger.getLogger( RolapCell.class );
-//                    backColor = rolapEvaluator.getBackColor();
-//                } finally {
-//                    rolapEvaluator.restore(savepoint);
-//                }
-//                return backColor;
             }else if(property == StandardProperty.FORE_COLOR) {
                 formatString = (String)getPropertyValue(StandardProperty.FORMAT_STRING.getName());
                 if(formatString == null) {

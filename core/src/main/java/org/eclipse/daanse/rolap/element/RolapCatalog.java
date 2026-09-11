@@ -855,6 +855,11 @@ public class RolapCatalog implements Catalog {
                 .map(Entry::getValue);
     }
 
+    /** Cell-cache switch of the named cube; an unknown cube caches. */
+    public boolean isCellCachingEnabled(String cubeName) {
+        return lookupCube(cubeName).map(RolapCube::isCacheAggregations).orElse(true);
+    }
+
 	/**
 	 * Returns an xmlCalculatedMember called 'calcMemberName' in the cube called
 	 * 'cubeName' or return null if no calculatedMember or xmlCube by those name

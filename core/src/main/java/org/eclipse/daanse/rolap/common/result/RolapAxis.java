@@ -135,8 +135,8 @@ public class RolapAxis implements Axis {
 
         @Override
         public List<Member> getMembers() {
-            return null;
-            //TODO
+            // this position IS the member list (AbstractList over the tuple)
+            return this;
         }
     }
 }

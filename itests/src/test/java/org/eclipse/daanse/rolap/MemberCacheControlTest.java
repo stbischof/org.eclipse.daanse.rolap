@@ -578,8 +578,8 @@ class MemberCacheControlTest {
         ExecutionContext.where(executionContext, () -> {
         assertEquals(
             Double.valueOf("74748"),
-            ((AggregationManager)aggMgr).getCellFromAllCaches(
-                AggregationManager.makeRequest(cacheRegionMembers), conn));
+            ((AggregationManager)aggMgr).getCellFromCache(
+                AggregationManager.makeRequest(cacheRegionMembers)));
         });
         // Now tell the cache that [CA].[Berkeley] is new
         final MemberEditCommand command =
@@ -589,8 +589,8 @@ class MemberCacheControlTest {
         // test that cells have been removed
         ExecutionContext.where(executionContext, () -> {
             assertNull(
-                ((AggregationManager)aggMgr).getCellFromAllCaches(
-                AggregationManager.makeRequest(cacheRegionMembers), conn));
+                ((AggregationManager)aggMgr).getCellFromCache(
+                AggregationManager.makeRequest(cacheRegionMembers)));
     	});
         MdxAssert.assertThatAxis(conn, "Sales",
 "[Retail].[Retail].[CA].Children").returns(
@@ -739,8 +739,8 @@ class MemberCacheControlTest {
         ExecutionContext.where(executionContext, () -> {
             assertEquals(
                     Double.valueOf("2117"),
-                    ((AggregationManager)aggMgr).getCellFromAllCaches(
-                    AggregationManager.makeRequest(cacheRegionMembers), conn));
+                    ((AggregationManager)aggMgr).getCellFromCache(
+                    AggregationManager.makeRequest(cacheRegionMembers)));
         });
 
         // Now tell the cache that [CA].[San Francisco] has been removed.
@@ -756,8 +756,8 @@ class MemberCacheControlTest {
         // test that cells have been removed
         ExecutionContext.where(executionContext, () -> {
         assertNull(
-            ((AggregationManager)aggMgr).getCellFromAllCaches(
-                AggregationManager.makeRequest(cacheRegionMembers), conn));
+            ((AggregationManager)aggMgr).getCellFromCache(
+                AggregationManager.makeRequest(cacheRegionMembers)));
         });
         // The list of children should be updated.
         MdxAssert.assertThatAxis(conn, "Sales",

@@ -20,6 +20,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.Future;
 
+import org.eclipse.daanse.olap.spi.SegmentPredicate;
 import org.eclipse.daanse.olap.api.Context;
 import org.eclipse.daanse.olap.api.connection.Connection;
 import org.eclipse.daanse.olap.api.element.Cube;
@@ -40,7 +41,7 @@ import org.eclipse.daanse.rolap.common.agg.Segment;
 import org.eclipse.daanse.rolap.common.agg.SegmentWithData;
 import org.eclipse.daanse.rolap.common.agg.ValueColumnPredicate;
 import org.eclipse.daanse.rolap.common.result.BatchLoader;
-import org.eclipse.daanse.rolap.common.result.FastBatchingCellReader;
+import org.eclipse.daanse.rolap.common.result.BatchingCellReader;
 import org.eclipse.daanse.rolap.common.result.GroupingSetsCollector;
 import org.eclipse.daanse.rolap.common.sql.SqlQueryCapabilities;
 import org.eclipse.daanse.rolap.common.star.RolapStar;
@@ -65,7 +66,7 @@ import org.opentest4j.AssertionFailedError;
  *
  * <p>
  * {@link #forRequests(CellRequest...)} replaces {@code assertRequestSql}'s core mechanic - run a
- * batch of requests through a real {@link FastBatchingCellReader}, and check whether the SQL
+ * batch of requests through a real {@link BatchingCellReader}, and check whether the SQL
  * that would have executed matches (or doesn't) a given statement. Unlike the legacy version, a
  * mismatch or a missing/forbidden query renders every request in {@link #render(CellRequest[])}
  * form as part of the {@link AssertionFailedError}, so a failure says what was actually being
@@ -316,7 +317,7 @@ public final class CellRequestFixture {
                     AbstractBasicContext<?> abc = (AbstractBasicContext<?>) connection.getContext();
                     BatchLoader loader = new BatchLoader(
                         ExecutionContext.current(),
-                        ((AggregationManager) abc.getAggregationManager()).getCacheMgr(),
+                        ((AggregationManager) abc.getAggregationManager()).getSegmentCacheManager(),
                         SqlQueryCapabilities.of(rolapCube.getStar().getDialect()),
                         rolapCube);
                     BatchBuilder batchBuilder = new BatchBuilder(connection, loader).cube(cube).measure(measure);
@@ -395,7 +396,7 @@ public final class CellRequestFixture {
             ExecutionMetadata metadata = ExecutionMetadata.of("CellRequestFixture", "CellRequestFixture", null, 0);
             ExecutionContext executionContext = execution.asContext().createChild(metadata, Optional.empty());
             try {
-                FastBatchingCellReader fbcr = new FastBatchingCellReader(execution, cube, aggMgr);
+                BatchingCellReader fbcr = new BatchingCellReader(execution, cube, aggMgr);
                 for (CellRequest request : requests) {
                     fbcr.recordCellRequest(request);
                 }
@@ -558,8 +559,8 @@ public final class CellRequestFixture {
                         .append(" = ").append(values[i]);
             }
         }
-        for (String compound : request.getCompoundPredicateStrings()) {
-            sb.append(System.lineSeparator()).append("  compound: ").append(compound);
+        for (SegmentPredicate compound : request.getCompoundPredicates()) {
+            sb.append(System.lineSeparator()).append("  compound: ").append(compound.canonical());
         }
         sb.append(System.lineSeparator()).append('}');
         return sb.toString();

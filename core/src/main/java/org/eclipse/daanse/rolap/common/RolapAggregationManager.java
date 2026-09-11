@@ -35,7 +35,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.eclipse.daanse.olap.api.cache.CacheControl;
 import org.eclipse.daanse.olap.api.element.Member;
 import org.eclipse.daanse.olap.api.element.OlapElement;
 import org.eclipse.daanse.olap.api.evaluator.Evaluator;
@@ -43,15 +42,9 @@ import org.eclipse.daanse.olap.api.exception.OlapRuntimeException;
 import org.eclipse.daanse.olap.api.result.CellValue;
 import org.eclipse.daanse.olap.api.result.NullValue;
 import org.eclipse.daanse.olap.common.Util;
-import org.eclipse.daanse.olap.key.BitKey;
 import org.eclipse.daanse.rolap.api.element.RolapMember;
 import org.eclipse.daanse.rolap.common.agg.CellRequest;
 import org.eclipse.daanse.rolap.common.agg.DrillThroughCellRequest;
-import org.eclipse.daanse.rolap.common.agg.ListPredicate;
-import org.eclipse.daanse.rolap.common.agg.MemberColumnPredicate;
-import org.eclipse.daanse.rolap.common.agg.OrPredicate;
-import org.eclipse.daanse.rolap.common.agg.RangeColumnPredicate;
-import org.eclipse.daanse.rolap.common.agg.ValueColumnPredicate;
 import org.eclipse.daanse.rolap.common.agg.CompoundPredicateInfo;
 import org.eclipse.daanse.rolap.common.evaluator.RolapEvaluator;
 import org.eclipse.daanse.rolap.common.result.CellReader;
@@ -67,7 +60,6 @@ import org.eclipse.daanse.rolap.element.RolapCubeMember;
 import org.eclipse.daanse.rolap.element.RolapHierarchy;
 import org.eclipse.daanse.rolap.element.RolapProperty;
 import org.eclipse.daanse.rolap.element.RolapStoredMeasure;
-import org.eclipse.daanse.rolap.element.VisualTotalMember;
 
 
 /**
@@ -281,8 +273,9 @@ public abstract class RolapAggregationManager {
             }
             if (predicateInfo.getPredicate() != null) {
                 request.addAggregateList(
-                    predicateInfo.getBitKey(), predicateInfo.getPredicate());
-                request.addPredicateString(predicateInfo.getPredicateString());
+                    predicateInfo.getBitKey(),
+                    predicateInfo.getPredicate(),
+                    predicateInfo.getWirePredicate());
             }
         }
         return true;
@@ -536,289 +529,6 @@ public abstract class RolapAggregationManager {
         }
     }
 
-    /**
-     * Groups members (or tuples) from the same compound (i.e. hierarchy) into
-     * groups that are constrained by the same set of columns.
-     *
-     * E.g.
-     *
-     * Members
-     *     [USA].[CA],
-     *     [Canada].[BC],
-     *     [USA].[CA].[San Francisco],
-     *     [USA].[OR].[Portland]
-     *
-     * will be grouped into
-     *
-     * Group 1:
-     *     {[USA].[CA], [Canada].[BC]}
-     * Group 2:
-     *     {[USA].[CA].[San Francisco], [USA].[OR].[Portland]}
-     *
-     * This helps with generating optimal form of sql.
-     *
-     * In case of aggregating over a list of tuples, similar logic also
-     * applies.
-     *
-     * For example:
-     *
-     * Tuples:
-     *     ([Gender].[M], [Store].[USA].[CA])
-     *     ([Gender].[F], [Store].[USA].[CA])
-     *     ([Gender].[M], [Store].[USA])
-     *     ([Gender].[F], [Store].[Canada])
-     *
-     * will be grouped into
-     *
-     * Group 1:
-     *     {([Gender].[M], [Store].[USA].[CA]),
-     *      ([Gender].[F], [Store].[USA].[CA])}
-     * Group 2:
-     *     {([Gender].[M], [Store].[USA]),
-     *      ([Gender].[F], [Store].[Canada])}
-     *
-     * This function returns a boolean value indicating if any constraint
-     * can be created from the aggregationList. It is possible that only part
-     * of the aggregationList can be applied, which still leads to a (partial)
-     * constraint that is represented by the compoundGroupMap.
- */
-    private static boolean makeCompoundGroup(
-        int starColumnCount,
-        RolapCube baseCube,
-        List<List<RolapMember>> aggregationList,
-        Map<BitKey, List<RolapCubeMember[]>> compoundGroupMap)
-    {
-        // The more generalized aggregation as aggregating over tuples.
-        // The special case is a tuple defined by only one member.
-        int unsatisfiableTupleCount = 0;
-        for (List<RolapMember> aggregation : aggregationList) {
-            boolean isTuple;
-            if (!aggregation.isEmpty()
-                && (aggregation.getFirst() instanceof RolapCubeMember
-                    || aggregation.getFirst() instanceof VisualTotalMember))
-            {
-                isTuple = true;
-            } else {
-                ++unsatisfiableTupleCount;
-                continue;
-            }
-
-            BitKey bitKey = BitKey.Factory.makeBitKey(starColumnCount);
-            RolapCubeMember[] tuple;
-
-            tuple = new RolapCubeMember[aggregation.size()];
-            int i = 0;
-            for (Member member : aggregation) {
-                if (member instanceof VisualTotalMember) {
-                    tuple[i] = (RolapCubeMember)
-                        ((VisualTotalMember) member).getMember();
-                } else {
-                    tuple[i] = (RolapCubeMember)member;
-                }
-                i++;
-            }
-
-            boolean tupleUnsatisfiable = false;
-            for (RolapCubeMember member : tuple) {
-                // Tuple cannot be constrained if any of the member cannot be.
-                tupleUnsatisfiable =
-                    makeCompoundGroupForMember(member, baseCube, bitKey);
-                if (tupleUnsatisfiable) {
-                    // If this tuple is unsatisfiable, skip it and try to
-                    // constrain the next tuple.
-                    unsatisfiableTupleCount ++;
-                    break;
-                }
-            }
-
-            if (!tupleUnsatisfiable && !bitKey.isEmpty()) {
-                // Found tuple(columns) to constrain,
-                // now add it to the compoundGroupMap
-                addTupleToCompoundGroupMap(tuple, bitKey, compoundGroupMap);
-            }
-        }
-
-        return (unsatisfiableTupleCount == aggregationList.size());
-    }
-
-    private static void addTupleToCompoundGroupMap(
-        RolapCubeMember[] tuple,
-        BitKey bitKey,
-        Map<BitKey, List<RolapCubeMember[]>> compoundGroupMap)
-    {
-        List<RolapCubeMember[]> compoundGroup = compoundGroupMap.get(bitKey);
-        if (compoundGroup == null) {
-            compoundGroup = new ArrayList<>();
-            compoundGroupMap.put(bitKey, compoundGroup);
-        }
-        compoundGroup.add(tuple);
-    }
-
-    private static boolean makeCompoundGroupForMember(
-        RolapCubeMember member,
-        RolapCube baseCube,
-        BitKey bitKey)
-    {
-        RolapCubeMember levelMember = member;
-        boolean memberUnsatisfiable = false;
-        while (levelMember != null) {
-            RolapCubeLevel level = levelMember.getLevel();
-            // Only need to constrain the nonAll levels
-            if (!level.isAll()) {
-                RolapStar.Column column = level.getBaseStarKeyColumn(baseCube);
-                if (column != null) {
-                    bitKey.set(column.getBitPosition());
-                } else {
-                    // One level in a member causes the member to be
-                    // unsatisfiable.
-                    memberUnsatisfiable = true;
-                    break;
-                }
-            }
-
-            levelMember = levelMember.getParentMember();
-        }
-        return memberUnsatisfiable;
-    }
-
-    /**
-     * Translates a Map&lt;BitKey, List&lt;RolapMember&gt;&gt; of the same
-     * compound member into {@link ListPredicate} by traversing a list of
-     * members or tuples.
-     *
-     * 1. The example below is for list of tuples
-     *
-     *
-     * group 1: [Gender].[M], [Store].[USA].[CA]<br/>
-     * group 2: [Gender].[F], [Store].[USA].[CA]
-     *
-     *
-     * is translated into
-     *
-     *
-     * (Gender=M AND Store_State=CA AND Store_Country=USA)<br/>
-     * OR<br/>
-     * (Gender=F AND Store_State=CA AND Store_Country=USA)
-     *
-     *
-     * The caller of this method will translate this representation into
-     * appropriate SQL form as
-     *
-     * where (gender = 'M'<br/>
-     *        and Store_State = 'CA'<br/>
-     *        AND Store_Country = 'USA')<br/>
-     *     OR (Gender = 'F'<br/>
-     *         and Store_State = 'CA'<br/>
-     *         AND Store_Country = 'USA')
-     *
-     *
-     * 2. The example below for a list of members
-     *
-     * group 1: [USA].[CA], [Canada].[BC]<br/>
-     * group 2: [USA].[CA].[San Francisco], [USA].[OR].[Portland]
-     *
-     *
-     * is translated into:
-     *
-     *
-     * (Country=USA AND State=CA)<br/>
-     * OR (Country=Canada AND State=BC)<br/>
-     * OR (Country=USA AND State=CA AND City=San Francisco)<br/>
-     * OR (Country=USA AND State=OR AND City=Portland)
-     *
-     *
-     * The caller of this method will translate this representation into
-     * appropriate SQL form. For exmaple, if the underlying DB supports multi
-     * value IN-list, the second group will turn into this predicate:
-     *
-     *
-     * where (country, state, city) IN ((USA, CA, San Francisco),
-     *                                      (USA, OR, Portland))
-     *
-     *
-     * or, if the DB does not support multi-value IN list:
-     *
-     *
-     * where country=USA AND
-     *           ((state=CA AND city = San Francisco) OR
-     *            (state=OR AND city=Portland))
-     *
-     *
-     * @param compoundGroupMap Map from dimensionality to groups
-     * @param baseCube base cube if virtual
-     * @return compound predicate for a tuple or a member
- */
-    private static StarPredicate makeCompoundPredicate(
-        Map<BitKey, List<RolapCubeMember[]>> compoundGroupMap,
-        RolapCube baseCube)
-    {
-        List<StarPredicate> compoundPredicateList =
-            new ArrayList<> ();
-        for (List<RolapCubeMember[]> group : compoundGroupMap.values()) {
-             // e.g {[USA].[CA], [Canada].[BC]}
-            StarPredicate compoundGroupPredicate = null;
-            for (RolapCubeMember[] tuple : group) {
-                // [USA].[CA]
-                StarPredicate tuplePredicate = null;
-
-                for (RolapCubeMember member : tuple) {
-                    tuplePredicate = makeCompoundPredicateForMember(
-                        member, baseCube, tuplePredicate);
-                }
-                if (tuplePredicate != null) {
-                    if (compoundGroupPredicate == null) {
-                        compoundGroupPredicate = tuplePredicate;
-                    } else {
-                        compoundGroupPredicate =
-                            compoundGroupPredicate.or(tuplePredicate);
-                    }
-                }
-            }
-
-            if (compoundGroupPredicate != null) {
-                // Sometimes the compound member list does not constrain any
-                // columns; for example, if only AllLevel is present.
-                compoundPredicateList.add(compoundGroupPredicate);
-            }
-        }
-
-        StarPredicate compoundPredicate = null;
-
-        if (compoundPredicateList.size() > 1) {
-            compoundPredicate = new OrPredicate(compoundPredicateList);
-        } else if (compoundPredicateList.size() == 1) {
-            compoundPredicate = compoundPredicateList.getFirst();
-        }
-
-        return compoundPredicate;
-    }
-
-    private static StarPredicate makeCompoundPredicateForMember(
-        RolapCubeMember member,
-        RolapCube baseCube,
-        StarPredicate memberPredicate)
-    {
-        while (member != null) {
-            RolapCubeLevel level = member.getLevel();
-            if (!level.isAll()) {
-                RolapStar.Column column = level.getBaseStarKeyColumn(baseCube);
-                if (memberPredicate == null) {
-                    memberPredicate =
-                        new ValueColumnPredicate(column, member.getKey());
-                } else {
-                    memberPredicate =
-                        memberPredicate.and(
-                            new ValueColumnPredicate(column, member.getKey()));
-                }
-            }
-            // Don't need to constrain USA if CA is unique
-            if (member.getLevel().isUnique()) {
-                break;
-            }
-            member = member.getParentMember();
-        }
-        return memberPredicate;
-    }
 
     /**
      * Retrieves the value of a cell from the cache.
@@ -830,10 +540,6 @@ public abstract class RolapAggregationManager {
      *   cell's value is null
  */
     public abstract Object getCellFromCache(CellRequest request);
-
-    public abstract Object getCellFromCache(
-        CellRequest request,
-        PinSet pinSet);
 
     /**
      * Generates a SQL statement which will return the rows which contribute to
@@ -851,98 +557,6 @@ public abstract class RolapAggregationManager {
         StarPredicate starPredicateSlicer,
         List<OlapElement> fields,
         boolean countOnly);
-
-    public static RolapCacheRegion makeCacheRegion(
-        final RolapStar star,
-        final CacheControl.CellRegion region)
-    {
-        final List<Member> measureList = CacheControlImpl.findMeasures(region);
-        final List<RolapStar.Measure> starMeasureList =
-            new ArrayList<>();
-        RolapCube baseCube = null;
-        for (Member measure : measureList) {
-            if (!(measure instanceof RolapStoredMeasure storedMeasure)) {
-                continue;
-            }
-            final RolapStar.Measure starMeasure =
-                (RolapStar.Measure) storedMeasure.getStarMeasure();
-            assert starMeasure != null;
-            if (star != starMeasure.getStar()) {
-                continue;
-            }
-            // TODO: each time this code executes, baseCube is set.
-            // Should there be a 'break' here? Are all of the
-            // storedMeasure cubes the same cube? Is the measureList always
-            // non-empty so that baseCube is always set?
-            baseCube = storedMeasure.getCube();
-            starMeasureList.add(starMeasure);
-        }
-        final RolapCacheRegion cacheRegion =
-            new RolapCacheRegion(star, starMeasureList);
-        if (region instanceof CacheControlImpl.CrossjoinCellRegion crossjoin) {
-            for (CacheControl.CellRegion component
-                : crossjoin.getComponents())
-            {
-                constrainCacheRegion(cacheRegion, baseCube, component);
-            }
-        } else {
-            constrainCacheRegion(cacheRegion, baseCube, region);
-        }
-        return cacheRegion;
-    }
-
-    private static void constrainCacheRegion(
-        final RolapCacheRegion cacheRegion,
-        final RolapCube baseCube,
-        final CacheControl.CellRegion region)
-    {
-        if (region instanceof CacheControlImpl.MemberCellRegion memberCellRegion) {
-            final List<Member> memberList = memberCellRegion.getMemberList();
-            for (Member member : memberList) {
-                if (member.isMeasure()) {
-                    continue;
-                }
-                final RolapCubeMember rolapMember;
-                if (member instanceof RolapCubeMember) {
-                    rolapMember = (RolapCubeMember) member;
-                } else {
-                    rolapMember =
-                        (RolapCubeMember) baseCube.getCatalogReader()
-                            .getMemberByUniqueName(
-                                Util.parseIdentifier(member.getUniqueName()),
-                                true);
-                }
-                final RolapCubeLevel level = rolapMember.getLevel();
-                RolapStar.Column column = level.getBaseStarKeyColumn(baseCube);
-
-                level.getLevelReader().constrainRegion(
-                    new MemberColumnPredicate(column, rolapMember),
-                    baseCube,
-                    cacheRegion);
-            }
-        } else if (region instanceof CacheControlImpl.MemberRangeCellRegion rangeRegion) {
-            final RolapCubeLevel level = (RolapCubeLevel)rangeRegion.getLevel();
-            RolapStar.Column column = level.getBaseStarKeyColumn(baseCube);
-
-            level.getLevelReader().constrainRegion(
-                new RangeColumnPredicate(
-                    column,
-                    rangeRegion.getLowerInclusive(),
-                    (rangeRegion.getLowerBound() == null
-                     ? null
-                     : new MemberColumnPredicate(
-                         column, rangeRegion.getLowerBound())),
-                    rangeRegion.getUpperInclusive(),
-                    (rangeRegion.getUpperBound() == null
-                     ? null
-                     : new MemberColumnPredicate(
-                         column, rangeRegion.getUpperBound()))),
-                baseCube,
-                cacheRegion);
-        } else {
-            throw new UnsupportedOperationException();
-        }
-    }
 
     /**
      * Returns a {@link org.eclipse.daanse.rolap.common.result.CellReader} which reads cells from cache.
@@ -978,13 +592,6 @@ public abstract class RolapAggregationManager {
     }
 
     /**
-     * Creates a {@link PinSet}.
-     *
-     * @return a new PinSet
- */
-    public abstract PinSet createPinSet();
-
-    /**
      * Bridges the object convention of the cache probe API (raw value,
      * {@link NullValue#INSTANCE} for a stored NULL, Java {@code null} for
      * "not in cache") into the sealed {@link CellValue} protocol of the
@@ -1003,10 +610,4 @@ public abstract class RolapAggregationManager {
         return CellValue.fromLegacyValue(o);
     }
 
-    /**
-     * A set of segments which are pinned (prevented from garbage collection)
-     * for a short duration as a result of a cache inquiry.
- */
-    public interface PinSet {
-    }
 }

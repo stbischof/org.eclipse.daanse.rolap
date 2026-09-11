@@ -25,46 +25,43 @@
 
 package org.eclipse.daanse.rolap.common.agg;
 
-import static org.eclipse.daanse.olap.exceptions.SegmentCacheFailedToInstanciateException.segmentCacheFailedToInstanciate;
-import static org.eclipse.daanse.olap.exceptions.SegmentCacheFailedToLoadSegmentException.segmentCacheFailedToLoadSegment;
-import static org.eclipse.daanse.olap.exceptions.SegmentCacheFailedToSaveSegmentException.segmentCacheFailedToSaveSegment;
-
-import java.util.ArrayList;
 import java.util.List;
 
-import org.eclipse.daanse.olap.api.exception.OlapRuntimeException;
-import org.eclipse.daanse.olap.exceptions.SegmentCacheFailedToInstanciateException;
-import org.eclipse.daanse.olap.exceptions.SegmentCacheFailedToLoadSegmentException;
-import org.eclipse.daanse.olap.exceptions.SegmentCacheFailedToSaveSegmentException;
 import org.eclipse.daanse.olap.spi.SegmentBody;
 import org.eclipse.daanse.olap.spi.SegmentCache;
 import org.eclipse.daanse.olap.spi.SegmentHeader;
-import org.eclipse.daanse.rolap.util.ClassResolver;
-import org.eclipse.daanse.rolap.util.ServiceDiscovery;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * Utility class to interact with the {@link SegmentCache}.
  *
- * @author LBoudreau
+ * Fault-isolating wrapper around one {@link SegmentCache}: every call
+ * catches Throwable, counts the error and degrades to a MISS/false - a
+ * dead store never breaks a query or blocks the pools. checkThread
+ * enforces (hard, not assert) that no store I/O ever runs on the cache
+ * manager's actor thread: the actor must never wait on a store.
+ *
  * @see SegmentCache
  */
 public final class SegmentCacheWorker {
 
     private static final Logger LOGGER =
         LoggerFactory.getLogger(SegmentCacheWorker.class);
-    private final static String segmentCacheIsNotImplementingInterface = """
-    The daanse.rolap.SegmentCache property points to a class name which is not an
-            implementation of daanse.spi.SegmentCache.
-    """;
-
     final SegmentCache cache;
+    final SegmentCacheStats stats;
     private final Thread cacheMgrThread;
-    private final boolean supportsRichIndex;
-    private final static String segmentCacheFailedToDeleteSegment =
+
+    /** The store's class name, used by the cache-explain audit lines. */
+    String cacheName() {
+        return cache.getClass().getSimpleName();
+    }
+    // set when the cache is detached; in-flight calls degrade to a miss
+    // instead of reaching a cache the provider may already have closed
+    private volatile boolean closing;
+    private static final String SEGMENT_CACHE_FAILED_TO_DELETE_SEGMENT =
         "An exception was encountered while deleting a segment from the SegmentCache.";
-    private final static String segmentCacheFailedToScanSegments =
+    private static final String SEGMENT_CACHE_FAILED_TO_SCAN_SEGMENTS =
         "An exception was encountered while getting a list of segment headers in the SegmentCache.";
 
     /**
@@ -78,69 +75,12 @@ public final class SegmentCacheWorker {
      */
     public SegmentCacheWorker(SegmentCache cache, Thread cacheMgrThread) {
         this.cache = cache;
+        this.stats = new SegmentCacheStats(cache.getClass().getSimpleName());
         this.cacheMgrThread = cacheMgrThread;
-
-        // no need to call checkThread(): supportsRichIndex is a fast call
-        this.supportsRichIndex = cache.supportsRichIndex();
 
         LOGGER.debug(
             "Segment cache initialized: "
             + cache.getClass().getName());
-    }
-
-    /**
-     * Instantiates a cache. Returns null if there is no external cache defined.
-     *
-     * @return Cache
-     */
-    public static List<SegmentCache> initCache(final String segmentCache) {
-        final List<SegmentCache> caches =
-            new ArrayList<>();
-        // First try to get the segmentcache impl class from
-        // mondrian properties.
-        final String cacheName = segmentCache;
-        if (cacheName != null) {
-            caches.add(instantiateCache(cacheName));
-        }
-
-        // There was no property set. Let's look for Java services.
-        final List<Class<SegmentCache>> implementors =
-            ServiceDiscovery.forClass(SegmentCache.class).getImplementor();
-        if (!implementors.isEmpty()) {
-            // The contract is to use the first implementation found.
-            SegmentCache cache =
-                instantiateCache(implementors.getFirst().getName());
-            if (cache != null) {
-                caches.add(cache);
-            }
-        }
-
-        // Check the SegmentCacheInjector
-        // People might have sent instances into this thing.
-        caches.addAll(SegmentCache.SegmentCacheInjector.getCaches());
-
-        // Done.
-        return caches;
-    }
-
-    /**
-     * Instantiates a cache, given the name of the cache class.
-     *
-     * @param cacheName Name of class that implements the
-     *     {@link mondrian.spi.SegmentCache} SPI
-     *
-     * @return Cache instance, or null on error
-     */
-    private static SegmentCache instantiateCache(String cacheName) {
-        try {
-            LOGGER.debug("Starting cache instance: " + cacheName);
-            return ClassResolver.INSTANCE.instantiateSafe(cacheName);
-        } catch (ClassCastException e) {
-            throw new OlapRuntimeException(segmentCacheIsNotImplementingInterface);
-        } catch (RuntimeException e) {
-            LOGGER.error(segmentCacheFailedToInstanciate, e);
-            throw new SegmentCacheFailedToInstanciateException(e);
-        }
     }
 
     /**
@@ -156,35 +96,42 @@ public final class SegmentCacheWorker {
      */
     public SegmentBody get(SegmentHeader header) {
         checkThread();
+        if (closing) {
+            return null;
+        }
         try {
-            return cache.get(header);
+            SegmentBody body = cache.get(header);
+            stats.recordGet(body != null);
+            return body;
         } catch (Throwable t) {
-            LOGGER.error(segmentCacheFailedToLoadSegment,
-                t);
-            throw new SegmentCacheFailedToLoadSegmentException(t);
+            stats.recordError();
+            LOGGER.warn("segment cache get failed; treated as a miss", t);
+            return null;
         }
     }
 
     /**
-     * Places a segment in the cache. Returns true or false
-     * if the operation succeeds.
+     * Places a segment in the cache. A refused or failed write degrades to
+     * a warning — the cache is optional and the segment stays available
+     * from its loader.
      *
      * @param header A header to search for in the segment cache.
      * @param body The segment body to cache.
      */
     public void put(SegmentHeader header, SegmentBody body) {
         checkThread();
+        if (closing) {
+            return;
+        }
         try {
-            final boolean result = cache.put(header, body);
-            if (!result) {
-                LOGGER.error(segmentCacheFailedToSaveSegment);
-                throw new SegmentCacheFailedToSaveSegmentException();
+            if (cache.put(header, body)) {
+                stats.recordPut();
+            } else {
+                LOGGER.warn("segment cache refused a put; entry not stored");
             }
         } catch (Throwable t) {
-            LOGGER.error(
-                    segmentCacheFailedToSaveSegment,
-                t);
-            throw new SegmentCacheFailedToSaveSegmentException(t);
+            stats.recordError();
+            LOGGER.warn("segment cache put failed; entry not stored", t);
         }
     }
 
@@ -196,12 +143,19 @@ public final class SegmentCacheWorker {
      */
     public boolean remove(SegmentHeader header) {
         checkThread();
+        if (closing) {
+            return false;
+        }
         try {
-            return cache.remove(header);
+            boolean removed = cache.remove(header);
+            if (removed) {
+                stats.recordRemove();
+            }
+            return removed;
         } catch (Throwable t) {
-            LOGGER.error(segmentCacheFailedToDeleteSegment,
-                t);
-            throw new OlapRuntimeException(segmentCacheFailedToDeleteSegment, t);
+            stats.recordError();
+            LOGGER.warn(SEGMENT_CACHE_FAILED_TO_DELETE_SEGMENT, t);
+            return false;
         }
     }
 
@@ -212,27 +166,67 @@ public final class SegmentCacheWorker {
      */
     public List<SegmentHeader> getSegmentHeaders() {
         checkThread();
+        if (closing) {
+            return List.of();
+        }
         try {
             return cache.getSegmentHeaders();
         } catch (Throwable t) {
-            LOGGER.error("Failed to get a list of segment headers.", t);
-            throw new OlapRuntimeException(
-                segmentCacheFailedToScanSegments, t);
+            stats.recordError();
+            LOGGER.warn(SEGMENT_CACHE_FAILED_TO_SCAN_SEGMENTS, t);
+            return List.of();
         }
     }
 
-    public boolean supportsRichIndex() {
-        return supportsRichIndex;
+    /** One star's headers; degrades to empty like the full listing. */
+    public List<SegmentHeader> getSegmentHeaders(
+            org.eclipse.daanse.olap.util.ByteString schemaChecksum,
+            String rolapStarFactTableName) {
+        checkThread();
+        if (closing) {
+            return List.of();
+        }
+        try {
+            return cache.getSegmentHeaders(schemaChecksum, rolapStarFactTableName);
+        } catch (Throwable t) {
+            stats.recordError();
+            LOGGER.warn(SEGMENT_CACHE_FAILED_TO_SCAN_SEGMENTS, t);
+            return List.of();
+        }
+    }
+
+    /** Moves a segment to a shrunk header; a failure degrades to false. */
+    public boolean rename(SegmentHeader oldHeader, SegmentHeader newHeader) {
+        checkThread();
+        if (closing) {
+            return false;
+        }
+        try {
+            return cache.rename(oldHeader, newHeader);
+        } catch (Throwable t) {
+            stats.recordError();
+            LOGGER.warn("segment cache rename failed", t);
+            return false;
+        }
+    }
+
+    /** Detaches the worker; calls degrade to a miss. */
+    public void markClosing() {
+        closing = true;
     }
 
     public void shutdown() {
         checkThread();
+        closing = true;
         cache.tearDown();
     }
 
     private void checkThread() {
-        assert cacheMgrThread != Thread.currentThread()
-            : new StringBuilder("this method is potentially slow; you should not call it from ")
-            .append("the cache manager thread, ").append(cacheMgrThread);
+        // cache calls are potentially slow and must never run on the
+        // cache manager thread
+        if (cacheMgrThread == Thread.currentThread()) {
+            throw new IllegalStateException(
+                "cache call must not run on the cache manager thread " + cacheMgrThread);
+        }
     }
 }

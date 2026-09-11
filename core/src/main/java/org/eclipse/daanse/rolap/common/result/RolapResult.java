@@ -146,14 +146,11 @@ public class RolapResult extends ResultBase {
   private final CellKey point;
 
   private CellInfoContainer cellInfos;
-  private FastBatchingCellReader batchingReader;
+  private BatchingCellReader batchingReader;
   private final CellReader aggregatingReader;
   private Modulos modulos = null;
   private final int maxEvalDepth;
   private final Map<Integer, Boolean> positionsHighCardinality = new HashMap<>();
-  private final Map<Integer, TupleCursor> positionsIterators = new HashMap<>();
-  private final Map<Integer, Integer> positionsIndexes = new HashMap<>();
-  private final Map<Integer, List<List<Member>>> positionsCurrent = new HashMap<>();
 
   /**
    * Creates a RolapResult.
@@ -186,7 +183,7 @@ public class RolapResult extends ResultBase {
     }
     RolapCube cube = (RolapCube) query.getCube();
 
-    this.batchingReader = new FastBatchingCellReader( execution, cube, aggMgr );
+    this.batchingReader = new BatchingCellReader( execution, cube, aggMgr );
 
     this.cellInfos = ( query.getAxes().length > 4 ) ? new CellInfoMap( point ) : new CellInfoPool( query.getAxes().length );
 
@@ -726,6 +723,9 @@ public class RolapResult extends ResultBase {
         // clear out the whole expression cache at the end of a query.
         evaluator.clearExpResultCache( true );
         execution.setExpCacheCounts( evaluator.root.expResultCacheHitCount, evaluator.root.expResultCacheMissCount );
+        // same per-execution duration: without this the eval cache pins
+        // member sets on the query object for its whole life
+        query.clearEvalCache();
       }
       if ( LOGGER.isDebugEnabled() ) {
         LOGGER.debug( "RolapResult<init>: {}", Util.printMemory());
@@ -1112,6 +1112,8 @@ public Cell getCell( int[] pos ) {
   }
 
   private void executeBody(RolapEvaluator evaluator, Query query, final int[] pos ) {
+    defaultLocaleFormatter = formatValueFormatters.computeIfAbsent(
+        statement.getDaanseConnection().getLocale(), FormatValueFormatter::new );
     // Compute the cells several times. The first time, use a dummy
     // evaluator which collects requests.
     int count = 0;
@@ -1280,12 +1282,7 @@ public Cell getCell( int[] pos ) {
           ValueFormatter valueFormatter = m.getFormatter();
           if ( valueFormatter == null ) {
             cachedFormatString = revaluator.getFormatString();
-            Locale locale = statement.getDaanseConnection().getLocale();
-            valueFormatter = formatValueFormatters.get( locale );
-            if ( valueFormatter == null ) {
-              valueFormatter = new FormatValueFormatter( locale );
-              formatValueFormatters.put( locale, valueFormatter );
-            }
+            valueFormatter = defaultLocaleFormatter;
           }
 
           ci.formatString = cachedFormatString;
@@ -1300,7 +1297,6 @@ public Cell getCell( int[] pos ) {
           LOGGER.warn( DAANSE_EXCEPTION_IN_EXECUTE_STRIPE, e );
         } catch ( Exception e ) {
           LOGGER.warn( DAANSE_EXCEPTION_IN_EXECUTE_STRIPE, e );
-//            discard( e );
         }
 
         // Store the cell state as a CellValue. The evaluator delivers
@@ -1856,7 +1852,7 @@ public Cell getCell( int[] pos ) {
   }
 
   /**
-   * A FormatValueFormatter takes a {@link Locale} as a parameter and uses it to get the {@link mondrian.util.Format} to
+   * A FormatValueFormatter takes a {@link Locale} as a parameter and uses it to get the format to
    * be used in formatting an Object value with a given format string.
  */
   static class FormatValueFormatter implements ValueFormatter {
@@ -1887,11 +1883,16 @@ public Cell getCell( int[] pos ) {
   }
 
   /**
-   * Synchronized Map from Locale to ValueFormatter. It is expected that there will be only a small number of Locale's.
-   * Should these be a WeakHashMap?
+   * JVM-global Map from Locale to ValueFormatter; holds only the few Locales in use.
  */
   protected static final Map<Locale, ValueFormatter> formatValueFormatters =
-      Collections.synchronizedMap( new HashMap<Locale, ValueFormatter>() );
+      new java.util.concurrent.ConcurrentHashMap<>();
+
+  /**
+   * The statement Locale's FormatValueFormatter, resolved once per execution in executeBody;
+   * the Locale is constant over a statement, so the per-cell leaf path reads only this field.
+   */
+  private ValueFormatter defaultLocaleFormatter;
 
   /**
    * A CellInfo contains all of the information that a Cell requires. It is placed in the cellInfos map during

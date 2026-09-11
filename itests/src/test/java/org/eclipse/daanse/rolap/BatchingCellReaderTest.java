@@ -47,7 +47,6 @@ import org.eclipse.daanse.rolap.testkit.assertions.SqlAssert;
 
 import org.eclipse.daanse.cwm.model.cwm.resource.relational.Column;
 import org.eclipse.daanse.cwm.model.cwm.resource.relational.Table;
-import org.eclipse.daanse.rolap.testkit.junit.api.DbScope;
 import org.eclipse.daanse.sql.dialect.api.Dialect;
 import org.eclipse.daanse.olap.api.Context;
 import org.eclipse.daanse.olap.api.DataTypeJdbc;
@@ -63,17 +62,17 @@ import org.eclipse.daanse.olap.util.Bug;
 import org.eclipse.daanse.rolap.aggregator.MaxAggregator;
 import org.eclipse.daanse.rolap.aggregator.MinAggregator;
 import org.eclipse.daanse.rolap.aggregator.SumAggregator;
-import org.eclipse.daanse.rolap.common.agg.AggregationKey;
 import org.eclipse.daanse.rolap.common.agg.AggregationManager;
 import org.eclipse.daanse.rolap.common.agg.Segment;
 import org.eclipse.daanse.rolap.common.agg.SegmentCacheManager;
 import org.eclipse.daanse.rolap.common.agg.SegmentWithData;
 import org.eclipse.daanse.rolap.common.result.BatchLoader;
-import org.eclipse.daanse.rolap.common.result.FastBatchingCellReader;
+import org.eclipse.daanse.rolap.common.result.BatchingCellReader;
 import org.eclipse.daanse.rolap.element.RolapCube;
 import org.eclipse.daanse.rolap.itests.utils.EmfUtil;
 import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.CatalogSupplier;
 import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.FoodmartDatabaseSupplier;
+import org.eclipse.daanse.test.FoodmartData;
 import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.FoodmartTestInstance;
 import org.eclipse.daanse.rolap.mapping.model.catalog.Catalog;
 import org.eclipse.daanse.rolap.mapping.model.catalog.impl.CatalogImpl;
@@ -103,15 +102,14 @@ import org.junit.jupiter.api.Test;
 
 import org.eclipse.daanse.rolap.testkit.assertions.DatabaseProduct;
 import org.eclipse.daanse.rolap.testkit.assertions.SqlPattern;
-import org.eclipse.daanse.test.FoodmartData;
 /**
- * Test for <code>FastBatchingCellReader</code>.
+ * Test for <code>BatchingCellReader</code>.
  *
  * @author Thiyagu
  * @since 24-May-2007
  */
 @RolapContextTest(FoodmartTestInstance.class)
-class FastBatchingCellReaderTest extends BatchTestCase {
+class BatchingCellReaderTest extends BatchTestCase {
 
     private ExecutionContext executionContext;
     private ExecutionImpl e;
@@ -154,7 +152,7 @@ class FastBatchingCellReaderTest extends BatchTestCase {
         if (useGroupingSets != null) {
             dialect = dialectWithGroupingSets(dialect, useGroupingSets);
         }
-        return new BatchLoader(ExecutionContext.current(), aggMgr.getCacheMgr(),
+        return new BatchLoader(ExecutionContext.current(), aggMgr.getSegmentCacheManager(),
             org.eclipse.daanse.rolap.common.sql.SqlQueryCapabilities.of(dialect), cube);
     }
 
@@ -251,7 +249,7 @@ class FastBatchingCellReaderTest extends BatchTestCase {
     void testDoesDBSupportGroupingSets(Context<?> context) {
         prepareContext(context);
         final Dialect dialect = getDialect(context.getConnectionWithDefaultRole());
-        FastBatchingCellReader fbcr = new FastBatchingCellReader(e, salesCube, aggMgr) {
+        BatchingCellReader fbcr = new BatchingCellReader(e, salesCube, aggMgr) {
             @Override
             public Dialect getDialect() {
                 return dialect;
@@ -517,7 +515,7 @@ class FastBatchingCellReaderTest extends BatchTestCase {
                     CellRequestFixture.of(connection).request().cube(cubeNameSales).measure(measureUnitSales).where("customer", "country", "F").build());
             BatchLoader.Batch batch2 = fbcr.new Batch(
                     CellRequestFixture.of(connection).request().cube(cubeNameSales).measure(measureUnitSales).where("customer", "gender", "F").build());
-            Map<AggregationKey, BatchLoader.CompositeBatch> batchGroups = new HashMap<>();
+            Map<BatchLoader.BatchKey, BatchLoader.CompositeBatch> batchGroups = new HashMap<>();
             fbcr.addToCompositeBatch(batchGroups, batch1, batch2);
             assertEquals(1, batchGroups.size());
             BatchLoader.CompositeBatch compositeBatch = batchGroups.get(batch1.batchKey);
@@ -540,7 +538,7 @@ class FastBatchingCellReaderTest extends BatchTestCase {
                     CellRequestFixture.of(connection).request().cube(cubeNameSales).measure(measureUnitSales).where("customer", "gender", "F").build());
             BatchLoader.Batch aggBatchAlreadyInComposite = fbcr.new Batch(
                     CellRequestFixture.of(connection).request().cube(cubeNameSales).measure(measureUnitSales).where("customer", "gender", "F").build());
-            Map<AggregationKey, BatchLoader.CompositeBatch> batchGroups = new HashMap<>();
+            Map<BatchLoader.BatchKey, BatchLoader.CompositeBatch> batchGroups = new HashMap<>();
             BatchLoader.CompositeBatch existingCompositeBatch = new BatchLoader.CompositeBatch(detailedBatch);
             existingCompositeBatch.add(aggBatchAlreadyInComposite);
             batchGroups.put(detailedBatch.batchKey, existingCompositeBatch);
@@ -568,7 +566,7 @@ class FastBatchingCellReaderTest extends BatchTestCase {
                     CellRequestFixture.of(connection).request().cube(cubeNameSales).measure(measureUnitSales).where("customer", "gender", "F").build());
             BatchLoader.Batch aggBatchAlreadyInComposite = fbcr.new Batch(
                     CellRequestFixture.of(connection).request().cube(cubeNameSales).measure(measureUnitSales).where("customer", "city", "F").build());
-            Map<AggregationKey, BatchLoader.CompositeBatch> batchGroups = new HashMap<>();
+            Map<BatchLoader.BatchKey, BatchLoader.CompositeBatch> batchGroups = new HashMap<>();
             BatchLoader.CompositeBatch existingCompositeBatch = new BatchLoader.CompositeBatch(
                     aggBatchToAddToDetailedBatch);
             existingCompositeBatch.add(aggBatchAlreadyInComposite);
@@ -600,7 +598,7 @@ class FastBatchingCellReaderTest extends BatchTestCase {
             BatchLoader.Batch aggBatchAlreadyInCompositeOfDetail = fbcr.new Batch(
                     CellRequestFixture.of(connection).request().cube(cubeNameSales).measure(measureUnitSales).where("customer", "state_province", "F").build());
 
-            Map<AggregationKey, BatchLoader.CompositeBatch> batchGroups = new HashMap<>();
+            Map<BatchLoader.BatchKey, BatchLoader.CompositeBatch> batchGroups = new HashMap<>();
             BatchLoader.CompositeBatch existingAggCompositeBatch = new BatchLoader.CompositeBatch(
                     aggBatchToAddToDetailedBatch);
             existingAggCompositeBatch.add(aggBatchAlreadyInCompositeOfAgg);
@@ -721,7 +719,10 @@ class FastBatchingCellReaderTest extends BatchTestCase {
                     .constrain(constraint2)
                     .build();
 
-            assertTrue(detailedBatch.canBatch(aggregationBatch));
+            // canBatch requires compound-predicate equality: merging batches
+            // with different compounds would publish headers whose data a
+            // foreign WHERE filtered.
+            assertFalse(detailedBatch.canBatch(aggregationBatch));
             assertFalse(aggregationBatch.canBatch(detailedBatch));
         });
     }
@@ -1040,7 +1041,7 @@ class FastBatchingCellReaderTest extends BatchTestCase {
             final List<Future<Map<Segment, SegmentWithData>>> segmentFutures = new ArrayList<>();
 
             AbstractBasicContext<?> abc = (AbstractBasicContext) context;
-            ((SegmentCacheManager) (abc.getAggregationManager().getCacheMgr())).execute(new CacheCommand<Void>() {
+            ((SegmentCacheManager) (abc.getAggregationManager().getSegmentCacheManager())).execute(new CacheCommand<Void>() {
                 private final ExecutionContext executionContext = ExecutionContext.current();
 
                 @Override
@@ -2088,8 +2089,6 @@ class FastBatchingCellReaderTest extends BatchTestCase {
         int index = resultString.indexOf("}");
         return index != -1 ? resultString.substring(index) : resultString;
     }
-
-    /** Named bridge onto the FoodMart CSVs (for the data=-Supplier form). */
 
     /**
      * Converts a {@link Result} to text in traditional format.

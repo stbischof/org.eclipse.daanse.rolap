@@ -145,7 +145,6 @@ public class MemberTuplePredicate implements StarPredicate {
                     columnBitKey =
                         BitKey.Factory.makeBitKey(
                             column.getStar().getColumnCount());
-                    columnBitKey.clear();
                 }
                 columnBitKey.set(column.getBitPosition());
                 columnListInner.add(0, column);

@@ -211,10 +211,6 @@ public class MockSegmentCache implements SegmentCache {
         listeners.remove(listener);
     }
 
-    @Override
-	public boolean supportsRichIndex() {
-        return true;
-    }
 
     public void fireSegmentCacheEvent(
         SegmentCacheListener.SegmentCacheEvent event)
