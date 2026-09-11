@@ -39,12 +39,11 @@ import org.junit.jupiter.api.Test;
 @RolapContextTest(FoodmartTestInstance.class)
 class RolapEvaluatorTest {
 
-    /** The slicer predicate string with identifier quoting stripped — the structural pin stays
-     *  (columns, tuples, values, operators) while the assertion works on every dialect (the
-     *  string is rendered with the star's LIVE dialect: backticks on MySQL, double quotes on H2,
-     *  brackets on MSSQL). */
+    /** The slicer predicate's canonical wire text with identifier quoting stripped —
+     *  the structural pin stays (columns, tuples, values, operators); the wire form is
+     *  dialect-free by construction. */
     private static String unquoted(CompoundPredicateInfo info) {
-        return info.getPredicateString().replaceAll("[`\"\\[\\]]", "");
+        return info.getWirePredicate().canonical().replaceAll("[`\"\\[\\]]", "");
     }
 
     @Test
@@ -61,7 +60,7 @@ class RolapEvaluatorTest {
         // slicer value must appear; satisfiability must hold.
         String p1 = unquoted(slicerPredicateInfo);
         for (String required : new String[] {"store.store_state", "time_by_day.the_year",
-                "time_by_day.quarter", "'CA'", "'WA'", "1997", "'Q1'", "'Q2'"}) {
+                "time_by_day.quarter", "CA", "WA", "1997", "Q1", "Q2"}) {
             org.junit.jupiter.api.Assertions.assertTrue(p1.contains(required),
                 "missing " + required + " in: " + p1);
         }
@@ -93,7 +92,7 @@ class RolapEvaluatorTest {
       final CompoundPredicateInfo slicerPredicateInfo =
           evalulator.getSlicerPredicateInfo();
       assertEquals(
-          "product_class.product_family in ('Drink', 'Non-Consumable')",
+          "product_class.product_family in (Drink,Non-Consumable)",
           unquoted(slicerPredicateInfo));
       assertTrue(slicerPredicateInfo.isSatisfiable());
     }
@@ -109,8 +108,8 @@ class RolapEvaluatorTest {
       // SEMANTIC pin — see testGetSlicerPredicateInfo.
       String p3 = unquoted(slicerPredicateInfo);
       for (String required : new String[] {"product_class.product_family",
-              "product_class.product_department", "'Drink'", "'Beverages'", "'Food'",
-              "'Produce'", "'Non-Consumable'"}) {
+              "product_class.product_department", "Drink", "Beverages", "Food",
+              "Produce", "Non-Consumable"}) {
           org.junit.jupiter.api.Assertions.assertTrue(p3.contains(required),
               "missing " + required + " in: " + p3);
       }

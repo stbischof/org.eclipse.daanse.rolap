@@ -101,9 +101,6 @@ public interface StarColumnPredicate extends StarPredicate {
      * We call this method to provide a fake column before the predicate is
      * rendered to SQL.
      *
-     * todo: remove this method when
-     * mondrian.util.Bug#BugMondrian313Fixed bug MONDRIAN-313 and
-     * mondrian.util.Bug#BugMondrian314Fixed bug MONDRIAN-314 are fixed.
      */
     StarColumnPredicate cloneWithColumn(RolapStar.Column column);
 

@@ -147,7 +147,7 @@ public class HierarchyUsage {
     private org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource joinTable;
 
     /**
-     * The expression (usually a {@link mondrian.olap.MappingColumn}) by
+     * The expression (usually a column) by
      * which the hierarchy which is joined to the fact table.
      */
     private SqlExpression joinExp;
@@ -347,19 +347,9 @@ public class HierarchyUsage {
         return this.joinExp;
     }
 
-    public Kind getKind() {
-        return this.kind;
-    }
     public boolean isShared() {
         return this.kind == Kind.SHARED;
     }
-    public boolean isVirtual() {
-        return this.kind == Kind.VIRTUAL;
-    }
-    public boolean isPrivate() {
-        return this.kind == Kind.PRIVATE;
-    }
-
     @Override
 	public boolean equals(Object o) {
         if (o instanceof HierarchyUsage other) {

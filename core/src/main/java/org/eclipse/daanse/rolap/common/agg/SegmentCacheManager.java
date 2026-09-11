@@ -25,6 +25,7 @@
 package org.eclipse.daanse.rolap.common.agg;
 
 import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -34,19 +35,25 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.Callable;
+import java.util.WeakHashMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 import org.eclipse.daanse.olap.api.Context;
-import org.eclipse.daanse.olap.api.Message;
 import org.eclipse.daanse.olap.api.cache.CacheCommand;
 import org.eclipse.daanse.olap.api.cache.CacheControl.CellRegion;
-import org.eclipse.daanse.olap.api.cache.OlapSegmentCacheIndex;
+import org.eclipse.daanse.olap.api.cache.OlapSegmentCacheIndexRegistry;
 import org.eclipse.daanse.olap.api.cache.OlapSegmentCacheManager;
 import org.eclipse.daanse.olap.api.element.Member;
 import org.eclipse.daanse.olap.api.exception.OlapRuntimeException;
@@ -67,223 +74,97 @@ import org.eclipse.daanse.olap.spi.SegmentBody;
 import org.eclipse.daanse.olap.spi.SegmentCache;
 import org.eclipse.daanse.olap.spi.SegmentColumn;
 import org.eclipse.daanse.olap.spi.SegmentHeader;
-import  org.eclipse.daanse.olap.util.Pair;
+import org.eclipse.daanse.olap.util.ByteString;
+import org.eclipse.daanse.olap.spi.SegmentIdentity;
+import org.eclipse.daanse.olap.util.Pair;
 import org.eclipse.daanse.rolap.api.RolapContext;
 import org.eclipse.daanse.rolap.common.CacheControlImpl;
 import org.eclipse.daanse.rolap.common.RolapUtil;
 import org.eclipse.daanse.rolap.common.cache.MemorySegmentCache;
 import org.eclipse.daanse.rolap.common.cache.SegmentCacheIndex;
 import org.eclipse.daanse.rolap.common.cache.SegmentCacheIndexImpl;
-import org.eclipse.daanse.rolap.common.catalog.RolapCatalogCache;
 import org.eclipse.daanse.rolap.common.catalog.RolapCatalogKey;
+import org.eclipse.daanse.rolap.common.star.BitKeyExplain;
 import org.eclipse.daanse.rolap.common.star.RolapStar;
 import org.eclipse.daanse.rolap.element.RolapCatalog;
 import org.eclipse.daanse.rolap.element.RolapStoredMeasure;
-import org.eclipse.daanse.rolap.util.BlockingHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-@SuppressWarnings( { "JavaDoc", "squid:S1192", "squid:S4274" } )
-// suppressing warnings for asserts, duplicated string constants
-// (mostly used in trace logging), and javadoc field accessibility
 /**
- * Active object that maintains the "global cache" (in JVM, but shared between connections using a particular schema)
- * and "external cache" (as implemented by a {@link mondrian.spi.SegmentCache}.
+ * Active object around the segment caches. One dedicated actor thread
+ * applies all index mutations: commands run synchronously via
+ * {@code execute}, events asynchronously via {@code event}. The
+ * {@code cacheExecutor} carries external cache traffic, the
+ * {@code sqlExecutor} the segment SQL. The composite cache chains the
+ * local memory store with every attached external cache: first hit wins
+ * on get, puts and removes go to all. Writes of the same segment are
+ * sequenced per unique id ({@link #sequencedCacheOp}), so a flush issued
+ * after a put can never be overtaken by it.
  *
- * Segment states
- *
- *
- *     StateMeaning
- *     LocalInitial state of a segment
- *
- *
- * Decisions to be reviewed
- *
- * 1. Create variant of actor that processes all requests synchronously,
- * and does not need a thread. This would be a more 'embedded' mode of operation
- * (albeit with worse scale-out).
- *
- * 2. Move functionality into AggregationManager?
- *
- * 3. Delete {@link org.eclipse.daanse.rolap.common.RolapStar#lookupOrCreateAggregation}
- * and {@link org.eclipse.daanse.rolap.common.RolapStar#lookupSegment}
- * and {@link org.eclipse.daanse.rolap.common.RolapStar}.lookupAggregationShared.
- *
- *
- *
- *
- * Moved methods
- *
- * (Keeping track of where methods came from will make it easier to merge
- * to the mondrian-4 code line.)
- *
- * 1. {@link org.eclipse.daanse.rolap.common.RolapStar#getCellFromCache} moved from
- * {@link Aggregation}.getCellValue
- *
- *
- *
- * Done
- *
- * 1. Obsolete CountingAggregationManager, and property
- * mondrian.rolap.agg.enableCacheHitCounters.
- *
- * 2. AggregationManager becomes non-singleton.
- *
- * 3. SegmentCacheWorker methods and segmentCache field become
- * non-static. initCache() is called on construction. SegmentCache is passed
- * into constructor (therefore move ServiceDiscovery into
- * client). AggregationManager (or maybe MondrianServer) is another constructor
- * parameter.
- *
- * 5. Move SegmentHeader, SegmentBody, ConstrainedColumn into
- * mondrian.spi. Leave behind dependencies on mondrian.rolap.agg. In particular,
- * put code that converts Segment + SegmentWithData to and from SegmentHeader
- * + SegmentBody (e.g. {@link SegmentHeader}#forSegment) into a utility class.
- * (Do this as CLEANUP, after functionality is complete?)
- *
- * 6. Move functionality Aggregation to Segment. Long-term, Aggregation
- * should not be used as a 'gatekeeper' to Segment. Remove Aggregation fields
- * columns and axes.
- *
- * 9. Obsolete {@link RolapStar#cacheAggregations}. Similar effect will be
- * achieved by removing the 'jvm cache' from the chain of caches.
- *
- * 10. Rename Aggregation.Axis to SegmentAxis.
- *
- * 11. Remove Segment.setData and instead split out subclass
- * SegmentWithData. Now segment is immutable. You don't have to wait for its
- * state to change. You wait for a Future&lt;SegmentWithData&gt; to become
- * ready.
- *
- * 12. Remove methods: RolapCube.checkAggregateModifications,
- * RolapStar.checkAggregateModifications,
- * RolapCatalog.checkAggregateModifications,
- * RolapStar.pushAggregateModificationsToGlobalCache,
- * RolapCatalog.pushAggregateModificationsToGlobalCache,
- * RolapCube.pushAggregateModificationsToGlobalCache.
- *
- * 13. Add new implementations of Future: CompletedFuture and SlotFuture.
- *
- * 14. Remove methods:
- *
- *
- * Remove {@link SegmentLoader}.loadSegmentsFromCache - creates a
- *   {@link SegmentHeader} that has PRECISELY same specification as the
- *   requested segment, very unlikely to have a hit
- *
- * Remove {@link SegmentLoader}.loadSegmentFromCacheRollup
- *
- * Break up {@link SegmentLoader}.cacheSegmentData, and
- *   place code that is called after a segment has arrived
- *
- *
- *
- * 13. Fix flush. Obsolete {@link Aggregation}.flush, and
- * {@link RolapStar}.flush, which called it.
- *
- * 18. {@code SegmentCacheManager#locateHeaderBody} (and maybe other
- * methods) call {@link SegmentCacheWorker#get}, and that's a slow blocking
- * call. Make waits for segment futures should be called from a worker or
- * client, not an agent.
- *
- *
- * Ideas and tasks
- *
- * 7. RolapStar.localAggregations and .sharedAggregations. Obsolete
- * sharedAggregations.
- *
- * 8. Longer term. Move {@link org.eclipse.daanse.rolap.common.RolapStar.Bar}.segmentRefs to
- * {@link mondrian.server.ExecutionImpl}. Would it still be thread-local?
- *
- * 10. Call
- * {@link mondrian.spi.DataSourceChangeListener#isAggregationChanged}.
- * Previously called from
- * {@link RolapStar}.checkAggregateModifications, now never called.
- *
- * 12. We can quickly identify segments affected by a flush using
- * {@link SegmentCacheIndex#intersectRegion}. But then what? Options:
- *
- * <ol>
- *
- * Option #1. Pull them in, trim them, write them out? But: causes
- *     a lot of I/O, and we may never use these
- *     segments. Easiest.
- *
- * Option #2. Mark the segments in the index as needing to be trimmed; trim
- *     them when read, and write out again. But: doesn't propagate to other
- *     nodes.
- *
- * Option #3. (Best?) Write a mapping SegmentHeader->Restrictions into the
- *     cache.  Less I/O than #1. Method
- *     "SegmentCache.addRestriction(SegmentHeader, CacheRegion)"
- *
- * </ol>
- *
- * 14. Move {@link AggregationManager#getCellFromCache} somewhere else.
- *   It's concerned with local segments, not the global/external cache.
- *
- * 15. Method to convert SegmentHeader + SegmentBody to Segment +
- * SegmentWithData is imperfect. Cannot parse predicates, compound predicates.
- * Need mapping in star to do it properly and efficiently?
- * {@link org.eclipse.daanse.rolap.common.agg.SegmentBuilder.SegmentConverter} is a hack that
- * can be removed when this is fixed.
- * See {@link SegmentBuilder#toSegment}. Also see #20.
- *
- * 17. Revisit the strategy for finding segments that can be copied from
- * global and external cache into local cache. The strategy of sending N
- * {@link CellRequest}s at a time, then executing SQL to fill in the gaps, is
- * flawed. We need to maximize N in order to reduce segment fragmentation, but
- * if too high, we blow memory. BasicQueryTest.testAnalysis is an example of
- * this. Instead, we should send cell-requests in batches (is ~1000 the right
- * size?), identify those that can be answered from global or external cache,
- * return those segments, but not execute SQL until the end of the phase.
- * If so, {@link CellRequestQuantumExceededException} be obsoleted.
- *
- * 19. Tracing.
- * a. Remove or re-purpose {@link FastBatchingCellReader#pendingCount};
- * b. Add counter to measure requests satisfied by calling
- * {@link org.eclipse.daanse.rolap.common.agg.SegmentCacheManager#peek}.
- *
- * 20. Obsolete {@link SegmentDataset} and its implementing classes.
- * {@link SegmentWithData} can use {@link SegmentBody} instead. Will save
- * copying.
- *
- * 21. Obsolete  mondrian.util.CombiningGenerator.
- *
- * 22. {@link SegmentHeader#constrain(mondrian.spi.SegmentColumn[])} is
- * broken for N-dimensional regions where N &gt; 1. Each call currently
- * creates N more 1-dimensional regions, but should create 1 more N-dimensional
- * region. {@link SegmentHeader#excludedRegions} should be a list of
- * {@link SegmentColumn} arrays.
- *
- * 23. All code that calls {@link Future#get} should probably handle
- * {@link CancellationException}.
- *
- * 24. Obsolete {@link #handler}. Indirection doesn't win anything.
- *
- * @author jhyde
+ * Two further roles: session OVERLAYS ({@link #sessionOverlay}) are
+ * thread-free twins sharing this manager's actor and pools but owning a
+ * private index registry and in-memory store - writeback isolation
+ * lives there; and PRIMING - attaching an external store schedules a
+ * keys-only star inventory and loads headers per star lazily
+ * ({@code schedulePrimingIfPending}-style markers in
+ * {@code factTablesToPrime}) instead of pulling the full listing over
+ * the wire.
  */
+@SuppressWarnings( { "JavaDoc", "squid:S1192" } )
+// suppressing warnings for duplicated string constants (mostly used in
+// trace logging) and javadoc field accessibility
 public class SegmentCacheManager implements OlapSegmentCacheManager {
-  private final Handler handler = new Handler();
   private final Actor actor;
-  public final Thread thread;
-  private final Set<String> starFactTablesToSync;
+  final Thread thread;
+  private final boolean overlay;
+  private final AtomicBoolean shutdownStarted = new AtomicBoolean();
+  // orders external put/remove per segment header id (not per catalog) on the
+  // cache executor: a flush issued after a put can never be overtaken by it.
+  // Entries remove themselves when their chain completes
+  private final SequencedStoreOps storeOps;
+
+  /**
+   * In-flight priming listings (attach-time and marker-triggered): store
+   * I/O dispatched to the cache executor. Drained by
+   * {@link #awaitPendingCacheWrites()} so warm-start probes and shutdown
+   * see a quiesced priming pipeline, not a race.
+   */
+  private final java.util.Queue<java.util.concurrent.Future<?>> pendingPrimingListings =
+      new java.util.concurrent.ConcurrentLinkedQueue<>();
+  private final Map<SegmentCache, SegmentCache.SegmentCacheListener> externalCacheListeners =
+      new ConcurrentHashMap<>();
+  // keyed by (checksum, fact alias): an alias-only marker let catalog A
+  // consume catalog B's pending prime (same alias, different checksum)
+  private final Set<SegmentCache.StarKey> factTablesToPrime;
+
+  /**
+   * Converters per (star, fact key), positive results only. Weak star
+   * keys: an evicted catalog releases its stars and their memo with them.
+   */
+  private final Map<RolapStar, Map<SegmentIdentity.FactKey, SegmentBuilder.SegmentConverter>> converterMemo =
+      Collections.synchronizedMap( new WeakHashMap<>() );
 
   /**
    * Executor with which to send requests to external caches.
    */
-  public final ExecutorService cacheExecutor;
+  final ExecutorService cacheExecutor;
+  // Statement cancels are JDBC network round-trips (PG/MySQL open a new
+  // connection per cancel) with the opposite latency profile of store
+  // ops - a cancel storm against a dead database must not starve the
+  // pool that carries every store put/remove. Cached: cancels are short
+  // and bursty, idle threads die away.
+  private final ExecutorService statementCancelExecutor;
 
   /**
    * Executor with which to execute SQL requests.
    *
-   * TODO: create using factory and/or configuration parameters. Executor
-   * should be shared within MondrianServer or target JDBC database.
+   * TODO: create using factory and/or configuration parameters; could be
+   * shared per context or per target JDBC database.
    */
-  public ExecutorService sqlExecutor;
+  final ExecutorService sqlExecutor;
 
-  // NOTE: This list is only mutable for testing purposes. Would rather it
-  // were immutable.
+  // mutated at runtime: whiteboard attach/detach adds and removes workers
   public final List<SegmentCacheWorker> segmentCacheWorkers =
     new CopyOnWriteArrayList<>();
 
@@ -291,24 +172,34 @@ public class SegmentCacheManager implements OlapSegmentCacheManager {
   private final SegmentCacheIndexRegistry indexRegistry;
 
   private static final Logger LOGGER =
-    LoggerFactory.getLogger( AggregationManager.class );
+    LoggerFactory.getLogger( SegmentCacheManager.class );
   private final RolapContext context;
-    private final static String sqlQueryLimitReached = """
+    // NOTE: both limit messages are currently UNREACHABLE - the pools run
+    // on an unbounded LinkedBlockingQueue, so their rejection handlers fire
+    // only after shutdown, and that case is answered by the isShutdown()
+    // branch first. maxSqlThreads/maxCacheThreads size the pools, they do
+    // not cause rejections.
+    private static final String SQL_QUERY_LIMIT_REACHED = """
     The number of concurrent SQL statements which can be used simultaneously by this Daanse server instance has been reached. Set ''daanse.rolap.maxSqlThreads'' to change the current limit.
     """;
-    private final static String segmentCacheLimitReached = """
+    private static final String SEGMENT_CACHE_LIMIT_REACHED = """
     The number of concurrent segment cache operations which can be run simultaneously by this Daanse server instance has been reached. Set ''daanse.rolap.maxCacheThreads'' to change the current limit.
     """;
 
     public SegmentCacheManager( RolapContext context ) {
     this.context = context;
+    this.overlay = false;
     this.sqlExecutor = createSqlExecutor(context);
     this.cacheExecutor = createCacheExecutor(context);
+    this.storeOps = new SequencedStoreOps( this.cacheExecutor );
+    this.statementCancelExecutor = Executors.newCachedThreadPool( runnable -> {
+      Thread cancelThread =
+          new Thread( runnable, "daanse.rolap.agg.SegmentCacheManager$statementCancelExecutor" );
+      cancelThread.setDaemon( true );
+      return cancelThread;
+    } );
     actor = new Actor();
-    thread = new Thread(
-      actor, "daanse.rolap.agg.SegmentCacheManager$ACTOR" );
-    thread.setDaemon( true );
-    thread.start();
+    thread = actor.thread;
 
     // Create the index registry.
     this.indexRegistry = new SegmentCacheIndexRegistry();
@@ -321,28 +212,140 @@ public class SegmentCacheManager implements OlapSegmentCacheManager {
         new SegmentCacheWorker( cache, thread ) );
     }
 
-    // Add an external cache, if configured.
-    final List<SegmentCache> externalCache = SegmentCacheWorker.initCache(context
-            .getConfig().segmentCache());
-    for ( SegmentCache cache : externalCache ) {
-      // Create a worker for this external cache
-      segmentCacheWorkers.add(
-        new SegmentCacheWorker( cache, thread ) );
-      // Hook up a listener so it can update
-      // the segment index.
-      cache.addListener(
-        new AsyncCacheListener( this, context ) );
-    }
-
     compositeCache = new CompositeSegmentCache( segmentCacheWorkers, context.getConfig().disableCaching() );
-    // sync elements already in external cache:
-    // we're not able to have indexes at this point,
-    // have to wait until the schema has been loaded
-    List<SegmentHeader> headers = compositeCache.getSegmentHeaders();
-    starFactTablesToSync = new HashSet<>();
-    for ( SegmentHeader header : headers ) {
-      starFactTablesToSync.add( header.rolapStarFactTableName );
+    factTablesToPrime = ConcurrentHashMap.newKeySet();
+  }
+
+  /**
+   * Attaches an external segment cache: worker, index listener and priming
+   * of already loaded stars. The provider owns the cache lifecycle.
+   */
+  public void addExternalCache( SegmentCache cache ) {
+    if ( overlay || context.getConfig().disableCaching() ) {
+      return;
     }
+    // claim the listener slot FIRST: two concurrent binds of the same
+    // cache otherwise both pass a containsKey check and register two
+    // workers (double puts, double stats) plus an unremovable listener
+    AsyncCacheListener listener = new AsyncCacheListener( this, context );
+    if ( externalCacheListeners.putIfAbsent( cache, listener ) != null ) {
+      return;
+    }
+    try {
+      segmentCacheWorkers.add( new SegmentCacheWorker( cache, thread ) );
+      cache.addListener( listener );
+    } catch ( RuntimeException | Error e ) {
+      // roll back the half-attached state: a thrown addListener or listing
+      // otherwise left a worker without invalidations AND blocked every
+      // retry behind the stale listener-map entry
+      externalCacheListeners.remove( cache, listener );
+      segmentCacheWorkers.removeIf( worker -> {
+        if ( worker.cache == cache ) {
+          worker.markClosing();
+          return true;
+        }
+        return false;
+      } );
+      try {
+        cache.removeListener( listener );
+      } catch ( RuntimeException cleanup ) {
+        LOGGER.debug( "listener cleanup after failed attach", cleanup );
+      }
+      throw e;
+    }
+    // the inventory listing is store I/O and runs OFF the bind thread
+    // (which holds the context's segment-cache monitor) on the cache
+    // executor, like schedulePrimingIfPending. Failure degrades instead
+    // of unwinding the attach: priming is eventually consistent, a query
+    // in the window loads cold and the markers retry on the next attach.
+    try {
+      pendingPrimingListings.removeIf( java.util.concurrent.Future::isDone );
+      pendingPrimingListings.add( cacheExecutor.submit( () -> {
+        try {
+          // the star inventory only: keys-side on the store, never the
+          // full header listing over the wire
+          final Set<SegmentCache.StarKey> knownStars = cache.knownStars();
+          factTablesToPrime.addAll( knownStars );
+          for ( Object catalog : context.getCatalogCache().getCachedCatalogs() ) {
+            var rolapCatalog = (RolapCatalog) catalog;
+            for ( RolapStar star : rolapCatalog.getRolapStarRegistry().getStars() ) {
+              primeStarFrom( cache, star, knownStars );
+            }
+          }
+        } catch ( RuntimeException | Error e ) {
+          LOGGER.warn( "priming from attached cache failed; queries load cold", e );
+        }
+      } ) );
+    } catch ( RuntimeException rejected ) {
+      LOGGER.debug( "attach-time priming rejected", rejected );
+    }
+  }
+
+  /** Primes one loaded star from the newly attached cache's inventory. */
+  private void primeStarFrom(
+      SegmentCache cache, RolapStar star, Set<SegmentCache.StarKey> knownStars ) {
+    final SegmentCache.StarKey starKey = new SegmentCache.StarKey(
+        star.getCatalog().getChecksum().toString(),
+        star.getFactTable().getAlias() );
+    if ( !knownStars.contains( starKey ) ) {
+      return;
+    }
+    // per-star prefix match: only this star's headers travel
+    final List<SegmentHeader> matching = cache.getSegmentHeaders(
+        star.getCatalog().getChecksum(), star.getFactTable().getAlias() );
+    if ( !matching.isEmpty() ) {
+      actor.event(
+        this,
+        new PrimeStarEvent( EventContext.external( context ), star, matching ) );
+    }
+    // consume the marker: this star is primed - leaving it made the next
+    // schedulePrimingIfPending list the store a second time
+    factTablesToPrime.remove( starKey );
+  }
+
+  /** Detaches the cache without tearing it down; the provider owns it. */
+  public void removeExternalCache( SegmentCache cache ) {
+    SegmentCache.SegmentCacheListener listener = externalCacheListeners.remove( cache );
+    if ( listener != null ) {
+      cache.removeListener( listener );
+    }
+    segmentCacheWorkers.removeIf( worker -> {
+      if ( worker.cache == cache ) {
+        // in-flight executor calls degrade to a miss; stale index headers
+        // heal on the next lookup (miss removes them and the load retries)
+        worker.markClosing();
+        return true;
+      }
+      return false;
+    } );
+  }
+
+
+  /**
+   * A session overlay isolates one session's segments (writeback pending
+   * rows) without starting threads: it shares the actor, its thread and both
+   * executors with the given manager and owns only its index registry plus a
+   * local in-memory store. Session values never reach an external cache.
+   */
+  public static SegmentCacheManager sessionOverlay( SegmentCacheManager shared ) {
+    return new SegmentCacheManager( shared );
+  }
+
+  private SegmentCacheManager( SegmentCacheManager shared ) {
+    this.context = shared.context;
+    this.overlay = true;
+    this.sqlExecutor = shared.sqlExecutor;
+    this.cacheExecutor = shared.cacheExecutor;
+    this.storeOps = new SequencedStoreOps( this.cacheExecutor );
+    this.statementCancelExecutor = shared.statementCancelExecutor;
+    this.actor = shared.actor;
+    this.thread = shared.thread;
+    this.indexRegistry = new SegmentCacheIndexRegistry();
+    if ( !context.getConfig().disableCaching() ) {
+      segmentCacheWorkers.add( new SegmentCacheWorker( new MemorySegmentCache(), thread ) );
+    }
+    compositeCache = new CompositeSegmentCache( segmentCacheWorkers, context.getConfig().disableCaching() );
+    factTablesToPrime = ConcurrentHashMap.newKeySet();
   }
 
     private ExecutorService createCacheExecutor(Context<?> context) {
@@ -352,10 +355,13 @@ public class SegmentCacheManager implements OlapSegmentCacheManager {
             // tasks will be put on an unbounded queue.
             context.getConfig().segmentCacheManagerNumberCacheThreads(),
             context.getConfig().segmentCacheManagerNumberCacheThreads(),
-            1,
+            60,
             "daanse.rolap.agg.SegmentCacheManager$cacheExecutor",
             ( r, executor ) -> {
-                throw new OlapRuntimeException(segmentCacheLimitReached);
+                if ( executor.isShutdown() ) {
+                    throw new OlapRuntimeException( "Cache operation submitted after shutdown" );
+                }
+                throw new OlapRuntimeException(SEGMENT_CACHE_LIMIT_REACHED);
             } );
     }
 
@@ -366,58 +372,92 @@ public class SegmentCacheManager implements OlapSegmentCacheManager {
             // tasks will be put on an unbounded queue.
             context.getConfig().segmentCacheManagerNumberSqlThreads(),
             context.getConfig().segmentCacheManagerNumberSqlThreads(),
-            1,
+            60,
             "daanse.rolap.agg.SegmentCacheManager$sqlExecutor",
             ( r, executor ) -> {
-                throw new OlapRuntimeException(sqlQueryLimitReached);
+                if ( executor.isShutdown() ) {
+                    throw new OlapRuntimeException( "Segment SQL submitted after shutdown" );
+                }
+                throw new OlapRuntimeException(SQL_QUERY_LIMIT_REACHED);
             } );
     }
 
-    /**
-   * Load external cached elements for received star. Similar to {@link #externalSegmentCreated(SegmentHeader,
-   * MondrianServer) externalSegmentCreated} but the index is created if not there.
-   *
-   * @param star the star for which the cache is loaded
-   * @return true if elements existed for this star.
-   */
-  public boolean loadCacheForStar( RolapStar star ) {
-    String starFactTableAlias = star.getFactTable().getAlias();
-    if ( starFactTablesToSync.remove( starFactTableAlias ) ) {
-      // make sure the index is created,
-      // using get with star instead of header
-      SegmentCacheIndex index = indexRegistry.getIndex( star );
-      for ( SegmentHeader header : compositeCache.getSegmentHeaders() ) {
-        if ( header.rolapStarFactTableName.equals( starFactTableAlias ) ) {
-          if ( index != null ) {
-            index.add( header, null, false );
-			CellCacheSegmentCreateEvent cacheSegmentCreateEvent = new CellCacheSegmentCreateEvent(
-					new CellCacheEventCommon(new ExecutionEventCommon(
-							new MdxStatementEventCommon(
-									new ConnectionEventCommon(
-											new ServertEventCommon(
-														new EventCommon(Instant.now()),
-							context.getName()), 0), 0), 0), CellCacheEvent.Source.EXTERNAL),
-					header.getConstrainedColumns().size(), 0);
-			context.getMonitor().accept(cacheSegmentCreateEvent);
-          }
-//          new CellCacheSegmentCreateEvent(
-//        		  );
-//          System.currentTimeMillis(),
-//          context.getName(), 0, 0, 0,
-//          , CellCacheEvent.Source.EXTERNAL )
-        }
-      }
-      return true;
+  /** Live counters per attached cache, in composite order. */
+  public List<SegmentCacheStats> getCacheStats() {
+    List<SegmentCacheStats> stats = new ArrayList<>( segmentCacheWorkers.size() );
+    for ( SegmentCacheWorker worker : segmentCacheWorkers ) {
+      stats.add( worker.stats );
     }
-    return false;
+    return stats;
+  }
+
+  /**
+   * Runs a cache operation on the cache executor, ordered with every other
+   * sequenced operation on the same segment id. The chain entry cleans
+   * itself up once it drains.
+   */
+  public <T> CompletableFuture<T> sequencedCacheOp( SegmentHeader header, Supplier<T> op ) {
+    return storeOps.sequenced( header.getUniqueID(), op );
+  }
+
+  /**
+   * Sequences an operation under BOTH segment ids: a rename reads under
+   * the old id and writes under the new, so follow-ups on either id must
+   * run after it. See {@link SequencedStoreOps} for the ordering rules.
+   */
+  public <T> CompletableFuture<T> sequencedCacheOp(
+      SegmentHeader oldHeader, SegmentHeader newHeader, Supplier<T> op ) {
+    return storeOps.sequenced( oldHeader.getUniqueID(), newHeader.getUniqueID(), op );
+  }
+
+  /**
+   * Consumes the star's priming marker and ENQUEUES the header listing -
+   * a true return is a promise, not completion: the headers arrive on
+   * the cache executor and land in the index via the actor later.
+   */
+  public boolean schedulePrimingIfPending( RolapStar star ) {
+    final String alias = star.getFactTable().getAlias();
+    final SegmentCache.StarKey starKey = new SegmentCache.StarKey(
+        star.getCatalog().getChecksum().toString(), alias );
+    if ( !factTablesToPrime.remove( starKey ) ) {
+      return false;
+    }
+    // the store listing is network I/O and runs on the cache executor:
+    // callers hold catalog-build locks the actor also takes, and the
+    // flush path reaches here ON the actor (writeback fact mismatch) -
+    // synchronous listing put store latency under both. Priming is
+    // eventually consistent; a query in the window loads cold.
+    try {
+      pendingPrimingListings.removeIf( java.util.concurrent.Future::isDone );
+      pendingPrimingListings.add( cacheExecutor.submit( () -> {
+        try {
+          // per-star prefix match — the full inventory never travels here
+          final List<SegmentHeader> matching = compositeCache.getSegmentHeaders(
+              star.getCatalog().getChecksum(), alias );
+          if ( !matching.isEmpty() ) {
+            actor.event(
+              this,
+              new PrimeStarEvent( EventContext.external( context ), star, matching ) );
+          }
+        } catch ( RuntimeException | Error e ) {
+          factTablesToPrime.add( starKey );
+          LOGGER.warn( "priming star " + alias + " failed; marker restored", e );
+        }
+      } ) );
+    } catch ( RuntimeException e ) {
+      // rejected submit (the pool's handler reports shutdown as
+      // OlapRuntimeException): keep the marker for a later attach
+      factTablesToPrime.add( starKey );
+    }
+    return true;
   }
 
   @Override
   public <T> T execute( CacheCommand<T> command ) {
-    return actor.execute( handler, command );
+    return actor.execute( command );
   }
 
-  public OlapSegmentCacheIndex getIndexRegistry() {
+  public OlapSegmentCacheIndexRegistry getIndexRegistry() {
     return indexRegistry;
   }
 
@@ -426,30 +466,55 @@ public class SegmentCacheManager implements OlapSegmentCacheManager {
    *
    * Called when a SQL statement has finished loading a segment.
    *
-   * Does not add the segment to the external cache. That is a potentially
-   * long-duration operation, better carried out by a worker.
-   *C
+   * The handling event fills the waiting slot AND decides the store put:
+   * only a header the index still holds is enqueued for the external
+   * caches (sequenced per segment id, off the actor) - a segment a flush
+   * removed mid-load gets no put at all.
+   *
    * @param header segment header
    * @param body   segment body
    */
-  public void loadSucceeded(
+  void loadSucceeded(
     RolapStar star,
     SegmentHeader header,
-    SegmentBody body ) {
-    final ExecutionContext executionContext = ExecutionContext.current();
+    SegmentBody body,
+    CellCacheEvent.Source source ) {
     actor.event(
-      handler,
-      new SegmentLoadSucceededEvent(
-    	Instant.now(),
-        executionContext.getExecution().getDaanseStatement().getDaanseConnection().getContext().getMonitor(),
-        executionContext.getExecution().getDaanseStatement().getDaanseConnection().getContext().getName(),
-        executionContext.getExecution().getDaanseStatement()
-          .getDaanseConnection().getId(),
-        executionContext.getExecution().getDaanseStatement().getId(),
-        executionContext.getExecution().getId(),
-        star,
-        header,
-        body ) );
+      this,
+      new SegmentLoadSucceededEvent( EventContext.current(), star, header, body, source ) );
+  }
+
+  /** Whether segments of the cube go to the caches at all. */
+  public boolean isSegmentCachingEnabled( RolapStar star, String cubeName ) {
+    return !context.getConfig().disableCaching()
+        && star.getCatalog().isCellCachingEnabled( cubeName );
+  }
+
+  /**
+   * Publishes a finished segment: releases every query waiting on the
+   * slot (with the monitor events). The store put is decided ON THE
+   * ACTOR inside the load-succeeded event and only happens while the
+   * index still holds the header - a flush that removed it wins; the
+   * sequencing per segment id merely orders the store ops that do get
+   * enqueued. Shared by the SQL load and the rollup path.
+   */
+  public void cacheLoaded( RolapStar star, SegmentHeader header, SegmentBody body,
+      CellCacheEvent.Source source ) {
+    if ( !isSegmentCachingEnabled( star, header.cubeName ) ) {
+      return;
+    }
+    if ( BitKeyExplain.enabled() ) {
+      BitKeyExplain.EXPLAIN.debug( "publish segment {} | dimensionality {}",
+          BitKeyExplain.explain( header ),
+          BitKeyExplain.explain( star, header.constrainedColsBitKey ) );
+    }
+    // the store put is decided ON THE ACTOR, inside the load-succeeded
+    // event: only a header the index still holds may reach the stores.
+    // The unconditional caller-side put wrote the pre-flush body of a
+    // segment a flush had just constrained away back into every store
+    // under the OLD id (and Redis published its birth cluster-wide) -
+    // the flush was silently non-persistent.
+    loadSucceeded( star, header, body, source );
   }
 
   /**
@@ -465,20 +530,9 @@ public class SegmentCacheManager implements OlapSegmentCacheManager {
     RolapStar star,
     SegmentHeader header,
     Throwable throwable ) {
-    final ExecutionContext executionContext = ExecutionContext.current();
     actor.event(
-      handler,
-      new SegmentLoadFailedEvent(
-        System.currentTimeMillis(),
-        executionContext.getExecution().getDaanseStatement().getDaanseConnection().getContext().getMonitor(),
-        executionContext.getExecution().getDaanseStatement().getDaanseConnection().getContext().getName(),
-        executionContext.getExecution().getDaanseStatement()
-          .getDaanseConnection().getId(),
-        executionContext.getExecution().getDaanseStatement().getId(),
-        executionContext.getExecution().getId(),
-        star,
-        header,
-        throwable ) );
+      this,
+      new SegmentLoadFailedEvent( star, header, throwable ) );
   }
 
   /**
@@ -493,20 +547,9 @@ public class SegmentCacheManager implements OlapSegmentCacheManager {
   public void remove(
     RolapStar star,
     SegmentHeader header ) {
-    final ExecutionContext executionContext = ExecutionContext.current();
     actor.event(
-      handler,
-      new SegmentRemoveEvent(
-	    Instant.now(),
-        executionContext.getExecution().getDaanseStatement().getDaanseConnection().getContext().getMonitor(),
-        executionContext.getExecution().getDaanseStatement().getDaanseConnection().getContext().getName(),
-        executionContext.getExecution().getDaanseStatement()
-          .getDaanseConnection().getId(),
-        executionContext.getExecution().getDaanseStatement().getId(),
-        executionContext.getExecution().getId(),
-        this,
-        star,
-        header ) );
+      this,
+      new SegmentRemoveEvent( EventContext.current(), star, header ) );
   }
 
   /**
@@ -520,16 +563,8 @@ public class SegmentCacheManager implements OlapSegmentCacheManager {
       return;
     }
     actor.event(
-      handler,
-      new ExternalSegmentCreatedEvent(
-    	Instant.now(),
-        context.getMonitor(),
-        context.getName(),
-        0,
-        0,
-        0,
-        this,
-        header ) );
+      this,
+      new ExternalSegmentCreatedEvent( EventContext.external( context ), header ) );
   }
 
   /**
@@ -543,16 +578,8 @@ public class SegmentCacheManager implements OlapSegmentCacheManager {
       return;
     }
     actor.event(
-      handler,
-      new ExternalSegmentDeletedEvent(
-    	Instant.now(),
-        context.getMonitor(),
-        context.getName(),
-        0,
-        0,
-        0,
-        this,
-        header ) );
+      this,
+      new ExternalSegmentDeletedEvent( EventContext.external( context ), header ) );
   }
 
   @Override
@@ -560,42 +587,182 @@ public class SegmentCacheManager implements OlapSegmentCacheManager {
     CellRegion region,
     PrintWriter pw,
     ExecutionContext executionContext ) {
-    actor.execute(
-      handler,
-      new PrintCacheStateCommand( region, pw, executionContext) );
+    // render on the actor, write on the caller: the caller's writer may
+    // be network- or file-bound, and the actor never waits on foreign I/O
+    pw.print( actor.execute(
+      new PrintCacheStateCommand( region, executionContext ) ) );
+    pw.flush();
   }
 
   /**
-   * Shuts down this cache manager and all active threads and indexes.
+   * Shuts down this cache manager and all active threads and indexes. An
+   * overlay only clears its local store; actor and executors belong to the
+   * shared manager.
    */
+  /**
+   * The context-free subset of {@link #shutdown()} for orphaned contexts:
+   * captures ONLY the four executors - never {@code this}, and never the
+   * workers or stores (the in-memory store's listener chain reaches the
+   * manager and through it the context; capturing it would pin the very
+   * graph this cleanup exists to release). The store heap needs no
+   * explicit teardown here: it is ordinary garbage once the context is
+   * unreachable - only the pool THREADS are GC roots that must be told
+   * to stop.
+   */
+  Runnable orphanCleanup() {
+    final ExecutorService actorExecutor = actor.executor;
+    final ExecutorService cachePool = cacheExecutor;
+    final ExecutorService sqlPool = sqlExecutor;
+    final ExecutorService cancelPool = statementCancelExecutor;
+    return () -> {
+      // orphaned: nothing queued matters any more - drop, don't drain
+      actorExecutor.shutdownNow();
+      cachePool.shutdownNow();
+      sqlPool.shutdownNow();
+      cancelPool.shutdownNow();
+    };
+  }
+
   @Override
   public void shutdown() {
-    execute( new ShutdownCommand() );
+    if ( overlay ) {
+      // shut the private store down but keep the LIST: the composite holds
+      // it by reference, and a statement still running on this session
+      // (two statements per XMLA connection are normal) must degrade to
+      // clean misses on closed workers - not find a structurally emptied
+      // composite whose puts vanish without a trace
+      for ( SegmentCacheWorker worker : segmentCacheWorkers ) {
+        worker.shutdown();
+      }
+      return;
+    }
+    if ( !shutdownStarted.compareAndSet( false, true ) ) {
+      return;
+    }
+    // priming listings BEFORE the actor drain: a listing submits its
+    // PrimeStarEvent to the actor, and with the actor already gone every
+    // drained listing failed pointlessly (30s each, one WARN per star)
+    drainPendingPrimingListings();
+    // drain the actor first: events still queued on it submit store ops
+    // to the cache executor, which must outlive the actor for them
+    actor.executor.shutdown();
+    awaitTermination( actor.executor );
+    // drain the sequenced store chains: a chain link submits only when its
+    // predecessor finishes - shutting the pool first rejected late links
+    // and lost queued removes (ghost entries in external stores)
+    awaitPendingCacheWrites();
     cacheExecutor.shutdown();
     sqlExecutor.shutdown();
+    // after the actor drain: index.cancel submits its cancel tasks ON the
+    // actor, so nothing can enqueue here any more
+    statementCancelExecutor.shutdown();
+    awaitTermination( cacheExecutor );
+    awaitTermination( sqlExecutor );
+    awaitTermination( statementCancelExecutor );
+    // tear down only the local in-memory store; external caches are shared
+    // across instances and owned by their providers — detach, never tearDown
+    for ( SegmentCacheWorker worker : segmentCacheWorkers ) {
+      if ( !externalCacheListeners.containsKey( worker.cache ) ) {
+        worker.shutdown();
+      }
+    }
+    segmentCacheWorkers.clear();
+    externalCacheListeners.forEach( SegmentCache::removeListener );
+    externalCacheListeners.clear();
+  }
+
+  /**
+   * Waits until every queued external cache write or remove has run.
+   * Completed chains remove themselves, so this drains to quiescence;
+   * writes race in from queries still running elsewhere.
+   */
+  public void awaitPendingCacheWrites() {
+    // priming listings first: their PrimeStarEvents are then queued on the
+    // actor FIFO ahead of any later lookup command
+    drainPendingPrimingListings();
+    storeOps.awaitQuiescence();
+  }
+
+  private void drainPendingPrimingListings() {
+    for ( java.util.concurrent.Future<?> listing;
+          ( listing = pendingPrimingListings.poll() ) != null; ) {
+      try {
+        listing.get( 30, TimeUnit.SECONDS );
+      } catch ( InterruptedException e ) {
+        Thread.currentThread().interrupt();
+        // break, never return: the caller still owes the store-chain
+        // drain - skipping it dropped queued external removes
+        break;
+      } catch ( Exception e ) {
+        // listing failures are logged where they occur
+      }
+    }
+  }
+
+  private static void awaitTermination( ExecutorService executor ) {
+    try {
+      if ( !executor.awaitTermination( 30, TimeUnit.SECONDS ) ) {
+        executor.shutdownNow();
+      }
+    } catch ( InterruptedException e ) {
+      executor.shutdownNow();
+      Thread.currentThread().interrupt();
+    }
   }
 
   public SegmentBuilder.SegmentConverter getConverter(
     RolapStar star,
     SegmentHeader header ) {
-    return indexRegistry.getIndex( star )
-      .getConverter(
-        header.schemaName,
-        header.schemaChecksum,
-        header.cubeName,
-        header.rolapStarFactTableName,
-        header.measureName,
-        header.compoundPredicates );
+    return getConverter( star, header.factKey() );
+  }
+
+  /**
+   * A header carries everything needed to convert: the runtime predicates
+   * rebuild from the wire form, the measure resolves by name. Null when a
+   * predicate has no structural mapping (opaque) — such a segment is not
+   * servable on this node and reloads instead.
+   */
+  public SegmentBuilder.SegmentConverter getConverter(
+    RolapStar star,
+    SegmentIdentity.FactKey key ) {
+    if ( star == null ) {
+      // no catalog holds this star (yet): the caller falls back to its
+      // request-scoped converter map
+      return null;
+    }
+    // positive results memoized per star: peek walks every header through
+    // here. Misses stay uncached - the catalog build can add measures, and
+    // an unresolvable predicate today may resolve after a reload.
+    final Map<SegmentIdentity.FactKey, SegmentBuilder.SegmentConverter> perStar =
+        converterMemo.computeIfAbsent( star, s -> new ConcurrentHashMap<>() );
+    final SegmentBuilder.SegmentConverter cached = perStar.get( key );
+    if ( cached != null ) {
+      return cached;
+    }
+    RolapStar.Measure measure =
+        star.getFactTable().lookupMeasureByName( key.cubeName(), key.measureName() );
+    if ( measure == null ) {
+      return null;
+    }
+    final SegmentBuilder.SegmentConverter converter =
+        SegmentPredicates.toStarPredicates( key.compoundPredicates(), star )
+            .<SegmentBuilder.SegmentConverter>map(
+                predicates -> new SegmentBuilder.StarSegmentConverter( measure, predicates ) )
+            .orElse( null );
+    if ( converter != null ) {
+      perStar.put( key, converter );
+    }
+    return converter;
   }
 
   /**
    * Makes a quick request to the aggregation manager to see whether the cell value required by a particular cell
    * request is in external cache.
    *
-   * 'Quick' is relative. It is an asynchronous request (due to
-   * the aggregation manager being an actor) and therefore somewhat slow. If the segment is in cache, will save batching
-   * up future requests and re-executing the query. Win should be particularly noticeable for queries running on a
-   * populated cache. Without this feature, every query would require at least two iterations.
+   * One synchronous actor round-trip; the body fetch from the composite
+   * cache happens afterwards on the caller's thread. If the segment is in
+   * cache this saves batching up the request and re-executing the query -
+   * without it, every query would require at least two iterations.
    *
    * Request does not issue SQL to populate the segment. Nor does it
    * try to find existing segments for rollup. Those operations can wait until next phase.
@@ -609,34 +776,55 @@ public class SegmentCacheManager implements OlapSegmentCacheManager {
     // Use currentOrNull() as peek may be called from contexts without execution context
     // (e.g., virtual cubes, background cache operations)
     ExecutionContext executionContext = ExecutionContext.currentOrNull();
-    final SegmentCacheManager.PeekResponse response =
+    final RolapStar star = request.getMeasure().getStar();
+    final Map<SegmentHeader, Future<SegmentBody>> headerMap =
       execute(
         new PeekCommand( request, executionContext) );
-    for ( SegmentHeader header : response.headerMap.keySet() ) {
+    // converters reconstruct purely from the header — on this thread,
+    // not on the actor
+    for ( SegmentHeader header : headerMap.keySet() ) {
       final SegmentBody body = compositeCache.get( header );
       if ( body != null ) {
-        final SegmentBuilder.SegmentConverter converter =
-          response.converterMap.get(
-            SegmentCacheIndexImpl.makeConverterKey( header ) );
+        final SegmentBuilder.SegmentConverter converter = getConverter( star, header );
         if ( converter != null ) {
-          return converter.convert( header, body );
+          try {
+            return converter.convert( header, body );
+          } catch ( IllegalArgumentException e ) {
+            // store-read header with bits this star does not know: drop
+            // it and keep peeking instead of aborting the query
+            LOGGER.warn( "dropping unconvertible store segment {}", header.getUniqueID(), e );
+            // NOT remove(star, header): that builds EventContext.current()
+            // and throws for the context-free callers peek explicitly
+            // supports (virtual cubes, background cache ops)
+            actor.event( this, new SegmentRemoveEvent(
+                executionContext != null
+                    ? EventContext.current()
+                    : EventContext.external( context ),
+                star, header ) );
+          }
         }
       }
     }
     for ( Map.Entry<SegmentHeader, Future<SegmentBody>> entry
-      : response.headerMap.entrySet() ) {
+      : headerMap.entrySet() ) {
       final Future<SegmentBody> bodyFuture = entry.getValue();
       if ( bodyFuture != null ) {
-        final SegmentBody body =
-          Util.safeGet(
-            bodyFuture,
-            "Waiting for segment to load" );
         final SegmentHeader header = entry.getKey();
-        final SegmentBuilder.SegmentConverter converter =
-          response.converterMap.get(
-            SegmentCacheIndexImpl.makeConverterKey( header ) );
-        if ( converter != null ) {
+        // converter check BEFORE the wait: it is a pure function of the
+        // header, and an unconvertible one otherwise cost the full
+        // foreign-load latency just to discard the body
+        final SegmentBuilder.SegmentConverter converter = getConverter( star, header );
+        if ( converter == null ) {
+          continue;
+        }
+        final SegmentBody body =
+          awaitPeekedBody( bodyFuture, executionContext );
+        try {
           return converter.convert( header, body );
+        } catch ( IllegalArgumentException e ) {
+          // same guard as the store loop above: an alien header must not
+          // abort the peeking query - keep trying the remaining futures
+          LOGGER.warn( "dropping unconvertible in-flight segment {}", header.getUniqueID(), e );
         }
       }
     }
@@ -644,201 +832,87 @@ public class SegmentCacheManager implements OlapSegmentCacheManager {
   }
 
   /**
-   * Visitor for messages (commands and events).
+   * Waits for someone else's in-flight load of a peeked segment. Sliced
+   * and cancel-aware like the query path's waits - the old unbounded
+   * safeGet pinned the peeking user thread forever when the loading query
+   * ran against a wedged database (the shepherd only cancels the
+   * FutureTask, never this latch). Without an execution context the wait
+   * is bounded at 30 seconds. Unwrap semantics mirror Util.safeGet.
    */
-  public interface Visitor {
-    void visit( SegmentLoadSucceededEvent event );
-
-    void visit( SegmentLoadFailedEvent event );
-
-    void visit( SegmentRemoveEvent event );
-
-    void visit( ExternalSegmentCreatedEvent event );
-
-    void visit( ExternalSegmentDeletedEvent event );
-  }
-
-  private class Handler implements Visitor {
-    @Override
-	public void visit( SegmentLoadSucceededEvent event ) {
-      indexRegistry.getIndex( event.star )
-        .loadSucceeded(
-          event.header,
-          event.body );
-
-
-		CellCacheSegmentCreateEvent cacheSegmentCreateEvent = new CellCacheSegmentCreateEvent(
-				new CellCacheEventCommon(new ExecutionEventCommon(
-						new MdxStatementEventCommon(
-								new ConnectionEventCommon(
-										new ServertEventCommon(
-						new EventCommon(event.timestamp), event.serverId),
-						event.connectionId), event.statementId), event.executionId), CellCacheEvent.Source.EXTERNAL),
-				event.header.getConstrainedColumns().size(), event.body == null ? 0 : event.body.getValueMap().size());
-
-		event.monitor.accept(cacheSegmentCreateEvent);
-
-//        new CellCacheSegmentCreateEvent(
-//          event.timestamp,
-//          event.serverId,
-//          event.connectionId,
-//          event.statementId,
-//          event.executionId,
-//          event.header.getConstrainedColumns().size(),
-//          event.body == null
-//            ? 0
-//            : event.body.getValueMap().size(),
-//          CellCacheEvent.Source.SQL )
-    }
-
-    @Override
-	public void visit( SegmentLoadFailedEvent event ) {
-      indexRegistry.getIndex( event.star )
-        .loadFailed(
-          event.header,
-          event.throwable );
-    }
-
-    @Override
-	public void visit( final SegmentRemoveEvent event ) {
-      indexRegistry.getIndex( event.star )
-        .remove( event.header );
-
-
-		CellCacheSegmentDeleteEvent cacheSegmentDeleteEvent = new CellCacheSegmentDeleteEvent(
-				new CellCacheEventCommon(new ExecutionEventCommon(
-						new MdxStatementEventCommon(
-								new ConnectionEventCommon(
-										new ServertEventCommon(
-						new EventCommon(event.timestamp), event.serverId),
-						event.connectionId), event.statementId), event.executionId), CellCacheEvent.Source.CACHE_CONTROL),
-				event.header.getConstrainedColumns().size());
-		event.monitor.accept(cacheSegmentDeleteEvent);
-//        new CellCacheSegmentDeleteEvent(
-//          event.timestamp,
-//          event.serverId,
-//          event.connectionId,
-//          event.statementId,
-//          event.executionId,
-//          event.header.getConstrainedColumns().size(),
-//      CellCacheEvent.Source.CACHE_CONTROL )
-
-      // Remove the segment from external caches. Use an executor, because
-      // it may take some time. We discard the future, because we don't
-      // care too much if it fails.
-      final Future<?> future = event.cacheMgr.cacheExecutor.submit(
-        () -> {
-          try {
-            // Note that the SegmentCache API doesn't require
-            // us to verify that the segment exists (by calling
-            // "contains") before we call "remove".
-            event.cacheMgr.compositeCache.remove( event.header );
-          } catch ( Exception e ) {
-            LOGGER.warn(
-              "remove header failed: " + event.header,
-              e );
-          }
+  private SegmentBody awaitPeekedBody( Future<SegmentBody> bodyFuture,
+      ExecutionContext executionContext ) {
+    final long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos( 30 );
+    while ( true ) {
+      if ( executionContext != null ) {
+        executionContext.checkCancelOrTimeout();
+        final Execution execution = executionContext.getExecution();
+        if ( execution != null ) {
+          execution.checkCancelOrTimeout();
         }
-      );
-      Util.safeGet( future, "SegmentCacheManager.segmentremoved" );
-    }
-
-    @Override
-	public void visit( ExternalSegmentCreatedEvent event ) {
-      final SegmentCacheIndex index =
-        event.cacheMgr.indexRegistry.getIndex( event.header );
-      if ( index == null ) {
-        LOGGER.debug(
-          "SegmentCacheManager.Handler.visitExternalCreated:No index found for external SegmentHeader:{}",
-            event.header );
-        return;
+      } else if ( System.nanoTime() - deadlineNanos >= 0 ) {
+        throw Util.newError( "timed out waiting for a peeked segment to load" );
       }
-      final RolapStar star = getStar( event.header );
-      if ( star == null ) {
-        // TODO FIXME this happens when a cache event comes
-        // in but the rolap schema pool was cleared.
-        // we should find a way to trigger the init remotely.
-        return;
+      try {
+        return bodyFuture.get( 1, TimeUnit.SECONDS );
+      } catch ( TimeoutException e ) {
+        // slice elapsed - re-check cancellation and keep waiting
+      } catch ( InterruptedException e ) {
+        Thread.currentThread().interrupt();
+        throw Util.newError( e, "Waiting for segment to load" );
+      } catch ( ExecutionException e ) {
+        Throwable cause = e.getCause();
+        if ( cause instanceof RuntimeException runtimeException ) {
+          throw runtimeException;
+        }
+        if ( cause instanceof Error error ) {
+          throw error;
+        }
+        throw Util.newError( cause, "Waiting for segment to load" );
       }
-
-      // Index the new segment
-      index.add(
-        event.header,
-        getConverter( star, event.header ),
-        false );
-
-      // Put an event on the monitor.
-
-		CellCacheSegmentCreateEvent cacheSegmentCreateEvent = new CellCacheSegmentCreateEvent(
-				new CellCacheEventCommon(
-						new ExecutionEventCommon(
-								new MdxStatementEventCommon(
-										new ConnectionEventCommon(new ServertEventCommon(
-												new EventCommon(event.timestamp), event.serverId), event.connectionId),
-										event.statementId),
-								event.executionId),
-						CellCacheEvent.Source.EXTERNAL),
-				event.header.getConstrainedColumns().size(), 0);
-		event.monitor.accept(cacheSegmentCreateEvent
-    		  );
-//        new CellCacheSegmentCreateEvent(
-//          event.timestamp,
-//          event.serverId,
-//          event.connectionId,
-//          event.statementId,
-//          event.executionId,
-//          event.header.getConstrainedColumns().size(),
-//          0,
-//          CellCacheEvent.Source.EXTERNAL )
-
-    }
-
-    @Override
-	public void visit( ExternalSegmentDeletedEvent event ) {
-      final SegmentCacheIndex index =
-        event.cacheMgr.indexRegistry.getIndex( event.header );
-      if ( index == null ) {
-        LOGGER.debug(
-          "SegmentCacheManager.Handler.visitExternalDeleted:No index found for external SegmentHeader:",
-            event.header );
-        return;
-      }
-      index.remove( event.header );
-
-		CellCacheSegmentDeleteEvent cacheSegmentDeleteEvent = new CellCacheSegmentDeleteEvent(
-				new CellCacheEventCommon(new ExecutionEventCommon(
-						new MdxStatementEventCommon(
-								new ConnectionEventCommon(
-										new ServertEventCommon(
-						new EventCommon(event.timestamp), event.serverId),
-						event.connectionId), event.statementId), event.executionId), CellCacheEvent.Source.EXTERNAL),
-				event.header.getConstrainedColumns().size());
-		event.monitor.accept(cacheSegmentDeleteEvent);
-//        new CellCacheSegmentDeleteEvent(
-//          event.timestamp,
-//          event.serverId,
-//          event.connectionId,
-//          event.statementId,
-//          event.executionId,
-//
-//          CellCacheEvent.Source.EXTERNAL )
     }
   }
-/*
-  interface Message {
 
+  /**
+   * The identity every monitor event carries: when it happened, where it
+   * goes, and which server/connection/statement/execution produced it.
+   */
+  private record EventContext( Instant timestamp, EventBus monitor, String serverId,
+      long connectionId, long statementId, long executionId ) {
 
+    /** The identity of the current execution. */
+    static EventContext current() {
+      final ExecutionContext executionContext = ExecutionContext.current();
+      final var statement = executionContext.getExecution().getDaanseStatement();
+      return new EventContext(
+          Instant.now(),
+          statement.getDaanseConnection().getContext().getMonitor(),
+          statement.getDaanseConnection().getContext().getName(),
+          statement.getDaanseConnection().getId(),
+          statement.getId(),
+          executionContext.getExecution().getId() );
+    }
+
+    /** An externally triggered event: no execution to attribute it to. */
+    static EventContext external( Context<?> context ) {
+      return new EventContext(
+          Instant.now(), context.getMonitor(), context.getName(), 0, 0, 0 );
+    }
   }
 
-  public abstract static class Command<T> implements Message {
-
-
-    public abstract Locus getLocus();
-    public abstract T call() throws Exception;
-
+  private static CellCacheEventCommon cellCacheEventCommon(
+      EventContext eventContext, CellCacheEvent.Source source ) {
+    return new CellCacheEventCommon(
+        new ExecutionEventCommon(
+            new MdxStatementEventCommon(
+                new ConnectionEventCommon(
+                    new ServertEventCommon(
+                        new EventCommon( eventContext.timestamp() ),
+                        eventContext.serverId() ),
+                    eventContext.connectionId() ),
+                eventContext.statementId() ),
+            eventContext.executionId() ),
+        source );
   }
-  */
-
   /**
    * Command to flush a particular region from cache.
    */
@@ -847,6 +921,10 @@ public class SegmentCacheManager implements OlapSegmentCacheManager {
     private final CacheControlImpl cacheControlImpl;
     private final ExecutionContext executionContext;
     private final SegmentCacheManager cacheMgr;
+    // trace output is buffered here and printed by the CALLER: the command
+    // runs on the actor thread, which must never block on the caller's
+    // PrintWriter (a slow or interactive sink would stall every cache op)
+    private final List<String> traceMessages = new ArrayList<>();
 
     public FlushCommand(
       ExecutionContext executionContext,
@@ -870,113 +948,135 @@ public class SegmentCacheManager implements OlapSegmentCacheManager {
       final SegmentColumn[] flushRegion = CacheControlImpl.findAxisValues( region );
       final List<RolapStar> starList = CacheControlImpl.getStarList( region );
 
-      final List<SegmentHeader> headers = getIntersectingHeaders( measures, flushRegion );
+      final List<Pair<RolapStar, SegmentHeader>> headers = getIntersectingHeaders( measures, flushRegion );
 
       // If flushRegion is empty, this means we must clear all
       // segments for the region's measures.
       if ( flushRegion.length == 0 ) {
-        clearAllSegmentsForRegionsMeasures( starList, headers );
-        return new FlushResult( Collections.emptyList() );
+        return new FlushResult(
+          clearAllSegmentsForRegionsMeasures( starList, headers ), traceMessages );
       }
       return getFlushResult( flushRegion, starList, headers );
 
     }
 
     private FlushResult getFlushResult( SegmentColumn[] flushRegion, List<RolapStar> starList,
-                                        List<SegmentHeader> headers ) {
+                                        List<Pair<RolapStar, SegmentHeader>> headers ) {
       // Now we know which headers intersect. For each of them,
       // we append an excluded region.
       //
       // TODO: Optimize the logic here. If a segment is mostly
       // empty, we should trash it completely.
-      final List<Callable<Boolean>> callableList =
+      final List<Supplier<CompletableFuture<Boolean>>> taskList =
         new ArrayList<>();
-      for ( final SegmentHeader header : headers ) {
+      for ( final Pair<RolapStar, SegmentHeader> pair : headers ) {
+        final SegmentHeader header = pair.right;
+        final SegmentCacheIndex index = cacheMgr.indexRegistry.getIndex( pair.left );
         if ( !header.canConstrain( flushRegion ) ) {
-          // We have to delete that segment altogether.
-          cacheControlImpl.trace(
-            "discard segment - it cannot be constrained and maintain consistency:\n"
-              + header.getDescription() );
-          for ( RolapStar star : starList ) {
-            cacheMgr.indexRegistry.getIndex( star ).remove( header );
+          // We have to delete that segment altogether - from the STORES
+          // too: an index-only remove left the entry behind, and the next
+          // priming or attach re-indexed the flushed segment (the flush
+          // was not persistent). Same task shape as the empty-region path.
+          if ( cacheControlImpl.isTraceEnabled() ) {
+            traceMessages.add(
+              "discard segment - it cannot be constrained and maintain consistency:\n"
+                + header.getDescription() );
           }
+          index.remove( header );
+          taskList.add(
+            // the workers degrade and log their own store failures; a
+            // throw out of here is unexpected and must surface to the
+            // caller's balance as an exceptional completion, not TRUE
+            () -> cacheMgr.sequencedCacheOp( header,
+              () -> cacheMgr.compositeCache.remove( header ) ) );
           continue;
         }
 
         // Build the new header's dimensionality
         final SegmentHeader newHeader = header.constrain( flushRegion );
-
-        // Update the segment index.
-        for ( RolapStar star : starList ) {
-          SegmentCacheIndex index =
-            cacheMgr.indexRegistry.getIndex( star );
-          index.update( header, newHeader );
+        if ( newHeader == header ) {
+          // the box is already excluded (an idempotent re-flush):
+          // nothing to update, rename or publish
+          continue;
         }
+        index.update( header, newHeader );
         // Update all of the cache workers.
-        clearCacheWorkers( callableList, header, newHeader );
+        clearCacheWorkers( taskList, header, newHeader );
       }
-      return new FlushResult( callableList );
+      for ( RolapStar star : starList ) {
+        star.invalidateWorkingStores();
+      }
+      return new FlushResult( taskList, traceMessages );
     }
 
-    private void clearCacheWorkers( List<Callable<Boolean>> callableList, SegmentHeader header,
-                                    SegmentHeader newHeader ) {
+    private void clearCacheWorkers( List<Supplier<CompletableFuture<Boolean>>> taskList,
+                                    SegmentHeader header, SegmentHeader newHeader ) {
       for ( final SegmentCacheWorker worker
         : cacheMgr.segmentCacheWorkers ) {
-        callableList.add(
-          () -> {
-            boolean existed;
-            if ( worker.supportsRichIndex() ) {
-              final SegmentBody sb = worker.get( header );
-              existed = worker.remove( header );
-              if ( sb != null ) {
-                worker.put( newHeader, sb );
-              }
-            } else {
-              // The cache doesn't support rich index. We
-              // have to clear the segment entirely.
-              existed = worker.remove( header );
+        taskList.add(
+          // sequenced under BOTH ids: the target side had no chain, so a
+          // rename chain H->H1, H1->H2 could execute out of order and leave
+          // a ghost segment under the intermediate id
+          () -> cacheMgr.sequencedCacheOp( header, newHeader, () -> {
+            // the body is re-keyed inside the store where the store supports
+            // it (JDBC UPDATE, Redis RENAME); a remote Hazelcast client pulls
+            // the bytes over get and writes them back under the new key
+            boolean renamed = worker.rename( header, newHeader );
+            if ( renamed ) {
+              // the OLD header is dead everywhere now - tell the same-JVM
+              // neighbor catalogs (their indexes still hold it; the store
+              // fires no same-JVM event for its own rename). Idempotent
+              // with a store-level death event (Redis collision publish);
+              // the monitor may count the delete twice, like the create.
+              cacheMgr.externalSegmentDeleted( header, cacheMgr.context );
+              // the store fires no same-JVM CREATE for its own rename
+              // (Hazelcast filters the self-echo, JDBC has no events at
+              // all): the manager publishes the birth itself, so neighbor
+              // catalogs sharing this JVM index the constrained header.
+              // Publication goes to THIS manager only - an overlay's
+              // rename never reaches the shared manager's indexes. The
+              // index add is idempotent for the flushing star (update
+              // already adopted the header); the monitor may count this
+              // segment's creation a second time.
+              cacheMgr.externalSegmentCreated( newHeader, cacheMgr.context );
             }
-            return existed;
-          } );
+            return renamed;
+          } ) );
       }
     }
 
-    private void clearAllSegmentsForRegionsMeasures( List<RolapStar> starList, List<SegmentHeader> headers ) {
-      for ( final SegmentHeader header : headers ) {
-        for ( RolapStar star : starList ) {
-          cacheMgr.indexRegistry.getIndex( star ).remove( header );
-        }
-        // Remove the segment from external caches. Use an
-        // executor, because it may take some time. We discard
-        // the future, because we don't care too much if it fails.
-        cacheControlImpl.trace(
-          "discard segment - it cannot be constrained and maintain consistency:\n"
-            + header.getDescription() );
-
-        final Future<?> task = cacheMgr.cacheExecutor.submit(
-          () -> {
-            try {
-              // Note that the SegmentCache API doesn't
-              // require us to verify that the segment
-              // exists (by calling "contains") before we
-              // call "remove".
-              cacheMgr.compositeCache.remove( header );
-            } catch ( Exception e ) {
-              LOGGER.warn(
-                "remove header failed: " + header,
-                e );
-            }
-          } );
-        Util.safeGet( task, "SegmentCacheManager.flush" );
+    private List<Supplier<CompletableFuture<Boolean>>> clearAllSegmentsForRegionsMeasures(
+        List<RolapStar> starList, List<Pair<RolapStar, SegmentHeader>> headers ) {
+      for ( RolapStar star : starList ) {
+        star.invalidateWorkingStores();
       }
+      // External removes go back to the caller as tasks — the actor thread
+      // must never wait on a store round-trip.
+      final List<Supplier<CompletableFuture<Boolean>>> taskList = new ArrayList<>();
+      for ( final Pair<RolapStar, SegmentHeader> pair : headers ) {
+        final SegmentHeader header = pair.right;
+        cacheMgr.indexRegistry.getIndex( pair.left ).remove( header );
+        if ( cacheControlImpl.isTraceEnabled() ) {
+          traceMessages.add(
+            "discard segment - it cannot be constrained and maintain consistency:\n"
+              + header.getDescription() );
+        }
+        taskList.add(
+          // workers degrade and log their own store failures; a throw is
+          // unexpected and surfaces as an exceptional completion
+          () -> cacheMgr.sequencedCacheOp( header,
+            () -> cacheMgr.compositeCache.remove( header ) ) );
+      }
+      return taskList;
     }
 
     /**
      * For each measure and each star, ask the index
      * which headers intersect.
      */
-    private List<SegmentHeader> getIntersectingHeaders( List<Member> measures, SegmentColumn[] flushRegion ) {
-      final List<SegmentHeader> headers =
+    private List<Pair<RolapStar, SegmentHeader>> getIntersectingHeaders(
+        List<Member> measures, SegmentColumn[] flushRegion ) {
+      final List<Pair<RolapStar, SegmentHeader>> headers =
         new ArrayList<>();
       for ( Member member : measures ) {
         if ( !( member instanceof RolapStoredMeasure storedMeasure ) ) {
@@ -985,48 +1085,50 @@ public class SegmentCacheManager implements OlapSegmentCacheManager {
         final RolapStar star = storedMeasure.getCube().getStar();
         final SegmentCacheIndex index =
           cacheMgr.indexRegistry.getIndex( star );
-        headers.addAll(
-          index.intersectRegion(
-            member.getDimension().getCatalog().getName(),
-            ( (RolapCatalog) member.getDimension().getCatalog() )
-              .getChecksum(),
-            storedMeasure.getCube().getName(),
-            storedMeasure.getName(),
-            storedMeasure.getCube().getStar()
-              .getFactTable().getAlias(),
-            flushRegion ) );
-        if ( cacheControlImpl.isTraceEnabled() ) {
-          headers.sort( Comparator.comparing( SegmentHeader::getUniqueID ) );
+        for ( SegmentHeader header : index.intersectRegion(
+            new SegmentIdentity.RegionKey(
+              member.getDimension().getCatalog().getName(),
+              ( (RolapCatalog) member.getDimension().getCatalog() )
+                .getChecksum(),
+              storedMeasure.getCube().getName(),
+              storedMeasure.getCube().getStar()
+                .getFactTable().getAlias(),
+              storedMeasure.getName() ),
+            flushRegion ) ) {
+          headers.add( Pair.of( star, header ) );
         }
+      }
+      if ( cacheControlImpl.isTraceEnabled() ) {
+        headers.sort( Comparator.comparing( p -> p.right.getUniqueID() ) );
       }
       return headers;
     }
   }
 
-  private class PrintCacheStateCommand implements CacheCommand<Void> {
-    private final PrintWriter pw;
+  private class PrintCacheStateCommand implements CacheCommand<String> {
     private final ExecutionContext executionContext;
     private final CellRegion region;
 
     public PrintCacheStateCommand(
       CellRegion region,
-      PrintWriter pw,
       ExecutionContext executionContext ) {
       this.region = region;
-      this.pw = pw;
       this.executionContext = executionContext;
     }
 
     @Override
-	public Void call() {
+	public String call() {
+      final StringWriter buffer = new StringWriter();
+      final PrintWriter out = new PrintWriter( buffer );
       final List<RolapStar> starList =
         CacheControlImpl.getStarList( region );
       starList.sort( Comparator.comparing( o -> o.getFactTable().getAlias() ) );
       for ( RolapStar star : starList ) {
         indexRegistry.getIndex( star )
-          .printCacheState( pw );
+          .printCacheState( out );
       }
-      return null;
+      out.flush();
+      return buffer.toString();
     }
 
     @Override
@@ -1040,368 +1142,394 @@ public class SegmentCacheManager implements OlapSegmentCacheManager {
    * to flush segments from the external cache(s).
    */
   public static class FlushResult {
-    public final List<Callable<Boolean>> tasks;
+    public final List<Supplier<CompletableFuture<Boolean>>> tasks;
+    /** Buffered trace output, printed by the caller off the actor thread. */
+    public final List<String> traceMessages;
 
-    public FlushResult( List<Callable<Boolean>> tasks ) {
+    public FlushResult( List<Supplier<CompletableFuture<Boolean>>> tasks ) {
+      this( tasks, List.of() );
+    }
+
+    public FlushResult( List<Supplier<CompletableFuture<Boolean>>> tasks, List<String> traceMessages ) {
       this.tasks = tasks;
+      this.traceMessages = traceMessages;
     }
+  }
+
+
+  private abstract static class Event {
+
+    /** Applies this event to the manager's state, on the actor thread. */
+    abstract void run( SegmentCacheManager cacheMgr );
   }
 
   /**
-   * Special exception, thrown only by {@link ShutdownCommand}, telling the actor to shut down.
+   * Single-thread executor that confines every index mutation to one actor
+   * thread; commands answer synchronously, events run fire-and-forget.
    */
-  private static class PleaseShutdownException extends RuntimeException {
-    private PleaseShutdownException() {
-    }
-  }
+  private static class Actor {
 
-  private static class ShutdownCommand implements CacheCommand<String> {
+    private static final AtomicInteger NAME_COUNTER = new AtomicInteger();
 
-    @Override
-	public String call() throws Exception {
-      throw new PleaseShutdownException();
-    }
+    final ExecutorService executor;
+    final Thread thread;
 
-    @Override
-	public ExecutionContext getExecutionContext() {
-      return null;
-    }
-  }
-
-  private abstract static class Event implements Message {
-
-
-    /**
-     * Dispatches a call to the appropriate {@code visit} method on {@link org.eclipse.daanse.olap.api.monitor.Visitor}.
-     *
-     * @param visitor Visitor
-     */
-    abstract void acceptWithoutResponse( Visitor visitor );
-
-  }
-
-  /**
-   * Copy-pasted from {@link org.eclipse.daanse.olap.api.monitor.EventBus}. Consider abstracting common code.
-   */
-  private static class Actor implements Runnable {
-
-    private final BlockingQueue<Pair<Handler, Message>> eventQueue =
-      new ArrayBlockingQueue<>( 1000 );
-
-    private final BlockingHashMap<CacheCommand<?>, Pair<Object, Throwable>>
-      responseMap =
-      new BlockingHashMap<>( 1000 );
-
-    private final AtomicBoolean shuttingDown = new AtomicBoolean( false );
-
-    @Override
-	public void run() {
+    Actor() {
+      final Thread[] holder = new Thread[1];
+      // suffixed like the pools' names (Util appends _n there)
+      final String name = "daanse.rolap.agg.SegmentCacheManager$ACTOR_" + NAME_COUNTER.incrementAndGet();
+      executor = Executors.newSingleThreadExecutor( r -> {
+        Thread t = new Thread( r, name );
+        t.setDaemon( true );
+        holder[0] = t;
+        return t;
+      } );
+      // materialize the thread so index guards can compare against it
       try {
-        while ( true ) {
-          final Pair<Handler, Message> entry = eventQueue.take();
-          final Handler handler = entry.left;
-          final Message message = entry.right;
-          try {
-            // A message is either a command or an event.
-            // A command returns a value that must be read by
-            // the caller.
-            if ( message instanceof CacheCommand<?> command ) {
-              try {
-                Object result;
-                ExecutionContext ctx = command.getExecutionContext();
-                if (ctx != null) {
-                  result = ExecutionContext.where(ctx, () -> {
-                    return command.call();
-                  });
-                } else {
-                  // No execution context available - execute directly
-                  result = command.call();
-                }
-                responseMap.put(
-                  command,
-                  Pair.of( result, null ) );
-              } catch ( PleaseShutdownException e ) {
-                shutDownAndDrainQueue( command );
-                return; // exit event loop
-              } catch ( Exception e ) {
-                responseMap.put(
-                  command,
-                  Pair.of( null, e ) );
-              }
-            } else {
-              Event event = (Event) message;
-              event.acceptWithoutResponse( handler );
-
-              // Broadcast the event to anyone who is interested.
-              RolapUtil.MONITOR_LOGGER.debug( message.toString() );
-              //TODO: here had  Logger been used to broadcast the full message.
-              //if necessary we should use eventadmin or something to broadcast events
-
-            }
-          } catch ( Exception e ) {
-            LOGGER.error( e.getMessage(), e );
-          }
-        }
+        executor.submit( () -> { } ).get();
       } catch ( InterruptedException e ) {
         Thread.currentThread().interrupt();
-        LOGGER.error( e.getMessage(), e );
-      } catch ( Exception e ) {
-        LOGGER.error( e.getMessage(), e );
+      } catch ( ExecutionException e ) {
+        // empty task
       }
+      thread = holder[0];
     }
 
-    /**
-     * on shutdown, stop accepting new queue elements, then drain the existing queue putting errors in the responseMap
-     * 
-     * This makes sure no threads waiting on a response in the {@link #responseMap} remain blocked.
-     */
-    private void shutDownAndDrainQueue( CacheCommand<?> command ) {
-      LOGGER.trace( "Shutting down and draining event queue" );
-      shuttingDown.set( true );
-      responseMap.put( command, Pair.of( null, null ) );
-      List<Pair<Handler, Message>> pendingQueue = new ArrayList<>( eventQueue.size() );
-      eventQueue.drainTo( pendingQueue );
-      for ( Pair<Handler, Message> queueElement : pendingQueue ) {
-        if ( queueElement.getValue() instanceof CacheCommand<?> ) {
-          responseMap.put(
-            (CacheCommand<?>) queueElement.getValue(),
-            Pair.of( null, Util.newError( "Actor queue already shut down" ) ) );
+    <T> T execute( CacheCommand<T> command ) {
+      try {
+        return executor.submit( () -> {
+          ExecutionContext ctx = command.getExecutionContext();
+          if ( ctx != null ) {
+            return ExecutionContext.where( ctx, () -> {
+              return command.call();
+            } );
+          }
+          return command.call();
+        } ).get();
+      } catch ( InterruptedException e ) {
+        Thread.currentThread().interrupt();
+        throw Util.newError( e, "Exception while executing " + command );
+      } catch ( ExecutionException e ) {
+        final Throwable cause = e.getCause();
+        if ( cause instanceof RuntimeException runtime ) {
+          throw runtime;
         }
-      }
-    }
-
-    <T> T execute( Handler handler, CacheCommand<T> command ) {
-      if ( shuttingDown.get() ) {
+        if ( cause instanceof Error error ) {
+          throw error;
+        }
+        throw new IllegalStateException( cause );
+      } catch ( RejectedExecutionException e ) {
+        // answer after the pre-shutdown work: callers see completed commands
+        // first, then the rejection
+        try {
+          executor.awaitTermination( 30, TimeUnit.SECONDS );
+        } catch ( InterruptedException interrupted ) {
+          Thread.currentThread().interrupt();
+        }
         throw Util.newError( "Command submitted after shutdown " + command );
       }
-      try {
-        eventQueue.put( Pair.of( handler, command ) );
-      } catch ( InterruptedException e ) {
-        Thread.currentThread().interrupt();
-        throw Util.newError( e, "Exception while executing " + command );
-      }
-      try {
-        final Pair<Object, Throwable> pair =
-          responseMap.get( command );
-        if ( pair.right != null ) {
-          if ( pair.right instanceof RuntimeException ) {
-            throw (RuntimeException) pair.right;
-          } else if ( pair.right instanceof Error ) {
-            throw (Error) pair.right;
-          } else {
-            throw new IllegalStateException( pair.right );
-          }
-        } else {
-          return (T) pair.left;
-        }
-      } catch ( InterruptedException e ) {
-        Thread.currentThread().interrupt();
-        throw Util.newError( e, "Exception while executing " + command );
-      }
     }
 
-    public void event( Handler handler, Event event ) {
-      if ( shuttingDown.get() ) {
-        throw Util.newError( "Event submitted after shutdown " + event );
-      }
+    void event( SegmentCacheManager cacheMgr, Event event ) {
       try {
-        eventQueue.put( Pair.of( handler, event ) );
-      } catch ( InterruptedException e ) {
-        Thread.currentThread().interrupt();
-        throw Util.newError( e, "Exception while executing " + event );
+        executor.execute( () -> {
+          try {
+            event.run( cacheMgr );
+            RolapUtil.MONITOR_LOGGER.debug( "{}", event );
+          } catch ( Throwable t ) {
+            // Errors included: an escaping Error kills the worker, the
+            // executor replaces it, and both thread guards (index assert,
+            // worker rejection) keep comparing against the dead original.
+            // The one actor thread must never die. execute() is immune the
+            // same way via FutureTask.
+            LOGGER.error( "event failed: " + event, t );
+          }
+        } );
+      } catch ( RejectedExecutionException e ) {
+        throw Util.newError( "Event submitted after shutdown " + event );
       }
     }
   }
-
   private static class SegmentLoadSucceededEvent extends Event {
+    private final EventContext context;
+    private final RolapStar star;
     private final SegmentHeader header;
     private final SegmentBody body;
-    private final Instant timestamp;
-    private final RolapStar star;
-    private final String serverId;
-    private final long connectionId;
-    private final long statementId;
-    private final long executionId;
-    private final EventBus monitor;
+    private final CellCacheEvent.Source source;
 
-    public SegmentLoadSucceededEvent(
-      Instant timestamp,
-      EventBus monitor,
-      String serverId,
-      long connectionId,
-      long statementId,
-      long executionId,
+    SegmentLoadSucceededEvent(
+      EventContext context,
       RolapStar star,
       SegmentHeader header,
-      SegmentBody body ) {
-      this.timestamp = timestamp;
-      this.monitor = monitor;
-      this.serverId = serverId;
-      this.connectionId = connectionId;
-      this.statementId = statementId;
-      this.executionId = executionId;
+      SegmentBody body,
+      CellCacheEvent.Source source ) {
       assert header != null;
       assert star != null;
+      this.context = context;
       this.star = star;
       this.header = header;
       this.body = body; // may be null
+      this.source = source;
     }
 
     @Override
-	public void acceptWithoutResponse( Visitor visitor ) {
-      visitor.visit( this );
+    public String toString() {
+      return "SegmentLoadSucceededEvent(" + header.getUniqueID() + ", source=" + source + ")";
+    }
+
+    @Override
+    void run( SegmentCacheManager cacheMgr ) {
+      final SegmentCacheIndex index = cacheMgr.indexRegistry.getIndex( star );
+      // a header the index no longer holds - or holds only flagged for
+      // removal after this very load (a flush hit it mid-flight) - arrived
+      // late: its body must NOT reach the stores, it is the PRE-flush data
+      // under the old id. contains() alone missed the removeAfterLoad case
+      // and leaked exactly that ghost.
+      final boolean registered = index.isRegistered( header );
+      publishToIndex( index, header, body );
+      context.monitor().accept( new CellCacheSegmentCreateEvent(
+          cellCacheEventCommon( context, source ),
+          header.getConstrainedColumns().size(),
+          body == null ? 0 : body.cellCount() ) );
+      if ( !registered ) {
+        LOGGER.debug( "skipping store put for late segment {}", header.getUniqueID() );
+        return;
+      }
+      // enqueue only - sequenced per segment id on the cache executor,
+      // the actor never waits on the store round-trip
+      cacheMgr.sequencedCacheOp( header, () -> {
+        cacheMgr.compositeCache.put( header, body );
+        return null;
+      } ).whenComplete( ( v, t ) -> {
+        if ( t != null ) {
+          LOGGER.warn( "external cache put failed for " + header.getUniqueID(), t );
+        }
+      } );
+    }
+  }
+
+  /**
+   * The index's loadSucceeded is the only completer of a pending load
+   * slot; if it throws, every query waiting on the slot hangs until its
+   * timeout. Failing the slot hands the waiters the cause instead.
+   */
+  static void publishToIndex( SegmentCacheIndex index, SegmentHeader header, SegmentBody body ) {
+    try {
+      index.loadSucceeded( header, body );
+    } catch ( RuntimeException | Error e ) {
+      try {
+        index.loadFailed( header, e );
+      } catch ( RuntimeException | Error failFailed ) {
+        LOGGER.error( "failing the load slot after a failed publication also failed", failFailed );
+      }
+      throw e;
     }
   }
 
   private static class SegmentLoadFailedEvent extends Event {
+    private final RolapStar star;
     private final SegmentHeader header;
     private final Throwable throwable;
-    private final long timestamp;
-    private final RolapStar star;
-    private final EventBus monitor;
-    private final String serverId;
-    private final long connectionId;
-    private final long statementId;
-    private final long executionId;
 
-    public SegmentLoadFailedEvent(
-      long timestamp,
-      EventBus monitor,
-      String serverId,
-      long connectionId,
-      long statementId,
-      long executionId,
+    SegmentLoadFailedEvent(
       RolapStar star,
       SegmentHeader header,
       Throwable throwable ) {
-      this.timestamp = timestamp;
-      this.monitor = monitor;
-      this.serverId = serverId;
-      this.connectionId = connectionId;
-      this.statementId = statementId;
-      this.executionId = executionId;
-      this.star = star;
-      this.throwable = throwable;
       assert header != null;
+      this.star = star;
       this.header = header;
+      this.throwable = throwable;
     }
 
     @Override
-	public void acceptWithoutResponse( Visitor visitor ) {
-      visitor.visit( this );
+    public String toString() {
+      return "SegmentLoadFailedEvent(" + header.getUniqueID() + ", " + throwable + ")";
+    }
+
+    @Override
+    void run( SegmentCacheManager cacheMgr ) {
+      cacheMgr.indexRegistry.getIndex( star ).loadFailed( header, throwable );
     }
   }
 
   private static class SegmentRemoveEvent extends Event {
-    private final SegmentHeader header;
-    private final Instant timestamp;
-    private final EventBus monitor;
-    private final String serverId;
-    private final long connectionId;
-    private final long statementId;
-    private final long executionId;
+    private final EventContext context;
     private final RolapStar star;
-    private final SegmentCacheManager cacheMgr;
+    private final SegmentHeader header;
 
-    public SegmentRemoveEvent(
-      Instant timestamp,
-      EventBus monitor,
-      String serverId,
-      long connectionId,
-      long statementId,
-      long executionId,
-      SegmentCacheManager cacheMgr,
+    SegmentRemoveEvent(
+      EventContext context,
       RolapStar star,
       SegmentHeader header ) {
-      this.timestamp = timestamp;
-      this.monitor = monitor;
-      this.serverId = serverId;
-      this.connectionId = connectionId;
-      this.statementId = statementId;
-      this.executionId = executionId;
-      this.cacheMgr = cacheMgr;
-      this.star = star;
       assert header != null;
+      this.context = context;
+      this.star = star;
       this.header = header;
     }
 
     @Override
-	public void acceptWithoutResponse( Visitor visitor ) {
-      visitor.visit( this );
+    public String toString() {
+      return "SegmentRemoveEvent(" + header.getUniqueID() + ")";
+    }
+
+    @Override
+    void run( SegmentCacheManager cacheMgr ) {
+      cacheMgr.indexRegistry.getIndex( star ).remove( header );
+      star.invalidateWorkingStores();
+      context.monitor().accept( new CellCacheSegmentDeleteEvent(
+          cellCacheEventCommon( context, CellCacheEvent.Source.CACHE_CONTROL ),
+          header.getConstrainedColumns().size() ) );
+
+      // Remove the segment from external caches, ordered against any put
+      // still queued for the same segment id. Not awaited — this runs on
+      // the actor thread, which must never wait on a store round-trip.
+      cacheMgr.sequencedCacheOp( header, () -> {
+        try {
+          cacheMgr.compositeCache.remove( header );
+        } catch ( Exception e ) {
+          LOGGER.warn( "remove header failed: " + header, e );
+        }
+        return null;
+      } );
     }
   }
 
   private static class ExternalSegmentCreatedEvent extends Event {
-    private final SegmentCacheManager cacheMgr;
+    private final EventContext context;
     private final SegmentHeader header;
-    private final Instant timestamp;
-    private final EventBus monitor;
-    private final String serverId;
-    private final int connectionId;
-    private final long statementId;
-    private final long executionId;
 
-    public ExternalSegmentCreatedEvent(
-      Instant timestamp,
-      EventBus monitor,
-      String serverId,
-      int connectionId,
-      long statementId,
-      long executionId,
-      SegmentCacheManager cacheMgr,
+    ExternalSegmentCreatedEvent(
+      EventContext context,
       SegmentHeader header ) {
-      this.timestamp = timestamp;
-      this.monitor = monitor;
-      this.serverId = serverId;
-      this.connectionId = connectionId;
-      this.statementId = statementId;
-      this.executionId = executionId;
       assert header != null;
-      assert cacheMgr != null;
-      this.cacheMgr = cacheMgr;
+      this.context = context;
       this.header = header;
     }
 
     @Override
-	public void acceptWithoutResponse( Visitor visitor ) {
-      visitor.visit( this );
+    public String toString() {
+      return "ExternalSegmentCreatedEvent(" + header.getUniqueID() + ")";
+    }
+
+    @Override
+    void run( SegmentCacheManager cacheMgr ) {
+      // content-identical catalogs opened under different connections each
+      // hold their own index over the same segment ids: the external create
+      // applies to every one of them (symmetric to the deleted event)
+      List<RolapStar> stars = cacheMgr.getStars( header );
+      if ( stars.isEmpty() ) {
+        // this catalog is not loaded here (yet). Mark the fact table so a
+        // later star build primes from the external inventory and picks
+        // this header up along with everything else.
+        cacheMgr.factTablesToPrime.add( new SegmentCache.StarKey(
+            header.schemaChecksum.toString(), header.rolapStarFactTableName ) );
+        // double-check: a concurrent getOrCreateStar may have registered
+        // the star between the miss above and the add - its priming ran
+        // before the marker existed, and every store header of this star
+        // (this one included) would stay invisible until a catalog
+        // rebuild. Re-priming with the fresh marker picks them all up.
+        stars = cacheMgr.getStars( header );
+        if ( stars.isEmpty() ) {
+          LOGGER.debug(
+            "SegmentCacheManager.ExternalSegmentCreatedEvent:No star loaded for external SegmentHeader:{}",
+              header );
+          return;
+        }
+        for ( RolapStar star : stars ) {
+          // the first star consumes the marker and lists the full store
+          // inventory (this header included); a star primed earlier just
+          // needs this one header
+          if ( !cacheMgr.schedulePrimingIfPending( star ) ) {
+            cacheMgr.indexRegistry.getIndex( star ).add( header, false );
+          }
+        }
+        // honest events: this recovery branch indexes the header too
+        context.monitor().accept( new CellCacheSegmentCreateEvent(
+            cellCacheEventCommon( context, CellCacheEvent.Source.EXTERNAL ),
+            header.getConstrainedColumns().size(), 0 ) );
+        return;
+      }
+      for ( RolapStar star : stars ) {
+        cacheMgr.indexRegistry.getIndex( star ).add( header, false );
+      }
+      context.monitor().accept( new CellCacheSegmentCreateEvent(
+          cellCacheEventCommon( context, CellCacheEvent.Source.EXTERNAL ),
+          header.getConstrainedColumns().size(), 0 ) );
+    }
+  }
+
+  /** Feeds pre-existing external headers into a star's index on the actor thread. */
+  private static class PrimeStarEvent extends Event {
+    private final EventContext context;
+    private final RolapStar star;
+    private final List<SegmentHeader> headers;
+
+    PrimeStarEvent(
+      EventContext context,
+      RolapStar star,
+      List<SegmentHeader> headers ) {
+      this.context = context;
+      this.star = star;
+      this.headers = List.copyOf( headers );
+    }
+
+    @Override
+    public String toString() {
+      return "PrimeStarEvent(" + star.getFactTable().getAlias() + ", " + headers.size() + " header(s))";
+    }
+
+    @Override
+    void run( SegmentCacheManager cacheMgr ) {
+      if ( BitKeyExplain.enabled() ) {
+        BitKeyExplain.EXPLAIN.debug( "prime star {} with {} external header(s)",
+            star.getFactTable().getAlias(), headers.size() );
+      }
+      final SegmentCacheIndex index = cacheMgr.indexRegistry.getIndex( star );
+      for ( SegmentHeader header : headers ) {
+        index.add( header, false );
+        context.monitor().accept( new CellCacheSegmentCreateEvent(
+            cellCacheEventCommon( context, CellCacheEvent.Source.EXTERNAL ),
+            header.getConstrainedColumns().size(), 0 ) );
+      }
     }
   }
 
   private static class ExternalSegmentDeletedEvent extends Event {
-    private final SegmentCacheManager cacheMgr;
+    private final EventContext context;
     private final SegmentHeader header;
-    private final Instant timestamp;
-    private final EventBus monitor;
-    private final String serverId;
-    private final int connectionId;
-    private final long statementId;
-    private final long executionId;
 
-    public ExternalSegmentDeletedEvent(
-      Instant timestamp,
-      EventBus monitor,
-      String serverId,
-      int connectionId,
-      long statementId,
-      long executionId,
-      SegmentCacheManager cacheMgr,
+    ExternalSegmentDeletedEvent(
+      EventContext context,
       SegmentHeader header ) {
-      this.timestamp = timestamp;
-      this.monitor = monitor;
-      this.serverId = serverId;
-      this.connectionId = connectionId;
-      this.statementId = statementId;
-      this.executionId = executionId;
       assert header != null;
-      assert cacheMgr != null;
-      this.cacheMgr = cacheMgr;
+      this.context = context;
       this.header = header;
     }
 
     @Override
-	public void acceptWithoutResponse( Visitor visitor ) {
-      visitor.visit( this );
+    public String toString() {
+      return "ExternalSegmentDeletedEvent(" + header.getUniqueID() + ")";
+    }
+
+    @Override
+    void run( SegmentCacheManager cacheMgr ) {
+      // content-identical catalogs opened under different connections each
+      // hold their own index over the same segment ids: the external delete
+      // applies to every one of them
+      final List<RolapStar> deletedStars = cacheMgr.getStars( header );
+      if ( deletedStars.isEmpty() ) {
+        LOGGER.debug(
+          "SegmentCacheManager.ExternalSegmentDeletedEvent:No index found for external SegmentHeader:",
+            header );
+        return;
+      }
+      for ( RolapStar deletedStar : deletedStars ) {
+        cacheMgr.indexRegistry.getIndex( deletedStar ).remove( header );
+        deletedStar.invalidateWorkingStores();
+      }
+      context.monitor().accept( new CellCacheSegmentDeleteEvent(
+          cellCacheEventCommon( context, CellCacheEvent.Source.EXTERNAL ),
+          header.getConstrainedColumns().size() ) );
     }
   }
 
@@ -1426,48 +1554,24 @@ public class SegmentCacheManager implements OlapSegmentCacheManager {
       if ( e.isLocal() ) {
         return;
       }
-      // Async cache handlers may run in background threads without an execution context
-      final CacheCommand<Void> command;
-      final ExecutionContext executionContext = ExecutionContext.currentOrNull();
-      switch ( e.getEventType() ) {
-        case ENTRY_CREATED:
-          command =
-            new CacheCommand<>() {
-              @Override
-              public Void call() {
-                cacheMgr.externalSegmentCreated(
-                  e.getSource(),
-                  context );
-                return null;
-              }
-
-              @Override
-              public ExecutionContext getExecutionContext() {
-                return executionContext;
-              }
-            };
-          break;
-        case ENTRY_DELETED:
-          command =
-            new CacheCommand<>() {
-              @Override
-              public Void call() {
-                cacheMgr.externalSegmentDeleted(
-                  e.getSource(),
-                  context );
-                return null;
-              }
-
-              @Override
-              public ExecutionContext getExecutionContext() {
-                return executionContext;
-              }
-            };
-          break;
-        default:
-          throw new UnsupportedOperationException();
+      // enqueue only — this runs on the store's I/O thread, which must
+      // not wait for the actor. After shutdown the enqueue throws; that
+      // must not escape into the store's event thread (Redis pub/sub,
+      // Hazelcast listener threads react badly to foreign exceptions)
+      try {
+        switch ( e.getEventType() ) {
+          case ENTRY_CREATED:
+            cacheMgr.externalSegmentCreated( e.getSource(), context );
+            break;
+          case ENTRY_DELETED:
+            cacheMgr.externalSegmentDeleted( e.getSource(), context );
+            break;
+          default:
+            throw new UnsupportedOperationException();
+        }
+      } catch ( RuntimeException ex ) {
+        LOGGER.warn( "dropped external cache event after shutdown or failure", ex );
       }
-      cacheMgr.execute( command );
   }
   }
 
@@ -1495,8 +1599,16 @@ public class SegmentCacheManager implements OlapSegmentCacheManager {
       for ( SegmentCacheWorker worker : workers ) {
         final SegmentBody body = worker.get( header );
         if ( body != null ) {
+          if ( BitKeyExplain.enabled() ) {
+            BitKeyExplain.EXPLAIN.debug( "fetch body from {} for {}",
+                worker.cacheName(), BitKeyExplain.explain( header ) );
+          }
           return body;
         }
+      }
+      if ( BitKeyExplain.enabled() && !workers.isEmpty() ) {
+        BitKeyExplain.EXPLAIN.debug( "no external store holds {}",
+            BitKeyExplain.explain( header ) );
       }
       return null;
     }
@@ -1525,6 +1637,26 @@ public class SegmentCacheManager implements OlapSegmentCacheManager {
           }
           return list;
       }
+    }
+
+    @Override
+	public List<SegmentHeader> getSegmentHeaders(
+        ByteString schemaChecksum,
+        String rolapStarFactTableName ) {
+      if ( disableCaching ) {
+        return Collections.emptyList();
+      }
+      final List<SegmentHeader> list = new ArrayList<>();
+      final Set<SegmentHeader> set = new HashSet<>();
+      for ( SegmentCacheWorker worker : workers ) {
+        for ( SegmentHeader header
+            : worker.getSegmentHeaders( schemaChecksum, rolapStarFactTableName ) ) {
+          if ( set.add( header ) ) {
+            list.add( header );
+          }
+        }
+      }
+      return list;
     }
 
     // this method always returns true, but return value needed by api.
@@ -1572,15 +1704,6 @@ public class SegmentCacheManager implements OlapSegmentCacheManager {
       }
     }
 
-    @Override
-	public boolean supportsRichIndex() {
-      for ( SegmentCacheWorker worker : workers ) {
-        if ( !worker.supportsRichIndex() ) {
-          return false;
-        }
-      }
-      return true;
-    }
   }
 
   /**
@@ -1594,7 +1717,7 @@ public class SegmentCacheManager implements OlapSegmentCacheManager {
    * segment header; it is possible that there is no body in the cache. For (b), the client will have to wait for the
    * segment to arrive.
    */
-  private class PeekCommand implements CacheCommand<PeekResponse> {
+  private class PeekCommand implements CacheCommand<Map<SegmentHeader, Future<SegmentBody>>> {
     private final CellRequest request;
     private final ExecutionContext executionContext;
 
@@ -1612,47 +1735,27 @@ public class SegmentCacheManager implements OlapSegmentCacheManager {
     }
 
     @Override
-	public PeekResponse call() {
-      final RolapStar.Measure measure = request.getMeasure();
-      final RolapStar star = measure.getStar();
-      final RolapCatalog catalog = star.getCatalog();
-      final AggregationKey key = new AggregationKey( request );
+	public Map<SegmentHeader, Future<SegmentBody>> call() {
+      final RolapStar star = request.getMeasure().getStar();
+      final SegmentCacheIndex index = indexRegistry.getIndex( star );
       final List<SegmentHeader> headers =
-        indexRegistry.getIndex( star )
-          .locate(
-            catalog.getName(),
-            catalog.getChecksum(),
-            measure.getCubeName(),
-            measure.getName(),
-            star.getFactTable().getAlias(),
-            request.getConstrainedColumnsBitKey(),
-            request.getMappedCellValues(),
-            request.getCompoundPredicateStrings() );
+        index.locate( request.segmentIdentity(), request.getMappedCellValues() );
 
       final Map<SegmentHeader, Future<SegmentBody>> headerMap =
         new HashMap<>();
-      final Map<List, SegmentBuilder.SegmentConverter> converterMap =
-        new HashMap<>();
 
-      // Is there a pending segment? (A segment that has been created and
-      // is loading via SQL.)
-      // Only check for pending segments if we have an execution context
-      if (executionContext != null) {
-        for ( final SegmentHeader header : headers ) {
-          final Future<SegmentBody> bodyFuture =
-            indexRegistry.getIndex( star )
-              .getFuture( executionContext.getExecution(), header );
-          if ( bodyFuture != null ) {
-            converterMap.put(
-              SegmentCacheIndexImpl.makeConverterKey( header ),
-              getConverter( star, header ) );
-            headerMap.put(
-              header, bodyFuture );
-          }
-        }
+      // every located header goes to the client: with a future when a SQL
+      // load is pending (the client waits), without one when the segment is
+      // already loaded (the client asks the composite cache for the body)
+      for ( final SegmentHeader header : headers ) {
+        final Future<SegmentBody> bodyFuture = executionContext == null ? null
+            : index
+                .getFuture( executionContext.getExecution(), header );
+        headerMap.put(
+          header, bodyFuture );
       }
 
-      return new PeekResponse( headerMap, converterMap );
+      return headerMap;
     }
 
     @Override
@@ -1661,68 +1764,37 @@ public class SegmentCacheManager implements OlapSegmentCacheManager {
     }
   }
 
-  private static class PeekResponse {
-    public final Map<SegmentHeader, Future<SegmentBody>> headerMap;
-    public final Map<List, SegmentBuilder.SegmentConverter> converterMap;
-
-    public PeekResponse(
-      Map<SegmentHeader, Future<SegmentBody>> headerMap,
-      Map<List, SegmentBuilder.SegmentConverter> converterMap ) {
-      this.headerMap = headerMap;
-      this.converterMap = converterMap;
-    }
-  }
-
   /**
-   * Registry of all the indexes that were created for this cache manager, per {@link RolapStar}.
+   * Registry of all the indexes that were created for this cache manager,
+   * one per catalog: all stars of a catalog share the index, entries are
+   * disambiguated by their {@code SegmentIdentity}.
    * 
    * The index is based off the checksum of the schema.
    */
-  public class SegmentCacheIndexRegistry implements OlapSegmentCacheIndex{
+  public class SegmentCacheIndexRegistry implements OlapSegmentCacheIndexRegistry{
     private final Map<RolapCatalogKey, SegmentCacheIndex> indexes =
-      Collections.synchronizedMap(
-        new HashMap<>() );
+      new ConcurrentHashMap<>();
+
+    /** Drops the index of a catalog that no longer exists (GC-collected). */
+    public void dropIndex(RolapCatalogKey key) {
+      indexes.remove(key);
+    }
 
     /**
      * Returns the {@link SegmentCacheIndex} for a given {@link RolapStar}.
      */
     public SegmentCacheIndex getIndex( RolapStar star ) {
-      LOGGER.trace(
-        "SegmentCacheManager.SegmentCacheIndexRegistry.getIndex:"
-          + System.identityHashCode( star ) );
-
-      if ( !indexes.containsKey( star.getCatalog().getKey() ) ) {
-        final SegmentCacheIndexImpl index =
-          new SegmentCacheIndexImpl( thread );
-        LOGGER.trace(
-          "SegmentCacheManager.SegmentCacheIndexRegistry.getIndex:Creating New Index {}"
-            + System.identityHashCode( index ) );
-        indexes.put( star.getCatalog().getKey(), index );
+      final SegmentCacheIndex index = indexes.computeIfAbsent(
+        star.getCatalog().getKey(), key -> new SegmentCacheIndexImpl( thread, statementCancelExecutor ) );
+      if ( LOGGER.isTraceEnabled() ) {
+        LOGGER.trace( "getIndex: star={} index={}",
+            System.identityHashCode( star ), System.identityHashCode( index ) );
       }
-      final SegmentCacheIndex index =
-        indexes.get( star.getCatalog().getKey() );
-      LOGGER.trace(
-        "SegmentCacheManager.SegmentCacheIndexRegistry.getIndex:Returning Index {}",
-          System.identityHashCode( index ) );
       return index;
     }
 
-    /**
-     * Returns the {@link SegmentCacheIndex} for a given {@link SegmentHeader}.
-     */
-    private SegmentCacheIndex getIndex(
-      SegmentHeader header ) {
-      final RolapStar star = getStar( header );
-      if ( star == null ) {
-        // TODO FIXME this happens when a cache event comes
-        // in but the rolap schema pool was cleared.
-        // we should find a way to trigger the init remotely.
-        return null;
-      } else {
-        return getIndex( star );
-      }
-    }
-
+    /** SPI hook, called from ExecutionImpl (olap) when a query dies. */
+    @Override
     public void cancelExecutionSegments( Execution exec ) {
       for ( SegmentCacheIndex index : indexes.values() ) {
         index.cancel( exec );
@@ -1730,23 +1802,47 @@ public class SegmentCacheManager implements OlapSegmentCacheManager {
     }
   }
 
-  RolapStar getStar(SegmentHeader header ) {
-    for ( RolapCatalog schema : ((RolapCatalogCache)context.getCatalogCache()).getCachedCatalogs() ) {
+  /**
+   * The first loaded star matching the header's content checksum - skipping
+   * checksum-matching catalogs that have not built the star yet. Content-
+   * identical catalogs under different connections serve identical segments,
+   * so any BUILT match converts the header; deletions use {@link #getStars}.
+   */
+  public RolapStar getStar(SegmentHeader header ) {
+    for ( var catalog0 : context.getCatalogCache().getCachedCatalogs() ) {
+      RolapCatalog schema = (RolapCatalog) catalog0;
       if ( !schema.getChecksum().equals( header.schemaChecksum ) ) {
         continue;
       }
-      // We have a schema match.
-      return schema.getRolapStarRegistry().getStar( header.rolapStarFactTableName );
+      // schema match - but stars build lazily: keep scanning when this
+      // content-identical catalog has not built the star yet (returning
+      // its null aborted the walk and NPEd downstream)
+      RolapStar star = schema.getRolapStarRegistry().getStar( header.rolapStarFactTableName );
+      if ( star != null ) {
+        return star;
+      }
     }
     return null;
   }
 
+  /** Every loaded star matching the header's content checksum. */
+  public List<RolapStar> getStars( SegmentHeader header ) {
+    List<RolapStar> result = new ArrayList<>();
+    for ( var catalog0 : context.getCatalogCache().getCachedCatalogs() ) {
+      RolapCatalog schema = (RolapCatalog) catalog0;
+      if ( schema.getChecksum().equals( header.schemaChecksum ) ) {
+        RolapStar star = schema.getRolapStarRegistry().getStar( header.rolapStarFactTableName );
+        if ( star != null ) {
+          result.add( star );
+        }
+      }
+    }
+    return result;
+  }
+
   /**
-   * Exception which someone can throw to indicate to the Actor that whatever it was doing is not needed anymore. Won't
-   * trigger any output to the logs.
-   *
-   * If your Command throws this, it will be sent back at you.
-   * You must handle it.
+   * Abandons a segment load whose headers left the index (a flush raced
+   * the load); the SQL load path catches it and skips the statement.
    */
   public static final class AbortException extends RuntimeException {
     private static final long serialVersionUID = 1L;

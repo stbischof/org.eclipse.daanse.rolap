@@ -24,6 +24,7 @@
 
 
 package org.eclipse.daanse.rolap.common.agg;
+import org.eclipse.daanse.olap.spi.body.DenseObjectSegmentBody;
 
 import java.util.List;
 import java.util.SortedSet;
@@ -31,7 +32,7 @@ import java.util.SortedSet;
 import org.eclipse.daanse.sql.model.type.BestFitColumnType;
 import org.eclipse.daanse.olap.key.CellKey;
 import org.eclipse.daanse.olap.spi.SegmentBody;
-import  org.eclipse.daanse.olap.util.Pair;
+import org.eclipse.daanse.olap.util.Pair;
 
 /**
  * Implementation of {@link org.eclipse.daanse.rolap.common.agg.DenseSegmentDataset} that stores

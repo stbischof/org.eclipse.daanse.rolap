@@ -26,8 +26,6 @@
 
 package org.eclipse.daanse.rolap.common.result;
 
-import static org.eclipse.daanse.rolap.common.util.SqlExpressionResolver.genericSql;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -35,9 +33,16 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import org.eclipse.daanse.rolap.common.sql.SqlQueryCapabilities;
 import org.eclipse.daanse.sql.dialect.api.Dialect;
+import org.eclipse.daanse.olap.api.monitor.event.CellCacheEvent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.eclipse.daanse.olap.api.result.CellValue;
 import org.eclipse.daanse.olap.api.result.NotLoaded;
 import org.eclipse.daanse.olap.api.result.NullValue;
@@ -50,6 +55,7 @@ import org.eclipse.daanse.olap.common.Util;
 import org.eclipse.daanse.olap.key.BitKey;
 import org.eclipse.daanse.olap.spi.SegmentBody;
 import org.eclipse.daanse.olap.spi.SegmentHeader;
+import org.eclipse.daanse.olap.spi.SegmentIdentity;
 import  org.eclipse.daanse.olap.util.Pair;
 import org.eclipse.daanse.rolap.common.RolapAggregationManager;
 import org.eclipse.daanse.rolap.common.agg.AggregationManager;
@@ -59,14 +65,12 @@ import org.eclipse.daanse.rolap.common.agg.SegmentBuilder;
 import org.eclipse.daanse.rolap.common.agg.SegmentCacheManager;
 import org.eclipse.daanse.rolap.common.agg.SegmentCacheManager.SegmentCacheIndexRegistry;
 import org.eclipse.daanse.rolap.common.agg.SegmentWithData;
-import org.eclipse.daanse.rolap.common.cache.SegmentCacheIndex;
-import org.eclipse.daanse.rolap.common.cache.SegmentCacheIndexImpl;
 import org.eclipse.daanse.rolap.common.evaluator.RolapEvaluator;
 import org.eclipse.daanse.rolap.common.star.RolapStar;
 import org.eclipse.daanse.rolap.element.RolapCube;
 
 /**
- * A FastBatchingCellReader doesn't really Read cells: when asked
+ * A BatchingCellReader doesn't really Read cells: when asked
  * to look up the values of stored measures, it lies, and records the fact
  * that the value was asked for.  Later, we can look over the values which
  * are required, fetch them in an efficient way, and re-run the evaluation
@@ -78,7 +82,10 @@ import org.eclipse.daanse.rolap.element.RolapCube;
  * This class tries to minimize the amount of storage needed to record the
  * fact that a cell was requested.
  */
-public class FastBatchingCellReader implements CellReader {
+public class BatchingCellReader implements CellReader {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(BatchingCellReader.class);
+
 
     private final int cellRequestLimit;
 
@@ -87,7 +94,7 @@ public class FastBatchingCellReader implements CellReader {
     /**
      * Records the number of requests. The field is used for correctness: if
      * the request count stays the same during an operation, you know that the
-     * FastBatchingCellReader has not told any lies during that operation, and
+     * BatchingCellReader has not told any lies during that operation, and
      * therefore the result is true. The field is also useful for debugging.
  */
     private int missCount;
@@ -101,15 +108,84 @@ public class FastBatchingCellReader implements CellReader {
      * Number of occasions that requested cell was in the process of being
      * loaded into cache but not ready.
  */
+    // never incremented: the monitor's cell-cache pending metric reads 0
+    // until a monitor round defines what counts as pending here
     private int pendingCount;
 
     private final AggregationManager aggMgr;
 
     private final boolean cacheEnabled;
 
+    /**
+     * Publishes a rollup like the SQL load does: register the header in the
+     * index FIRST (synchronously, on the actor) so a flush sees the segment
+     * and its remove is sequenced behind the put; then release the slot and
+     * write to the caches via cacheLoaded. Two actor round-trips on purpose:
+     * the registration must be visible before the shared publication path
+     * runs, and merging both would duplicate cacheLoaded's internals.
+     * cacheLoaded is the slot's ONLY completer, so a throw between the two
+     * calls must fail the slot - an open slot serves an eternally pending
+     * future to every later reader of the id.
+     */
+    static void publishRollup(SegmentCacheManager cacheMgr,
+            SegmentWithData segmentWithData, SegmentHeader header, SegmentBody body) {
+        final ExecutionContext executionContext = ExecutionContext.current();
+        try {
+            // the add itself is INSIDE the bracket: an interrupt of this
+            // thread while parked on the actor round-trip leaves the add
+            // running to completion on the actor - the slot is then open
+            // with nobody to complete it
+            cacheMgr.execute(
+                new CacheCommand<Void>() {
+                    @Override
+                    public Void call() throws Exception {
+                        ((SegmentCacheIndexRegistry) cacheMgr.getIndexRegistry())
+                            .getIndex(segmentWithData.getStar())
+                            .add(segmentWithData.getHeader(), true);
+                        return null;
+                    }
+                    @Override
+                    public ExecutionContext getExecutionContext() {
+                        return executionContext;
+                    }
+                });
+            cacheMgr.cacheLoaded(segmentWithData.getStar(), header, body,
+                CellCacheEvent.Source.ROLLUP);
+        } catch (RuntimeException | Error e) {
+            // fail the slot SYNCHRONOUSLY (execute, not a fire-and-forget
+            // event: the dominant trigger is a rejected event, and a
+            // second event would be rejected identically). The interrupt
+            // flag is parked around the recovery - an interrupted thread
+            // could not run the round-trip that closes the slot.
+            final boolean wasInterrupted = Thread.interrupted();
+            try {
+                cacheMgr.execute(
+                    new CacheCommand<Void>() {
+                        @Override
+                        public Void call() throws Exception {
+                            ((SegmentCacheIndexRegistry) cacheMgr.getIndexRegistry())
+                                .getIndex(segmentWithData.getStar())
+                                .loadFailed(segmentWithData.getHeader(), e);
+                            return null;
+                        }
+                        @Override
+                        public ExecutionContext getExecutionContext() {
+                            return executionContext;
+                        }
+                    });
+            } catch (RuntimeException suppressed) {
+                e.addSuppressed(suppressed);
+            } finally {
+                if (wasInterrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            throw e;
+        }
+    }
+
     private final SegmentCacheManager cacheMgr;
 
-    private final RolapAggregationManager.PinSet pinnedSegments;
 
     /**
      * Indicates that the reader has given incorrect results.
@@ -118,29 +194,36 @@ public class FastBatchingCellReader implements CellReader {
 
     private final List<CellRequest> cellRequests = new ArrayList<>();
 
+    /**
+     * Segment identities this reader has already peeked. A peek is one
+     * synchronous actor round-trip; cells of the same identity share the
+     * result — a converted segment sits in the working store, and a
+     * negative answer is not asked again.
+     */
+    private final Set<SegmentIdentity> peekedIdentities = new HashSet<>();
+
     private final Execution execution;
 
     /**
-     * Creates a FastBatchingCellReader.
+     * Creates a BatchingCellReader.
      *
      * @param execution Execution that calling statement belongs to. Allows us
      *                  to check for cancel
      * @param cube      Cube that requests belong to
      * @param aggMgr    Aggregation manager
  */
-    public FastBatchingCellReader(
+    public BatchingCellReader(
         Execution execution,
         RolapCube cube,
         OlapAggregationManager aggMgr)
     {
         this.execution = execution;
         if (cube == null || execution == null) {
-            throw new IllegalArgumentException("FastBatchingCellReader: cube and execution should not be null");
+            throw new IllegalArgumentException("BatchingCellReader: cube and execution should not be null");
         }
         this.cube = cube;
         this.aggMgr = (AggregationManager)aggMgr;
-        cacheMgr = (SegmentCacheManager)aggMgr.getCacheMgr(execution.getDaanseStatement().getDaanseConnection());
-        pinnedSegments = this.aggMgr.createPinSet();
+        cacheMgr = (SegmentCacheManager)aggMgr.getSegmentCacheManager(execution.getDaanseStatement().getDaanseConnection());
         cacheEnabled = !cube.getCatalog().getInternalConnection().getContext().getConfig().disableCaching();
         Integer cellBatchSize = cube.getCatalog().getInternalConnection().getContext()
                 .getConfig().cellBatchSize();
@@ -159,11 +242,10 @@ public class FastBatchingCellReader implements CellReader {
             return NullValue.INSTANCE; // request not satisfiable.
         }
 
-        // Try to retrieve a cell and simultaneously pin the segment which
-        // contains it. The probe API uses the object convention (raw value /
+        // The probe API uses the object convention (raw value /
         // NullValue.INSTANCE / null-for-absent); this reader is the
         // CellValue boundary.
-        final Object o = aggMgr.getCellFromCache(request, pinnedSegments);
+        final Object o = aggMgr.getCellFromCache(request);
 
         if (o != null) {
             ++hitCount;
@@ -175,13 +257,14 @@ public class FastBatchingCellReader implements CellReader {
         // will be worth the wait, because we can avoid the effort of batching
         // up requests that could have been satisfied by the same segment.
         if (cacheEnabled
-            && missCount == 0)
+            && missCount == 0
+            && peekedIdentities.add(request.segmentIdentity()))
         {
             SegmentWithData segmentWithData = cacheMgr.peek(request);
             if (segmentWithData != null) {
                 segmentWithData.getStar().register(segmentWithData);
                 final Object o2 =
-                    aggMgr.getCellFromCache(request, pinnedSegments);
+                    aggMgr.getCellFromCache(request);
                 if (o2 != null) {
                     ++hitCount;
                     return RolapAggregationManager.toCellValue(o2, NullValue.INSTANCE);
@@ -289,7 +372,7 @@ public class FastBatchingCellReader implements CellReader {
                     new BatchLoader.LoadBatchCommand(
                         ExecutionContext.current(),
                         cacheMgr,
-                        org.eclipse.daanse.rolap.common.sql.SqlQueryCapabilities.of(getDialect()),
+                        SqlQueryCapabilities.of(getDialect()),
                         cube,
                         Collections.unmodifiableList(cellRequests1)));
 
@@ -317,8 +400,22 @@ public class FastBatchingCellReader implements CellReader {
                     continue;
                 }
                 headerBodies.put(header, body);
-                final SegmentWithData segmentWithData =
-                    response.convert(header, body);
+                final SegmentWithData segmentWithData;
+                try {
+                    segmentWithData = response.convert(header, body);
+                } catch (IllegalArgumentException e) {
+                    // a store-read header whose key carries bits this star
+                    // does not know cannot be converted; treat it like a
+                    // missing body - drop it from the index and reload -
+                    // instead of aborting the query on every locate
+                    LOGGER.warn("dropping unconvertible store segment {}", header.getUniqueID(), e);
+                    headerBodies.remove(header);
+                    if (cube.getStar() != null) {
+                        cacheMgr.remove(cube.getStar(), header);
+                    }
+                    ++failureCount;
+                    continue;
+                }
                 segmentWithData.getStar().register(segmentWithData);
             }
 
@@ -326,11 +423,6 @@ public class FastBatchingCellReader implements CellReader {
             //
             // TODO this could be improved.
             // See http://jira.pentaho.com/browse/MONDRIAN-1195
-
-            // Rollups that succeeded. Will tell cache mgr to put the headers
-            // into the index and the header/bodies in cache.
-            final Map<SegmentHeader, SegmentBody> succeededRollups =
-                new HashMap<>();
 
             for (final BatchLoader.RollupInfo rollup : response.rollups) {
                 // Gather the required segments.
@@ -344,11 +436,11 @@ public class FastBatchingCellReader implements CellReader {
 
                 final Set<String> keepColumns = new HashSet<>();
                 for (RolapStar.Column column : rollup.constrainedColumns) {
-                    keepColumns.add(
-                        genericSql(column.getExpression()));
+                    keepColumns.add(column.genericSql());
                 }
-                Pair<SegmentHeader, SegmentBody> rollupHeaderBody =
-                    SegmentBuilder.rollup(
+                Pair<SegmentHeader, SegmentBody> rollupHeaderBody;
+                try {
+                    rollupHeaderBody = SegmentBuilder.rollup(
                         map,
                         keepColumns,
                         rollup.constrainedColumnsBitKey,
@@ -356,6 +448,19 @@ public class FastBatchingCellReader implements CellReader {
                         rollup.measure.getDatatype(),
                         cacheMgr.getContext().getConfig().sparseSegmentCountThreshold(),
                         cacheMgr.getContext().getConfig().sparseSegmentDensityThreshold());
+                } catch (IllegalStateException e) {
+                    // the builder's corruption guard (an inexpressible
+                    // excluded region): skip THIS rollup. failureCount is
+                    // bumped like the unconvertible-header path - without
+                    // it the loop broke with the cells unloaded and no SQL
+                    // issued, and the query span to its eval-depth limit;
+                    // with it the iteration cap ends the query with the
+                    // real cause in the log
+                    LOGGER.warn("skipping rollup of {}: {}",
+                        rollup.constrainedColumnsBitKey, e.getMessage());
+                    failureCount++;
+                    continue;
+                }
 
                 final SegmentHeader header = rollupHeaderBody.left;
                 final SegmentBody body = rollupHeaderBody.right;
@@ -366,7 +471,6 @@ public class FastBatchingCellReader implements CellReader {
                 }
 
                 headerBodies.put(header, body);
-                succeededRollups.put(header, body);
 
                 final SegmentWithData segmentWithData =
                     response.convert(header, body);
@@ -374,36 +478,16 @@ public class FastBatchingCellReader implements CellReader {
                 // Register this segment with the local star.
                 segmentWithData.getStar().register(segmentWithData);
 
-                // Make sure that the cache manager knows about this new
-                // segment. First thing we do is to add it to the index.
-                // Then we insert the segment body into the SlotFuture.
-                // This has to be done on the SegmentCacheManager's
-                // Actor thread to ensure thread safety.
-                if (!cacheMgr.getContext().getConfig().disableCaching()) {
-                    final ExecutionContext executionContext = ExecutionContext.current();
-                    cacheMgr.execute(
-                        new CacheCommand<Void>() {
-                            @Override
-							public Void call() throws Exception {
-                                SegmentCacheIndex index =
-                                        ((SegmentCacheIndexRegistry)cacheMgr.getIndexRegistry())
-                                    .getIndex(segmentWithData.getStar());
-                                index.add(
-                                    segmentWithData.getHeader(),
-                                    response.converterMap.get(
-                                        SegmentCacheIndexImpl
-                                            .makeConverterKey(
-                                                segmentWithData.getHeader())),
-                                    true);
-                                index.loadSucceeded(
-                                    segmentWithData.getHeader(), body);
-                                return null;
-                            }
-                            @Override
-							public ExecutionContext getExecutionContext() {
-                                return executionContext;
-                            }
-                        });
+                // Publish like the SQL load does: register the header in the
+                // index FIRST (synchronously, on the actor) so a flush sees
+                // the segment and its remove is sequenced behind the put;
+                // then release the slot and write to the caches. Other
+                // instances hit the shared rollup instead of recomputing it.
+                // A flush that ran before this registration can still be
+                // overwritten by a rollup computed from pre-flush data —
+                // accepted, same as in the loader.
+                if (cacheMgr.isSegmentCachingEnabled(segmentWithData.getStar(), header.cubeName)) {
+                    publishRollup(cacheMgr, segmentWithData, header, body);
                 }
             }
 
@@ -425,7 +509,7 @@ public class FastBatchingCellReader implements CellReader {
                 {
                     final SegmentHeader header = entry.getKey();
                     final Future<SegmentBody> bodyFuture = entry.getValue();
-                    final SegmentBody body = Util.safeGet(
+                    final SegmentBody body = awaitSegmentFuture(
                         bodyFuture,
                         "Waiting for someone else's segment to load via SQL");
                     final SegmentWithData segmentWithData =
@@ -438,7 +522,7 @@ public class FastBatchingCellReader implements CellReader {
                     : sqlSegmentMapFutures)
                 {
                     final Map<Segment, SegmentWithData> segmentMap =
-                        Util.safeGet(
+                        awaitSegmentFuture(
                             sqlSegmentMapFuture,
                             "Waiting for segment to load via SQL");
                     for (SegmentWithData segmentWithData : segmentMap.values())
@@ -456,12 +540,11 @@ public class FastBatchingCellReader implements CellReader {
 
             // Figure out which cell requests are not satisfied by any of the
             // segments retrieved.
-            @SuppressWarnings("unchecked")
             List<CellRequest> old = new ArrayList<>(cellRequests1);
             cellRequests1.clear();
             for (CellRequest cellRequest : old) {
                 if (cellRequest.getMeasure().getStar()
-                    .getCellFromCache(cellRequest, null) == null)
+                    .getCellFromCache(cellRequest) == null)
                 {
                     cellRequests1.add(cellRequest);
                 }
@@ -494,21 +577,23 @@ public class FastBatchingCellReader implements CellReader {
     }
 
     /**
-     * Iterates through cell requests and makes sure .getCardinality has
-     * been called on all constrained columns.  This is a  workaround
-     * to an issue in which cardinality queries can be fired on the Actor
-     * thread, potentially causing a deadlock when interleaved with
-     * other threads that depend both on db connections and Actor responses.
-     *
- */
-    private void preloadColumnCardinality(List<CellRequest> cellRequests) {
-        List<BitKey> loaded = new ArrayList<>();
+     * Calls getCardinality on every constrained column BEFORE the batch
+     * reaches the actor: the probe path acquires the query-limit semaphore
+     * that actor-dependent SQL threads hold - firing it on the actor is one
+     * half of a real deadlock cycle. The dedup is scoped PER STAR: BitKeys
+     * carry positions, not stars, and a star-blind set skipped the second
+     * star of a multi-star batch (virtual cubes), sending its columns to
+     * the actor cold.
+     */
+    static void preloadColumnCardinality(List<CellRequest> cellRequests) {
+        Map<RolapStar, Set<BitKey>> loaded = new HashMap<>();
         for (CellRequest req : cellRequests) {
-            if (!loaded.contains(req.getConstrainedColumnsBitKey())) {
+            Set<BitKey> perStar = loaded.computeIfAbsent(
+                req.getMeasure().getStar(), star -> new HashSet<>());
+            if (perStar.add(req.getConstrainedColumnsBitKey())) {
                 for (RolapStar.Column col : req.getConstrainedColumns()) {
                     col.getCardinality();
                 }
-                loaded.add(req.getConstrainedColumnsBitKey());
             }
         }
     }
@@ -569,10 +654,36 @@ public class FastBatchingCellReader implements CellReader {
     }
 
     /**
-     * Returns the SQL dialect. Overridden in some unit tests.
-     *
-     * @return Dialect
- */
+     * Waits for a segment future in one-second slices with a cancel check
+     * between them: a canceled or timed-out execution stops waiting on a
+     * load (possibly someone else's, which continues for its remaining
+     * clients) instead of pinning its worker thread for the load's full
+     * duration. Unwrap semantics mirror Util.safeGet.
+     */
+    private <T> T awaitSegmentFuture(Future<T> future, String message) {
+        while (true) {
+            execution.checkCancelOrTimeout();
+            try {
+                return future.get(1, TimeUnit.SECONDS);
+            } catch (TimeoutException e) {
+                // slice elapsed - re-check cancellation and keep waiting
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw Util.newError(e, message);
+            } catch (ExecutionException e) {
+                Throwable cause = e.getCause();
+                if (cause instanceof RuntimeException runtimeException) {
+                    throw runtimeException;
+                }
+                if (cause instanceof Error error) {
+                    throw error;
+                }
+                throw Util.newError(cause, message);
+            }
+        }
+    }
+
+    /** Returns the SQL dialect. Overridden in some unit tests. */
     public Dialect getDialect() {
 
         final RolapStar star = cube.getStar();

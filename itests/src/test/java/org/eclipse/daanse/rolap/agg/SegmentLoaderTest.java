@@ -104,12 +104,12 @@ class SegmentLoaderTest extends BatchTestCase {
         Connection connection = context.getConnectionWithDefaultRole();
         cacheMgr =
             (SegmentCacheManager) ((AbstractBasicContext) connection
-                .getContext()).getAggregationManager().getCacheMgr();
+                .getContext()).getAggregationManager().getSegmentCacheManager();
         statement = ((Connection) connection).getInternalStatement();
         execution = new ExecutionImpl(statement, Optional.of(Duration.ofMillis(1000)));
         executionContext = execution.asContext();
         cacheMgr = (SegmentCacheManager) ((AbstractBasicContext)execution.getDaanseStatement().getDaanseConnection()
-            .getContext()).getAggregationManager().getCacheMgr();
+            .getContext()).getAggregationManager().getSegmentCacheManager();
 
         // Note: ExecutionContext.push() removed. Tests should wrap operations in ExecutionContext.where() if needed.
     }
@@ -323,7 +323,7 @@ class SegmentLoaderTest extends BatchTestCase {
             }
 
             @Override
-			public boolean useSparse(boolean sparse, int n, RowList rows,
+			protected boolean decideSparse(SegmentAxis[] axes, int actualCount,
                               int sparseSegmentCountThreshold,
                               double sparseSegmentDensityThreshold) {
                 return true;
@@ -675,8 +675,8 @@ class SegmentLoaderTest extends BatchTestCase {
             6047.0, null, null, 368.0, 473.0, null, null, null, null
         };
         int index = 0;
-        for (Map.Entry<CellKey, Object> x : segment.getData()) {
-            assertEquals(unitSalesValues[index++], x.getValue());
+        for (CellKey key : allPositions(segment)) {
+            assertEquals(unitSalesValues[index++], segment.getData().getObject(key));
         }
     }
 
@@ -707,9 +707,12 @@ class SegmentLoaderTest extends BatchTestCase {
             CellKey.Generator.newCellKey(new int[]{0, 1, 3, 1}),
             6047.0);
 
-        for (Map.Entry<CellKey, Object> x : segment.getData()) {
-            assertTrue(cells.containsKey(x.getKey()));
-            assertEquals(cells.get(x.getKey()), x.getValue());
+        for (CellKey key : allPositions(segment)) {
+            Object value = segment.getData().getObject(key);
+            if (value != null) {
+                assertTrue(cells.containsKey(key));
+                assertEquals(cells.get(key), value);
+            }
         }
     }
 
@@ -728,9 +731,12 @@ class SegmentLoaderTest extends BatchTestCase {
             CellKey.Generator.newCellKey(new int[]{0, 0, 2}),
             4186.0);
 
-        for (Map.Entry<CellKey, Object> x : segment.getData()) {
-            assertTrue(cells.containsKey(x.getKey()));
-            assertEquals(cells.get(x.getKey()), x.getValue());
+        for (CellKey key : allPositions(segment)) {
+            Object value = segment.getData().getObject(key);
+            if (value != null) {
+                assertTrue(cells.containsKey(key));
+                assertEquals(cells.get(key), value);
+            }
         }
     }
 
@@ -740,9 +746,37 @@ class SegmentLoaderTest extends BatchTestCase {
             null, 12037.0, null, 841.0, null, null
         };
         int index = 0;
-        for (Map.Entry<CellKey, Object> x : segment.getData()) {
-            assertEquals(unitSalesValues[index++], x.getValue());
+        for (CellKey key : allPositions(segment)) {
+            assertEquals(unitSalesValues[index++], segment.getData().getObject(key));
         }
+    }
+
+    /**
+     * Every coordinate of the segment's cell space in dense row-major
+     * order (last axis fastest) - the order the removed dataset iterator
+     * used to walk.
+     */
+    private static java.util.List<CellKey> allPositions(SegmentWithData segment) {
+        org.eclipse.daanse.rolap.common.agg.SegmentAxis[] axes = segment.getAxes();
+        int arity = axes.length;
+        int[] lengths = new int[arity];
+        int total = 1;
+        for (int i = 0; i < arity; i++) {
+            lengths[i] = axes[i].getKeys().length;
+            total *= lengths[i];
+        }
+        java.util.List<CellKey> keys = new java.util.ArrayList<>(total);
+        int[] pos = new int[arity];
+        for (int c = 0; c < total; c++) {
+            keys.add(CellKey.Generator.newCellKey(pos.clone()));
+            for (int d = arity - 1; d >= 0; d--) {
+                if (++pos[d] < lengths[d]) {
+                    break;
+                }
+                pos[d] = 0;
+            }
+        }
+        return keys;
     }
 
     @Disabled //has not been fixed during creating Daanse project

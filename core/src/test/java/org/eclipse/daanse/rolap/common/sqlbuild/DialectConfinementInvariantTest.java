@@ -48,7 +48,7 @@ class DialectConfinementInvariantTest {
         "common/sqlbuild/QueryBuildContext.java",
         "common/sql/SqlQueryCapabilities.java",
         "common/sql/DialectSqlQueryCapabilities.java",
-        "common/result/FastBatchingCellReader.java",      // getDialect() accessor feeding seam + adapter
+        "common/result/BatchingCellReader.java",      // getDialect() accessor feeding seam + adapter
         // --- measure/expression render channel: Aggregator.getExpression needs the dialect until
         //     every aggregator has a node form (retires with the distinct-recorder teardown) ---
         "common/sqlbuild/AggregateSqlMapper.java",

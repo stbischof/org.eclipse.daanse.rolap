@@ -21,6 +21,7 @@
  *   SmartCity Jena - initial
  */
 package org.eclipse.daanse.rolap.common.agg;
+import org.eclipse.daanse.olap.spi.body.AbstractSegmentBody;
 
 import static java.util.Arrays.asList;
 import static org.assertj.core.api.Assertions.assertThat;

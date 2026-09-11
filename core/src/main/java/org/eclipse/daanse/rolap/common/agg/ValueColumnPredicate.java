@@ -42,6 +42,7 @@ public class ValueColumnPredicate
     implements Comparable
 {
     private final Object value;
+    private int hash;
 
     /**
      * Creates a column constraint.
@@ -55,7 +56,6 @@ public class ValueColumnPredicate
         Object value)
     {
         super(constrainedColumn);
-//        assert constrainedColumn != null;
         assert value != null;
         assert ! (value instanceof StarColumnPredicate);
         this.value = value;
@@ -126,13 +126,16 @@ public class ValueColumnPredicate
 
     @Override
 	public int hashCode() {
-        int hashCode = getConstrainedColumnBitKey().hashCode();
-
-        if (value != null) {
-            hashCode = hashCode ^ value.hashCode();
+        // immutable; hashed per cell request when batching
+        int h = hash;
+        if (h == 0) {
+            h = getConstrainedColumnBitKey().hashCode();
+            if (value != null) {
+                h = h ^ value.hashCode();
+            }
+            hash = h;
         }
-
-        return hashCode;
+        return h;
     }
 
     @Override

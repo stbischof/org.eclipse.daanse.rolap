@@ -130,7 +130,8 @@ class RolapCatalogTest {
                 ConfigConstants.ENABLE_NATIVE_CROSS_JOIN, Boolean.TRUE,
                 ConfigConstants.ENABLE_NATIVE_TOP_COUNT, Boolean.TRUE,
                 ConfigConstants.ENABLE_NATIVE_FILTER, Boolean.TRUE)));
-        when(aggManagerMock.getCacheMgr(rolapConnectionMock)).thenReturn(scManagerMock);
+        when(aggManagerMock.getSegmentCacheManager(rolapConnectionMock)).thenReturn(scManagerMock);
+        when(aggManagerMock.getSegmentCacheManager()).thenReturn(scManagerMock);
         return new RolapCatalog(key,  rolapConnectionMock, contextMock);
     }
 

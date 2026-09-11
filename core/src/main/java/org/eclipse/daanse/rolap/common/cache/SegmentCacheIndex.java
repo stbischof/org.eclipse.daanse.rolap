@@ -26,76 +26,54 @@
 package org.eclipse.daanse.rolap.common.cache;
 
 import java.io.PrintWriter;
-import java.sql.Statement;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Future;
 
 import org.eclipse.daanse.olap.api.execution.Execution;
-import org.eclipse.daanse.olap.execution.ExecutionImpl;
-import org.eclipse.daanse.olap.key.BitKey;
+import org.eclipse.daanse.olap.api.execution.GuardedStatement;
+import org.eclipse.daanse.olap.spi.SegmentIdentity;
 import org.eclipse.daanse.olap.spi.SegmentBody;
 import org.eclipse.daanse.olap.spi.SegmentColumn;
 import org.eclipse.daanse.olap.spi.SegmentHeader;
-import org.eclipse.daanse.olap.util.ByteString;
-import org.eclipse.daanse.rolap.common.agg.SegmentBuilder;
 
 /**
- * Data structure that identifies which segments contain cells.
+ * The per-catalog segment inventory: which segments cover which cells,
+ * which are still loading (slots), and which a flush has marked for
+ * removal-after-load.
  *
- * Not thread-safe.
- *
- * @author Julian Hyde
+ * NOT "synchronize before use": every mutation and read is ACTOR-
+ * CONFINED - callers reach the index only through
+ * {@code SegmentCacheManager#execute}'s single actor thread, which is
+ * the whole synchronization model (see the cache handbook's map,
+ * rule 1). Direct calls from other threads are a design violation, not
+ * a locking bug to patch locally.
  */
 public interface SegmentCacheIndex {
     /**
      * Identifies the segment headers that contain a given cell.
      *
-     * @param catalogName Schema name
-     * @param catalogChecksum Schema checksum
-     * @param cubeName Cube name
-     * @param measureName Measure name
-     * @param rolapStarFactTableName Fact table table
-     * @param constrainedColsBitKey Bit key
+     * @param identity Segment identity (dimensionality, measure, predicates)
      * @param coordinates Coordinates
-     * @param compoundPredicates Compound predicates
      * @return Empty list if not found; never null
      */
     List<SegmentHeader> locate(
-        String catalogName,
-        ByteString catalogChecksum,
-        String cubeName,
-        String measureName,
-        String rolapStarFactTableName,
-        BitKey constrainedColsBitKey,
-        Map<String, Comparable> coordinates,
-        List<String> compoundPredicates);
+        SegmentIdentity identity,
+        Map<String, Comparable> coordinates);
 
     /**
      * Returns a list of segments that can be rolled up to satisfy a given
      * cell request.
      *
-     * @param catalogName catalog name
-     * @param catalogChecksum catalog Checksum
-     * @param cubeName Cube name
-     * @param measureName Measure name
-     * @param rolapStarFactTableName Fact table table
-     * @param constrainedColsBitKey Bit key
+     * @param identity Segment identity (dimensionality, measure, predicates)
      * @param coordinates Coordinates
-     * @param compoundPredicates Compound predicates
      *
      * @return List of candidates; each element is a list of headers that, when
      * combined using union, are sufficient to answer the given cell request
      */
     List<List<SegmentHeader>> findRollupCandidates(
-        String catalogName,
-        ByteString catalogChecksum,
-        String cubeName,
-        String measureName,
-        String rolapStarFactTableName,
-        BitKey constrainedColsBitKey,
-        Map<String, Comparable> coordinates,
-        List<String> compoundPredicates);
+        SegmentIdentity identity,
+        Map<String, Comparable> coordinates);
 
     /**
      * Finds a list of headers that intersect a given region.
@@ -103,20 +81,12 @@ public interface SegmentCacheIndex {
      * This method is used to find out which headers need to be trimmed
      * or removed during a flush.
      *
-     * @param schemaName Schema name
-     * @param schemaChecksum Schema checksum
-     * @param cubeName Cube name
-     * @param measureName Measure name
-     * @param rolapStarFactTableName Fact table table
-     * @param region Region
+     * @param key Region key (identity without the compound predicates)
+     * @param region Region columns
      * @return List of intersecting headers
      */
     public List<SegmentHeader> intersectRegion(
-        String schemaName,
-        ByteString schemaChecksum,
-        String cubeName,
-        String measureName,
-        String rolapStarFactTableName,
+        SegmentIdentity.RegionKey key,
         SegmentColumn[] region);
 
     /**
@@ -124,11 +94,9 @@ public interface SegmentCacheIndex {
      *
      * @param header Segment header
      * @param loading Whether segment is pending a load from SQL
-     * @param converter Segment converter
      */
     void add(
         SegmentHeader header,
-        SegmentBuilder.SegmentConverter converter,
         boolean loading);
 
     /**
@@ -145,12 +113,9 @@ public interface SegmentCacheIndex {
      * Changes the state of a header from loading to loaded.
      *
      * The segment must have previously been added by calling {@link #add}
-     * with a not-null value of the {@code bodyFuture} parameter;
-     * neither {@code loadSucceeded} nor {@link #loadFailed} must have been
-     * called.
-     *
-     * Informs anyone waiting on the future supplied with
-     * {@link #add}.
+     * with {@code loading=true}; the call fills the load slot and releases
+     * everyone waiting on it. Data arriving for an unknown header is
+     * discarded.
      *
      * @param header Segment header
      * @param body Segment body
@@ -164,15 +129,11 @@ public interface SegmentCacheIndex {
      * segment from the index.
      *
      * The segment must have previously been added using {@link #add}
-     * with a not-null value of the {@code bodyFuture} parameter;
-     * neither {@link #loadSucceeded} nor {@code loadFailed} must have been
-     * called.
-     *
-     * Informs anyone waiting on the future supplied with
-     * {@link #add}.
+     * with {@code loading=true}; the call fails the load slot, handing the
+     * cause to everyone waiting on it.
      *
      * @param header Header
-     * @param throwable Error message
+     * @param throwable Load failure, handed to the waiters
      */
     void loadFailed(
         SegmentHeader header,
@@ -200,7 +161,7 @@ public interface SegmentCacheIndex {
      * When this method is invoked, the execution instance of the
      * thread is automatically added to the list of clients for the
      * given segment. The calling code is responsible for calling
-     * {@link #cancel(ExecutionImpl)} when it is done with the segments,
+     * {@link #cancel(Execution)} when it is done with the segments,
      * or else this registration will prevent others from canceling
      * the running SQL statements associated to this segment.
      *
@@ -225,52 +186,23 @@ public interface SegmentCacheIndex {
     public boolean contains(SegmentHeader header);
 
     /**
-     * Allows to link a {@link Statement} to a segment. This allows
-     * the index to cleanup when {@link #cancel(ExecutionImpl)} is
+     * Whether the header is registered AND not flagged for removal after
+     * its load: a flush that hits a still-loading header only flags it
+     * ({@code removeAfterLoad}), so {@link #contains} stays true until the
+     * load completes - callers deciding whether a load still has an
+     * interested party (the store-put gate, the loader's abort check) must
+     * use THIS probe, or a flushed-away segment's pre-flush body reaches
+     * the stores again.
+     */
+    public boolean isRegistered(SegmentHeader header);
+
+    /**
+     * Allows to link a {@link GuardedStatement} to a segment. This allows
+     * the index to cleanup when {@link #cancel(Execution)} is
      * invoked and orphaned segments are left.
      * @param header The segment.
-     * @param stmt The SQL statement.
+     * @param stmt The guarded SQL statement.
      */
-    public void linkSqlStatement(SegmentHeader header, Statement stmt);
+    public void linkSqlStatement(SegmentHeader header, GuardedStatement stmt);
 
-    /**
-     * Returns a converter that can convert the given header to internal
-     * format.
-     *
-     * @param schemaName Schema name
-     * @param schemaChecksum Schema checksum
-     * @param cubeName Cube name
-     * @param rolapStarFactTableName Fact table
-     * @param measureName Measure name
-     * @param compoundPredicates Compound predicates
-     * @return Converter
-     */
-    SegmentBuilder.SegmentConverter getConverter(
-        String schemaName,
-        ByteString schemaChecksum,
-        String cubeName,
-        String rolapStarFactTableName,
-        String measureName,
-        List<String> compoundPredicates);
-
-    /**
-     * Sets a converter that can convert headers in for a given measure to
-     * internal format.
-     *
-     * @param schemaName Schema name
-     * @param schemaChecksum Schema checksum
-     * @param cubeName Cube name
-     * @param rolapStarFactTableName Fact table
-     * @param measureName Measure name
-     * @param compoundPredicates Compound predicates
-     * @param converter Converter to store
-     */
-    void setConverter(
-        String schemaName,
-        ByteString schemaChecksum,
-        String cubeName,
-        String rolapStarFactTableName,
-        String measureName,
-        List<String> compoundPredicates,
-        SegmentBuilder.SegmentConverter converter);
 }

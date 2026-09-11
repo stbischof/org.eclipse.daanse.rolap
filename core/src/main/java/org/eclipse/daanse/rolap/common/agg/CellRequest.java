@@ -28,20 +28,24 @@
 
 package org.eclipse.daanse.rolap.common.agg;
 
-import static org.eclipse.daanse.rolap.common.util.SqlExpressionResolver.genericSql;
-
+import java.util.AbstractMap;
+import java.util.AbstractSet;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
 import org.eclipse.daanse.olap.key.BitKey;
-import org.eclipse.daanse.rolap.common.agg.CompoundPredicateInfo;
 import org.eclipse.daanse.rolap.common.star.RolapStar;
 import org.eclipse.daanse.rolap.common.star.StarColumnPredicate;
+import org.eclipse.daanse.olap.spi.SegmentIdentity;
+import org.eclipse.daanse.olap.spi.SegmentPredicate;
 import org.eclipse.daanse.rolap.common.star.StarPredicate;
 
 /**
@@ -56,13 +60,10 @@ public class CellRequest {
     public final boolean extendedContext;
     public final boolean drillThrough;
 
-     // Sparsely populated array of column predicates.  Each predicate will
-     // be located according to the bitPosition of the column to which it
-     // corresponds.  This costs a little memory in terms of unused array
-     // slots, but avoids the need to explicitly sort the column predicates
-     // into a canonical order. There aren't usually a lot of predicates to
-     // sort, but that time adds up quickly.
-    private StarColumnPredicate[] sparseColumnPredicateList;
+    // Constrained columns and their predicates: compact parallel arrays in
+    // insertion order until check() co-sorts them by bit position.
+    private RolapStar.Column[] columns = new RolapStar.Column[8];
+    private StarColumnPredicate[] predicates = new StarColumnPredicate[8];
 
     /**
      * An array that contains the bit positions of each constrained
@@ -77,12 +78,7 @@ public class CellRequest {
      */
     private int[] columnBitPositions;
 
-    /**
-     * Tracks the number of column constraints actually associated with this
-     * CellRequest. We could figure this out by iterating over
-     * sparseColumnPredicateList, but it's quicker to just track them
-     * as they are added.
-     */
+    /** Number of constrained columns; the used prefix of the arrays. */
     private int numColumns;
 
     /**
@@ -99,19 +95,8 @@ public class CellRequest {
     private Object[] singleValues;
 
     /**
-     * After all of the columns are loaded, the columnsCache is created
-     * the first time the getColumns method (or any method that itself
-     * calls the check method) is called.
-     *
-     * It is assumed that the call to all additional columns,
-     * {@link #addConstrainedColumn}, will not be called after the first call
-     * to the {@link #getConstrainedColumns()} method.
-     *
-     * TODO: Since the expectation is that the columns do not change once
-     * set, it may be worth either caching these structures so that only one
-     * exists for every unique combination, or eliminating the cache and
-     * creating a wrapper that makes the bit key + star's column list look
-     * like a column array.
+     * The sorted columns, created on the first read; a non-null value
+     * freezes the request — {@link #addConstrainedColumn} throws then.
      */
     private RolapStar.Column[] columnsCache = null;
 
@@ -122,33 +107,30 @@ public class CellRequest {
      * required to be present in an aggregate table for the table be used to
      * fulfill the query.
      */
-    private final BitKey constrainedColumnsBitKey;
+    // not final: the first read swaps the built key for its frozen form
+    private BitKey constrainedColumnsBitKey;
 
     /**
-     * Map from BitKey (representing a group of columns that forms a
-     * compound key) to StarPredicate (representing the predicate
-     * defining the compound member).
-     *
-     * We use LinkedHashMap so that the entries occur in deterministic
-     * order; otherwise, successive runs generate different SQL queries.
-     * Another solution worth considering would be to use the inherent ordering
-     * of BitKeys and create a sorted map.
-     *
-     * Creating CellRequests is one of the top hotspots in Mondrian.
-     * Therefore we initialize the map to null, and don't create a map until
-     * we add the first entry.
-     *
-     * The map (when not null) is sorted by key, to allow more rapid
-     * comparison with maps of other requests and with existing segments.
+     * Map from a compound key's column BitKey to the predicate defining
+     * the compound member. Sorted by key for fast comparison with other
+     * requests and existing segments; null until the first entry — most
+     * requests have none.
      */
     private SortedMap<BitKey, StarPredicate> compoundPredicateMap = null;
 
 
-    /**
-     * List of string representations of the compound predicates contained
-     * in compoundPredicateMap, if present.
-     */
-    private List<String> compoundPredicateStrings = null;
+    /** Wire form per compound key, filled when the caller already has it. */
+    private SortedMap<BitKey, SegmentPredicate> compoundWireMap = null;
+
+    /** Wire form of the compound predicates, derived lazily from the map. */
+    private List<SegmentPredicate> compoundSegmentPredicates = null;
+
+    private Map<String, Comparable> mappedCellValues;
+    private List<StarPredicate> compoundPredicateList;
+    private SegmentIdentity segmentIdentity;
+
+    /** Set on the first bitkey read: the freeze point and the guard point coincide. */
+    private boolean bitKeyPublished;
 
 
     /**
@@ -160,11 +142,7 @@ public class CellRequest {
      */
     private boolean unsatisfiable;
 
-    /**
-     * The columnPredicateList and columnsCache must be set after all
-     * constraints have been added. This is used by access methods to determine
-     * if both columnPredicateList and columnsCache need to be generated.
-     */
+    /** True until check() co-sorts the arrays and freezes the request. */
     private boolean isDirty = true;
 
     /**
@@ -185,8 +163,6 @@ public class CellRequest {
         this.drillThrough = drillThrough;
         this.constrainedColumnsBitKey =
             BitKey.Factory.makeBitKey(measure.getStar().getColumnCount());
-        this.sparseColumnPredicateList =
-            new StarColumnPredicate[measure.getStar().getColumnCount()];
     }
 
     /**
@@ -200,7 +176,14 @@ public class CellRequest {
         RolapStar.Column column,
         StarColumnPredicate predicate)
     {
-        assert columnsCache == null;
+        // bitKeyPublished/segmentIdentity too: the duplicate-column branch
+        // below never touches the frozen BitKey, so without this guard it
+        // silently mutated predicates/unsatisfiable AFTER the key or the
+        // identity was published
+        if (columnsCache != null || segmentIdentity != null || bitKeyPublished) {
+            throw new IllegalStateException(
+                "addConstrainedColumn after the request was read");
+        }
 
         // Sanity check; we should never be adding column constraints
         // from more than one star
@@ -215,8 +198,8 @@ public class CellRequest {
             // This column is already constrained. Unless the value is the
             // same, or this value or the previous value is null (meaning
             // unconstrained) the request will never return any results.
-            final StarColumnPredicate prevValue =
-                sparseColumnPredicateList[bitPosition];
+            int index = indexOf(bitPosition);
+            final StarColumnPredicate prevValue = predicates[index];
             if (prevValue == null) {
                 // Previous column was unconstrained. Constrain on new
                 // value.
@@ -231,13 +214,28 @@ public class CellRequest {
                 predicate = null;
                 unsatisfiable = true;
             }
-        } else {
-            this.constrainedColumnsBitKey.set(bitPosition);
-            numColumns++;
+            // Note: it is possible and valid for predicate to be null here
+            predicates[index] = predicate;
+            return;
         }
+        this.constrainedColumnsBitKey.set(bitPosition);
+        if (numColumns == columns.length) {
+            columns = Arrays.copyOf(columns, numColumns * 2);
+            predicates = Arrays.copyOf(predicates, numColumns * 2);
+        }
+        columns[numColumns] = column;
+        predicates[numColumns] = predicate;
+        numColumns++;
+    }
 
-        // Note: it is possible and valid for predicate to be null here
-        this.sparseColumnPredicateList[bitPosition] = predicate;
+    /** Slot of the already-constrained column; only reached on a duplicate add. */
+    private int indexOf(int bitPosition) {
+        for (int i = 0; i < numColumns; i++) {
+            if (columns[i].getBitPosition() == bitPosition) {
+                return i;
+            }
+        }
+        throw new IllegalStateException("constrained column not found: bit " + bitPosition);
     }
 
     /**
@@ -251,21 +249,40 @@ public class CellRequest {
         BitKey compoundBitKey,
         StarPredicate compoundPredicate)
     {
+        addAggregateList(compoundBitKey, compoundPredicate, null);
+    }
+
+    /**
+     * As {@link #addAggregateList(BitKey, StarPredicate)}, taking the
+     * predicate's wire form along when the caller has it already (the
+     * slicer's is built once and reused across cell requests).
+     */
+    public void addAggregateList(
+        BitKey compoundBitKey,
+        StarPredicate compoundPredicate,
+        SegmentPredicate wirePredicate)
+    {
+        if (compoundSegmentPredicates != null || segmentIdentity != null) {
+            // mirror addConstrainedColumn's guard: the compound map feeds
+            // three lazily-cached derivations - a post-read add silently
+            // diverged the cached identity from the map
+            throw new IllegalStateException(
+                "addAggregateList after the request was read");
+        }
         if (compoundPredicateMap == null) {
             compoundPredicateMap = new TreeMap<>();
         }
-        compoundPredicateMap.put(compoundBitKey, compoundPredicate);
-    }
-
-
-    public void addPredicateString(
-        String predicateString)
-    {
-        if (compoundPredicateStrings == null) {
-            compoundPredicateStrings = new ArrayList<>();
+        // map keys are published state: only frozen keys go in
+        final BitKey frozenKey = compoundBitKey.freeze();
+        compoundPredicateMap.put(frozenKey, compoundPredicate);
+        if (wirePredicate != null) {
+            if (compoundWireMap == null) {
+                compoundWireMap = new TreeMap<>();
+            }
+            compoundWireMap.put(frozenKey, wirePredicate);
         }
-        compoundPredicateStrings.add(predicateString);
     }
+
 
     /**
      * Returns the measure of this cell request.
@@ -279,7 +296,7 @@ public class CellRequest {
     public RolapStar.Column[] getConstrainedColumns() {
         if (this.columnsCache == null) {
             // This is called more than once so caching the value makes sense.
-            check();
+            freeze();
         }
         return this.columnsCache;
     }
@@ -290,57 +307,94 @@ public class CellRequest {
      * @return BitKey for the list of columns
      */
     public BitKey getConstrainedColumnsBitKey() {
-        return constrainedColumnsBitKey;
+        // freeze on first read: from here the key is published (working
+        // store, batch identity, segment identity) and must never mutate
+        // again - a later addConstrainedColumn now throws instead of
+        // silently corrupting map buckets. Frozen keys return themselves,
+        // so every further read is free.
+        BitKey frozen = constrainedColumnsBitKey.freeze();
+        constrainedColumnsBitKey = frozen;
+        bitKeyPublished = true;
+        return frozen;
     }
 
-    /**
-     * Returns the map of compound predicates, or null if empty.
-     *
-     * NOTE: It is not generally considered good API design to return null
-     * to represent empty collections, but this collection is very often empty
-     * and the the implementation of Collections.emptyMap().keySet().iterator()
-     * is slow, so we optimize for the common case.
-     *
-     * @return predicate map, or null if empty
-     */
-    SortedMap<BitKey, StarPredicate> getCompoundPredicateMap() {
-        return compoundPredicateMap;
-    }
-
-    public List<String> getCompoundPredicateStrings() {
-        if (compoundPredicateStrings != null) {
-            return Collections.unmodifiableList(compoundPredicateStrings);
-        }
-        if (compoundPredicateMap != null) {
-            List<String> stringPredicates = new ArrayList<>();
-            for (StarPredicate predicate : compoundPredicateMap.values()) {
-                stringPredicates.add(
-                    CompoundPredicateInfo.getPredicateString(
-                        measure.getStar(), predicate));
+    /** The wire form of the compound predicates, derived once from the map. */
+    public List<SegmentPredicate> getCompoundPredicates() {
+        if (compoundSegmentPredicates == null) {
+            if (compoundPredicateMap == null) {
+                compoundSegmentPredicates = Collections.emptyList();
+            } else {
+                List<SegmentPredicate> wire =
+                    new ArrayList<>(compoundPredicateMap.size());
+                for (Map.Entry<BitKey, StarPredicate> entry
+                    : compoundPredicateMap.entrySet())
+                {
+                    SegmentPredicate stored = compoundWireMap == null
+                        ? null : compoundWireMap.get(entry.getKey());
+                    wire.add(stored != null
+                        ? stored : SegmentPredicates.toWire(entry.getValue()));
+                }
+                compoundSegmentPredicates = List.copyOf(wire);
             }
-            compoundPredicateStrings =
-                Collections.unmodifiableList(stringPredicates);
-            return compoundPredicateStrings;
         }
-        return Collections.emptyList();
+        return compoundSegmentPredicates;
+    }
+
+    /** The runtime compound predicates in key order; constant, built once. */
+    public List<StarPredicate> getCompoundPredicateList() {
+        if (compoundPredicateList == null) {
+            compoundPredicateList = compoundPredicateMap == null
+                ? Collections.emptyList()
+                : List.copyOf(compoundPredicateMap.values());
+        }
+        return compoundPredicateList;
+    }
+
+    /** The segment identity of this request; constant, computed once. */
+    public SegmentIdentity segmentIdentity() {
+        if (segmentIdentity == null) {
+            final RolapStar requestStar = measure.getStar();
+            segmentIdentity = new SegmentIdentity(
+                requestStar.getCatalog().getName(),
+                requestStar.getCatalog().getChecksum(),
+                measure.getCubeName(),
+                requestStar.getFactTable().getAlias(),
+                measure.getName(),
+                getCompoundPredicates(),
+                // the GETTER, not the raw field: it freezes the key first,
+                // so a later addConstrainedColumn throws instead of silently
+                // diverging from the cached identity
+                getConstrainedColumnsBitKey());
+        }
+        return segmentIdentity;
     }
 
     /**
-     * Builds the {@link #columnsCache} and {@link #columnBitPositions}
-     * based upon bit key position of the columns.
+     * Co-sorts the column and predicate arrays by bit position (insertion
+     * sort over the few constrained columns) and freezes the request:
+     * {@link #columnsCache} and {@link #columnBitPositions} come out in
+     * ascending bit-position order, index-parallel to the predicates.
      */
-    private void check() {
+    private void freeze() {
         if (isDirty) {
-            columnsCache = new RolapStar.Column[numColumns];
+            for (int i = 1; i < numColumns; i++) {
+                RolapStar.Column column = columns[i];
+                StarColumnPredicate predicate = predicates[i];
+                int bit = column.getBitPosition();
+                int j = i - 1;
+                while (j >= 0 && columns[j].getBitPosition() > bit) {
+                    columns[j + 1] = columns[j];
+                    predicates[j + 1] = predicates[j];
+                    j--;
+                }
+                columns[j + 1] = column;
+                predicates[j + 1] = predicate;
+            }
+            columnsCache = numColumns == columns.length
+                ? columns : Arrays.copyOf(columns, numColumns);
             columnBitPositions = new int[numColumns];
-            int i = 0;
-            for (int bitPos = constrainedColumnsBitKey.nextSetBit(0);
-                bitPos >= 0;
-                bitPos = constrainedColumnsBitKey.nextSetBit(bitPos + 1))
-            {
-                columnBitPositions[i] = bitPos;
-                columnsCache[i] = this.star.getColumn(bitPos);
-                i++;
+            for (int i = 0; i < numColumns; i++) {
+                columnBitPositions[i] = columnsCache[i].getBitPosition();
             }
             isDirty = false;
         }
@@ -360,8 +414,8 @@ public class CellRequest {
      * @return predicate value associated with the given index
      */
     public StarColumnPredicate getValueAt(int index) {
-        check();
-        return sparseColumnPredicateList[columnBitPositions[index]];
+        freeze();
+        return predicates[index];
     }
 
     /**
@@ -370,7 +424,7 @@ public class CellRequest {
      * @return number of columns in the CellRequest
      */
     public int getNumValues() {
-        check();
+        freeze();
         return numColumns;
     }
 
@@ -387,36 +441,98 @@ public class CellRequest {
     public Object[] getSingleValues() {
         assert !unsatisfiable;
         if (singleValues == null) {
-            check();
+            freeze();
             singleValues = new Object[numColumns];
-            int i = 0;
-            for (int bitPos : columnBitPositions) {
+            for (int i = 0; i < numColumns; i++) {
                 ValueColumnPredicate predicate =
-                    (ValueColumnPredicate) sparseColumnPredicateList[bitPos];
-                singleValues[i++] = predicate.getValue();
+                    (ValueColumnPredicate) predicates[i];
+                singleValues[i] = predicate.getValue();
             }
         }
         return singleValues;
     }
 
     /**
-     * Builds a map of column names to values, as specified
-     * by this cell request object.
+     * The request's coordinates as a map of column expressions to values:
+     * an immutable view over the constrained columns. Lookups scan the few
+     * columns with an identity fast path on the cached expressions.
      */
     public Map<String, Comparable> getMappedCellValues() {
-        final Map<String, Comparable> map =
-            new HashMap<>();
-        final RolapStar.Column[] columns =
-            this.getConstrainedColumns();
-        final Object[] values = this.getSingleValues();
-        for (int i = 0; i < columns.length; i++) {
-            RolapStar.Column column = columns[i];
-            final Object o = values[i];
-            map.put(
-                genericSql(column.getExpression()),
-                (Comparable) o);
+        if (mappedCellValues == null) {
+            mappedCellValues =
+                new CellValuesView(getConstrainedColumns(), getSingleValues());
         }
-        return map;
+        return mappedCellValues;
+    }
+
+    private static final class CellValuesView
+            extends AbstractMap<String, Comparable> {
+        private final RolapStar.Column[] columns;
+        private final Object[] values;
+
+        CellValuesView(RolapStar.Column[] columns, Object[] values) {
+            this.columns = columns;
+            this.values = values;
+        }
+
+        @Override
+        public int size() {
+            return columns.length;
+        }
+
+        @Override
+        public boolean containsKey(Object key) {
+            return indexOf(key) >= 0;
+        }
+
+        @Override
+        public Comparable get(Object key) {
+            int i = indexOf(key);
+            return i >= 0 ? (Comparable) values[i] : null;
+        }
+
+        private int indexOf(Object key) {
+            for (int i = 0; i < columns.length; i++) {
+                String expression = columns[i].genericSql();
+                if (expression == key || expression.equals(key)) {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        @Override
+        public Set<Entry<String, Comparable>> entrySet() {
+            return new AbstractSet<>() {
+                @Override
+                public int size() {
+                    return columns.length;
+                }
+
+                @Override
+                public Iterator<Entry<String, Comparable>> iterator() {
+                    return new Iterator<>() {
+                        private int i;
+
+                        @Override
+                        public boolean hasNext() {
+                            return i < columns.length;
+                        }
+
+                        @Override
+                        public Entry<String, Comparable> next() {
+                            if (i >= columns.length) {
+                                throw new NoSuchElementException();
+                            }
+                            Entry<String, Comparable> entry = new SimpleImmutableEntry<>(
+                                columns[i].genericSql(), (Comparable) values[i]);
+                            i++;
+                            return entry;
+                        }
+                    };
+                }
+            };
+        }
     }
 
     /**

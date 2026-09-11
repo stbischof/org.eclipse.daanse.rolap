@@ -145,12 +145,6 @@ public interface ContextConfigOCD {
     // blocks are stored, shared and discarded.
     // ------------------------------------------------------------------
 
-    /** @see org.eclipse.daanse.olap.api.ContextConfig#segmentCache() */
-    @AttributeDefinition(
-            name = BasicContextOCD.L10N_PREFIX + ConfigConstants.SEGMENT_CACHE + BasicContextOCD.L10N_POSTFIX_NAME,
-            description = BasicContextOCD.L10N_PREFIX + ConfigConstants.SEGMENT_CACHE + BasicContextOCD.L10N_POSTFIX_DESCRIPTION,
-            required = false)
-    String segmentCache();
 
     /** @see org.eclipse.daanse.olap.api.ContextConfig#disableCaching() */
     @AttributeDefinition(
@@ -636,6 +630,22 @@ public interface ContextConfigOCD {
             defaultValue = ConfigConstants.NULL_MEMBER_REPRESENTATION_DEFAULT_VALUE,
             required = false)
     String nullMemberRepresentation();
+
+    /** @see org.eclipse.daanse.olap.api.ContextConfig#memberListCacheMaxWeight() */
+    @AttributeDefinition(
+            name = BasicContextOCD.L10N_PREFIX + ConfigConstants.MEMBER_LIST_CACHE_MAX_WEIGHT + BasicContextOCD.L10N_POSTFIX_NAME,
+            description = BasicContextOCD.L10N_PREFIX + ConfigConstants.MEMBER_LIST_CACHE_MAX_WEIGHT + BasicContextOCD.L10N_POSTFIX_DESCRIPTION,
+            defaultValue = "" + ConfigConstants.MEMBER_LIST_CACHE_MAX_WEIGHT_DEFAULT_VALUE,
+            required = false)
+    int memberListCacheMaxWeight();
+
+    /** @see org.eclipse.daanse.olap.api.ContextConfig#nativeTupleCacheMaxTuples() */
+    @AttributeDefinition(
+            name = BasicContextOCD.L10N_PREFIX + ConfigConstants.NATIVE_TUPLE_CACHE_MAX_TUPLES + BasicContextOCD.L10N_POSTFIX_NAME,
+            description = BasicContextOCD.L10N_PREFIX + ConfigConstants.NATIVE_TUPLE_CACHE_MAX_TUPLES + BasicContextOCD.L10N_POSTFIX_DESCRIPTION,
+            defaultValue = "" + ConfigConstants.NATIVE_TUPLE_CACHE_MAX_TUPLES_DEFAULT_VALUE,
+            required = false)
+    int nativeTupleCacheMaxTuples();
 
     /** @see org.eclipse.daanse.olap.api.ContextConfig#resultLimit() */
     @AttributeDefinition(

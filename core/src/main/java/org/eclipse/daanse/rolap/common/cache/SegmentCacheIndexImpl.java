@@ -29,124 +29,140 @@
 package org.eclipse.daanse.rolap.common.cache;
 
 import java.io.PrintWriter;
-import java.sql.Statement;
+import java.io.StringWriter;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.BitSet;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.Map.Entry;
 import java.util.SortedMap;
 import java.util.SortedSet;
 import java.util.TreeMap;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Future;
 
 import org.eclipse.daanse.olap.api.execution.Execution;
+import org.eclipse.daanse.olap.api.execution.GuardedStatement;
 import org.eclipse.daanse.olap.exceptions.QueryCanceledException;
 import org.eclipse.daanse.olap.common.Util;
 import org.eclipse.daanse.olap.key.BitKey;
 import org.eclipse.daanse.olap.spi.SegmentBody;
 import org.eclipse.daanse.olap.spi.SegmentColumn;
+import org.eclipse.daanse.rolap.common.star.BitKeyExplain;
+import org.eclipse.daanse.olap.spi.SegmentRegion;
 import org.eclipse.daanse.olap.spi.SegmentHeader;
-import org.eclipse.daanse.olap.util.ByteString;
+import org.eclipse.daanse.olap.spi.SegmentPredicate;
+import org.eclipse.daanse.olap.spi.SegmentIdentity;
 import org.eclipse.daanse.olap.util.CartesianProductList;
-import  org.eclipse.daanse.olap.util.Pair;
+import org.eclipse.daanse.olap.util.Pair;
 import org.eclipse.daanse.rolap.common.RolapUtil;
 import org.eclipse.daanse.rolap.common.agg.CellRequest;
-import org.eclipse.daanse.rolap.common.agg.SegmentBuilder;
-import org.eclipse.daanse.rolap.util.PartiallyOrderedSet;
 import org.eclipse.daanse.rolap.util.SlotFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 
 /**
- * Data structure that identifies which segments contain cells.
- *
- * Not thread safe.
- *
- * @author Julian Hyde
+ * The actor-confined implementation of {@link SegmentCacheIndex}: five
+ * coupled maps (headers by bitkey shape, by fact table, by region, the
+ * per-header info with its load slot and removal flag, and the
+ * registrations by client execution) plus the rollup-candidate search
+ * with its generation-guarded ancestor memo. Every entry in one map has
+ * its counterpart in the others - add/remove/update keep them in step,
+ * which is exactly why all access runs on the ONE actor thread of the
+ * owning {@code SegmentCacheManager} (checkThread guards it; direct
+ * multi-threaded use is a design violation, not a missing lock).
  */
 public class SegmentCacheIndexImpl implements SegmentCacheIndex {
 
     private static final Logger LOGGER =
         LoggerFactory.getLogger(SegmentCacheIndexImpl.class);
-    public static final String SEGMENT_CACHE_INDEX_IMPL = "SegmentCacheIndexImpl(";
+    private static final String SEGMENT_CACHE_INDEX_IMPL = "SegmentCacheIndexImpl(";
 
-    private final Map<List, List<SegmentHeader>> bitkeyMap =
+    private final Map<SegmentIdentity, Set<SegmentHeader>> bitkeyMap =
         new HashMap<>();
 
     /**
      * The fact map allows us to spot quickly which
      * segments have facts relating to a given header.
      */
-    private final Map<List, FactInfo> factMap =
+    private final Map<SegmentIdentity.FactKey, FactInfo> factMap =
         new HashMap<>();
 
     /**
-     * The fuzzy fact map allows us to spot quickly which
+     * The region fact map allows us to spot quickly which
      * segments have facts relating to a given header, but doesn't
      * consider the compound predicates in the key. This allows
      * flush operations to be consistent.
      */
-    // TODO Get rid of the fuzzy map once we have a way to parse
-    // compound predicates into rich objects that can be serialized
-    // as part of the SegmentHeader.
-    private final Map<List, FuzzyFactInfo> fuzzyFactMap =
+    // The region map stays: it gives the flush an O(1) lookup instead of
+    // an O(#fact keys) scan, and RegionKey has a second user (groupByStar
+    // priming). Folding it into the fact map would require every compound
+    // predicate to be re-parseable from its wire form, which Not and
+    // Opaque predicates are not.
+    private final Map<SegmentIdentity.RegionKey, RegionFactInfo> regionFactMap =
+        new HashMap<>();
+
+    /** Reverse of HeaderInfo.clients: every query end cancels in O(own headers). */
+    private final Map<Execution, Set<SegmentHeader>> headersByClient =
         new HashMap<>();
 
     private final Map<SegmentHeader, HeaderInfo> headerMap =
         new HashMap<>();
 
     private final Thread thread;
+    private final Executor statementCancelExecutor;
 
     /**
-     * Creates a SegmentCacheIndexImpl.
+     * Creates a SegmentCacheIndexImpl. Statement cancels run inline on the
+     * caller (tests); production passes an executor.
      *
      * @param thread Thread that must be used to execute commands.
      */
     public SegmentCacheIndexImpl(Thread thread) {
+        this(thread, Runnable::run);
+    }
+
+    /**
+     * @param thread Thread that must be used to execute commands.
+     * @param statementCancelExecutor Where JDBC Statement.cancel runs -
+     *        a network round-trip that must never run on the actor thread
+     */
+    public SegmentCacheIndexImpl(Thread thread, Executor statementCancelExecutor) {
         this.thread = thread;
+        this.statementCancelExecutor = statementCancelExecutor;
         if (thread == null) {
             throw new IllegalArgumentException("SegmentCacheIndexImpl: thread should be not null");
         }
     }
 
-    public static List makeConverterKey(SegmentHeader header) {
-        return List.of(
-            header.schemaName,
-            header.schemaChecksum,
-            header.cubeName,
-            header.rolapStarFactTableName,
-            header.measureName,
-            header.compoundPredicates);
+    public static SegmentIdentity.FactKey makeConverterKey(SegmentHeader header) {
+        return header.factKey();
     }
 
-    public static List makeConverterKey(CellRequest request)
+    public static SegmentIdentity.FactKey makeConverterKey(CellRequest request)
     {
-        return List.of(
+        return new SegmentIdentity.FactKey(
             request.getMeasure().getStar().getCatalog().getName(),
             request.getMeasure().getStar().getCatalog().getChecksum(),
             request.getMeasure().getCubeName(),
             request.getMeasure().getStar().getFactTable().getAlias(),
             request.getMeasure().getName(),
-            request.getCompoundPredicateStrings());
+            request.getCompoundPredicates());
     }
 
     @Override
 	public List<SegmentHeader> locate(
-        String schemaName,
-        ByteString schemaChecksum,
-        String cubeName,
-        String measureName,
-        String rolapStarFactTableName,
-        BitKey constrainedColsBitKey,
-        Map<String, Comparable> coordinates,
-        List<String> compoundPredicates)
+        SegmentIdentity identity,
+        Map<String, Comparable> coordinates)
     {
         checkThread();
 
@@ -155,36 +171,23 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
                 new StringBuilder(SEGMENT_CACHE_INDEX_IMPL)
                     .append(System.identityHashCode(this))
                     .append(")locate:")
-                    .append("\nschemaName:").append(schemaName)
-                    .append("\nschemaChecksum:").append(schemaChecksum)
-                    .append("\ncubeName:").append(cubeName)
-                    .append("\nmeasureName:").append(measureName)
-                    .append("\nrolapStarFactTableName:").append(rolapStarFactTableName)
-                    .append("\nconstrainedColsBitKey:").append(constrainedColsBitKey)
-                    .append("\ncoordinates:").append(coordinates)
-                    .append("\ncompoundPredicates:").append(compoundPredicates).toString());
+                    .append("\nidentity:").append(identity)
+                    .append("\ncoordinates:").append(coordinates).toString());
         }
 
         List<SegmentHeader> list = Collections.emptyList();
-        final List starKey =
-            makeBitkeyKey(
-                schemaName,
-                schemaChecksum,
-                cubeName,
-                rolapStarFactTableName,
-                constrainedColsBitKey,
-                measureName,
-                compoundPredicates);
-        final List<SegmentHeader> headerList = bitkeyMap.get(starKey);
-        if (headerList == null) {
-            String msg = new StringBuilder(SEGMENT_CACHE_INDEX_IMPL)
-                .append(System.identityHashCode(this))
-                .append(").locate:NOMATCH").toString();
-            LOGGER.trace(msg);
+        final Set<SegmentHeader> headers = bitkeyMap.get(identity);
+        if (headers == null) {
+            LOGGER.trace("locate:NOMATCH index={}", System.identityHashCode(this));
             return Collections.emptyList();
         }
-        for (SegmentHeader header : headerList) {
-            if (matches(header, coordinates, compoundPredicates)) {
+        for (SegmentHeader header : headers) {
+            final HeaderInfo headerInfo = headerMap.get(header);
+            if (headerInfo != null && headerInfo.removeAfterLoad) {
+                // flagged stale by a flush; gone once its load finishes
+                continue;
+            }
+            if (matchesCoordinates(header, coordinates)) {
                 // Be lazy. Don't allocate a list unless there is at least one
                 // entry.
                 if (list.isEmpty()) {
@@ -211,15 +214,15 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
     @Override
 	public void add(
         SegmentHeader header,
-        SegmentBuilder.SegmentConverter converter,
         boolean loading)
     {
         checkThread();
-        String msg = new StringBuilder(SEGMENT_CACHE_INDEX_IMPL)
-            .append(System.identityHashCode(this))
-            .append(").add:\n")
-            .append(header.toString()).toString();
-        LOGGER.debug(msg);
+        if (LOGGER.isDebugEnabled()) {
+            LOGGER.debug(new StringBuilder(SEGMENT_CACHE_INDEX_IMPL)
+                .append(System.identityHashCode(this))
+                .append(").add:\n")
+                .append(header).toString());
+        }
 
         HeaderInfo headerInfo = headerMap.get(header);
         if (headerInfo == null) {
@@ -232,32 +235,21 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             headerMap.put(header, headerInfo);
         }
 
-        final List bitkeyKey = makeBitkeyKey(header);
-        List<SegmentHeader> headerList = bitkeyMap.computeIfAbsent(bitkeyKey, k -> new ArrayList<>());
-        if (!headerList.contains(header)) {
-            headerList.add(header);
-        }
+        final var bitkeyKey = header.identity();
+        bitkeyMap.computeIfAbsent(bitkeyKey, k -> new LinkedHashSet<>()).add(header);
 
-        final List factKey = makeFactKey(header);
+        final var factKey = header.factKey();
         FactInfo factInfo = factMap.computeIfAbsent(factKey, k -> new FactInfo());
 
-        if (!factInfo.headerList.contains(header)) {
-            factInfo.headerList.add(header);
+        if (factInfo.headers.add(header)) {
+            final BitKey bitKey = header.getConstrainedColumnsBitKey();
+            if (factInfo.bitkeyCounts.merge(bitKey, 1, Integer::sum) == 1) {
+                factInfo.ancestorMemo.clear();
+            }
         }
-        if (!factInfo.bitkeyPoset
-            .contains(header.getConstrainedColumnsBitKey()))
-        {
-            factInfo.bitkeyPoset.add(header.getConstrainedColumnsBitKey());
-        }
-        if (converter != null) {
-            factInfo.converter = converter;
-        }
-
-        final List fuzzyFactKey = makeFuzzyFactKey(header);
-        FuzzyFactInfo fuzzyFactInfo = fuzzyFactMap.computeIfAbsent(fuzzyFactKey, k -> new FuzzyFactInfo());
-        if (!fuzzyFactInfo.headerList.contains(header)) {
-            fuzzyFactInfo.headerList.add(header);
-        }
+        final var regionFactKey = header.regionKey();
+        regionFactMap.computeIfAbsent(regionFactKey, k -> new RegionFactInfo())
+            .headers.add(header);
     }
 
     @Override
@@ -271,25 +263,52 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             "SegmentCacheIndexImpl.update: Updating header from:\n{}\n\nto\n\n{}",
             oldHeader, newHeader);
         final HeaderInfo headerInfo = headerMap.get(oldHeader);
+        if (headerInfo != null && headerInfo.slot != null && !headerInfo.slot.isDone()) {
+            // the segment is STILL LOADING: moving the HeaderInfo would
+            // strand its open slot under the new key - loadSucceeded(old)
+            // runs into 'data arrived late' and the waiters hang until
+            // their query timeout. Fail the slot (waiters reload) and drop
+            // the header; the late load result is discarded.
+            headerInfo.slot.fail(new IllegalStateException(
+                "segment constrained by a flush while loading"));
+            remove(oldHeader);
+            return;
+        }
         headerMap.remove(oldHeader);
-        if(headerInfo != null) {
-            headerMap.put(newHeader, headerInfo);
+        if (headerInfo == null) {
+            // nothing to move: seeding the side maps without a headerMap
+            // entry would create an unremovable ghost (remove() bails on
+            // the missing HeaderInfo and locate would serve it forever)
+            return;
+        }
+        final HeaderInfo displaced = headerMap.put(newHeader, headerInfo);
+        if (displaced != null && displaced.slot != null && !displaced.slot.isDone()) {
+            // the target header was already loading: its waiters would be
+            // orphaned by the overwrite - fail their slot with the cause
+            displaced.slot.fail(new IllegalStateException(
+                "segment replaced by a constrained flush result while loading"));
         }
 
-        final List oldBitkeyKey = makeBitkeyKey(oldHeader);
-        List<SegmentHeader> headerList = bitkeyMap.get(oldBitkeyKey);
-        headerList.remove(oldHeader);
-        headerList.add(newHeader);
+        final var oldBitkeyKey = oldHeader.identity();
+        final Set<SegmentHeader> headers = bitkeyMap.get(oldBitkeyKey);
+        if (headers != null) {
+            headers.remove(oldHeader);
+            headers.add(newHeader);
+        }
 
-        final List oldFactKey = makeFactKey(oldHeader);
+        final var oldFactKey = oldHeader.factKey();
         final FactInfo factInfo = factMap.get(oldFactKey);
-        factInfo.headerList.remove(oldHeader);
-        factInfo.headerList.add(newHeader);
+        if (factInfo != null) {
+            factInfo.headers.remove(oldHeader);
+            factInfo.headers.add(newHeader);
+        }
 
-        final List oldFuzzyFactKey = makeFuzzyFactKey(oldHeader);
-        final FuzzyFactInfo fuzzyFactInfo = fuzzyFactMap.get(oldFuzzyFactKey);
-        fuzzyFactInfo.headerList.remove(oldHeader);
-        fuzzyFactInfo.headerList.add(newHeader);
+        final var oldRegionFactKey = oldHeader.regionKey();
+        final RegionFactInfo regionFactInfo = regionFactMap.get(oldRegionFactKey);
+        if (regionFactInfo != null) {
+            regionFactInfo.headers.remove(oldHeader);
+            regionFactInfo.headers.add(newHeader);
+        }
     }
 
     @Override
@@ -305,15 +324,18 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             return;
         }
 
-        if (!headerInfo.slot.isDone()) {
+        if (headerInfo.slot != null && !headerInfo.slot.isDone()) {
             headerInfo.slot.put(body);
         }
         if (headerInfo.removeAfterLoad) {
             remove(header);
         }
-        // Cleanup the HeaderInfo
+        // Cleanup the HeaderInfo. Waiting clients hold the future object
+        // itself; keeping the slot here would pin the body strong and defeat
+        // the memory cache's soft eviction.
         headerInfo.stmt = null;
-        headerInfo.clients.clear();
+        dropClientLinks(header, headerInfo);
+        headerInfo.slot = null;
     }
 
     @Override
@@ -326,15 +348,19 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             return;
         }
         if (headerInfo.slot == null) {
-            throw new IllegalArgumentException(
-                new StringBuilder("segment header ").append(header.getUniqueID()).append(" is not loading").toString()
-            );
+            // registered but not loading: a rollup already completed this
+            // header's slot while the SQL load also owning it failed later.
+            // Throwing here (on the actor) skipped the remove and left a
+            // registered header with no body anywhere - degrade like the
+            // unknown-header case instead.
+            LOGGER.debug("loadFailed: header {} is not loading", header.getUniqueID());
+            return;
         }
         headerInfo.slot.fail(throwable);
         remove(header);
         // Cleanup the HeaderInfo
         headerInfo.stmt = null;
-        headerInfo.clients.clear();
+        dropClientLinks(header, headerInfo);
     }
 
     @Override
@@ -356,49 +382,69 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
 
         final HeaderInfo headerInfo = headerMap.get(header);
         if (headerInfo == null) {
-            String msg = new StringBuilder(SEGMENT_CACHE_INDEX_IMPL)
-                .append(System.identityHashCode(this))
-                .append(").remove:UNKNOWN HEADER").toString();
-            LOGGER.debug(msg);
+            LOGGER.debug("remove:UNKNOWN HEADER index={}", System.identityHashCode(this));
             return;
         }
         if (headerInfo.slot != null && !headerInfo.slot.isDone()) {
             // Cannot remove while load is pending; flag for removal after load
             headerInfo.removeAfterLoad = true;
-            String msg = new StringBuilder(SEGMENT_CACHE_INDEX_IMPL)
-                .append(System.identityHashCode(this))
-                .append(").remove:DEFFERED").toString();
-            LOGGER.debug(msg);
+            LOGGER.debug("remove:DEFERRED index={}", System.identityHashCode(this));
             return;
         }
 
         headerMap.remove(header);
+        dropClientLinks(header, headerInfo);
 
-        final List factKey = makeFactKey(header);
+        final var factKey = header.factKey();
         final FactInfo factInfo = factMap.get(factKey);
-        if (factInfo != null) {
-            factInfo.headerList.remove(header);
-            factInfo.bitkeyPoset.remove(header.getConstrainedColumnsBitKey());
-            if (factInfo.headerList.isEmpty()) {
+        if (factInfo != null && factInfo.headers.remove(header)) {
+            final BitKey bitKey = header.getConstrainedColumnsBitKey();
+            final Integer left = factInfo.bitkeyCounts.merge(bitKey, -1, Integer::sum);
+            if (left != null && left <= 0) {
+                factInfo.bitkeyCounts.remove(bitKey);
+                factInfo.ancestorMemo.clear();
+            }
+            if (factInfo.headers.isEmpty()) {
                 factMap.remove(factKey);
             }
         }
 
-        final List fuzzyFactKey = makeFuzzyFactKey(header);
-        final FuzzyFactInfo fuzzyFactInfo = fuzzyFactMap.get(fuzzyFactKey);
-        if (fuzzyFactInfo != null) {
-            fuzzyFactInfo.headerList.remove(header);
-            if (fuzzyFactInfo.headerList.isEmpty()) {
-                fuzzyFactMap.remove(fuzzyFactKey);
+        final var regionFactKey = header.regionKey();
+        final RegionFactInfo regionFactInfo = regionFactMap.get(regionFactKey);
+        if (regionFactInfo != null) {
+            regionFactInfo.headers.remove(header);
+            if (regionFactInfo.headers.isEmpty()) {
+                regionFactMap.remove(regionFactKey);
             }
         }
 
-        final List bitkeyKey = makeBitkeyKey(header);
-        final List<SegmentHeader> headerList = bitkeyMap.get(bitkeyKey);
-        headerList.remove(header);
-        if (headerList.isEmpty()) {
-            bitkeyMap.remove(bitkeyKey);
+        final var bitkeyKey = header.identity();
+        final Set<SegmentHeader> headers = bitkeyMap.get(bitkeyKey);
+        if (headers != null) {
+            headers.remove(header);
+            if (headers.isEmpty()) {
+                bitkeyMap.remove(bitkeyKey);
+            }
         }
+    }
+
+    private void dropClientLinks(SegmentHeader header, HeaderInfo headerInfo) {
+        for (Execution client : headerInfo.clients) {
+            final Set<SegmentHeader> headers = headersByClient.get(client);
+            if (headers != null) {
+                headers.remove(header);
+                if (headers.isEmpty()) {
+                    headersByClient.remove(client);
+                }
+            }
+        }
+        headerInfo.clients.clear();
+    }
+
+    /** Test probe: the ancestor memo of the fact the header belongs to. */
+    Map<BitKey, List<BitKey>> ancestorMemoForTests(SegmentHeader header) {
+        final FactInfo factInfo = factMap.get(header.factKey());
+        return factInfo == null ? null : factInfo.ancestorMemo;
     }
 
     private void checkThread() {
@@ -408,25 +454,19 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             .toString();
     }
 
-    public static boolean matches(
+    /**
+     * Coordinate containment only — for headers whose compound predicates
+     * are already known to match (the bitkey map keys on them).
+     */
+    public static boolean matchesCoordinates(
         SegmentHeader header,
-        Map<String, Comparable> coords,
-        List<String> compoundPredicates)
+        Map<String, Comparable> coords)
     {
-        if (!header.compoundPredicates.equals(compoundPredicates)) {
+        // a cell inside one of the excluded region boxes is not served
+        if (header.isCellExcluded(coords)) {
             return false;
         }
         for (Map.Entry<String, Comparable> entry : coords.entrySet()) {
-            // Check if the segment explicitly excludes this coordinate.
-            final SegmentColumn excludedColumn =
-                header.getExcludedRegion(entry.getKey());
-            if (excludedColumn != null) {
-                final SortedSet<Comparable> values =
-                    excludedColumn.getValues();
-                if (values == null || values.contains(entry.getValue())) {
-                    return false;
-                }
-            }
             // Check if the dimensionality of the segment intersects
             // with the coordinate.
             final SegmentColumn constrainedColumn =
@@ -451,29 +491,20 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
 
     @Override
 	public List<SegmentHeader> intersectRegion(
-        String schemaName,
-        ByteString schemaChecksum,
-        String cubeName,
-        String measureName,
-        String rolapStarFactTableName,
+        SegmentIdentity.RegionKey key,
         SegmentColumn[] region)
     {
         checkThread();
 
-        final List factKey = makeFuzzyFactKey(
-            schemaName,
-            schemaChecksum,
-            cubeName,
-            rolapStarFactTableName,
-            measureName);
-        final FuzzyFactInfo factInfo = fuzzyFactMap.get(factKey);
+        final RegionFactInfo factInfo = regionFactMap.get(key);
         List<SegmentHeader> list = Collections.emptyList();
         if (factInfo == null) {
             return list;
         }
-        for (SegmentHeader header : factInfo.headerList) {
+        for (SegmentHeader header : factInfo.headers) {
             // Don't return stale segments.
-            if (headerMap.get(header) != null && headerMap.get(header).removeAfterLoad) {
+            final HeaderInfo headerInfo = headerMap.get(header);
+            if (headerInfo != null && headerInfo.removeAfterLoad) {
                 continue;
             }
             if (intersects(header, region)) {
@@ -496,110 +527,137 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         if (region.length == 0) {
             return true;
         }
+        // the region is a box: the segment intersects it only when EVERY box
+        // column either is absent from the segment (covers all its values),
+        // is a wildcard on either side, or shares at least one value
         for (SegmentColumn regionColumn : region) {
             final SegmentColumn headerColumn =
                 header.getConstrainedColumn(regionColumn.getColumnExpression());
             if (headerColumn == null) {
-                // If the segment header doesn't contain a column specified
-                // by the region, then it always implicitly intersects.
-                // This allows flush operations to be valid.
-                return true;
+                continue;
             }
             final SortedSet<Comparable> regionValues =
                 regionColumn.getValues();
             final SortedSet<Comparable> headerValues =
                 headerColumn.getValues();
             if (headerValues == null || regionValues == null) {
-                // This is a wildcard, so it always intersects.
-                return true;
+                continue;
             }
+            boolean overlap = false;
             for (Comparable myValue : regionValues) {
                 if (headerValues.contains(myValue)) {
-                    return true;
+                    overlap = true;
+                    break;
                 }
             }
+            if (!overlap) {
+                return false;
+            }
         }
-        return false;
+        return true;
     }
 
     @Override
 	public void printCacheState(PrintWriter pw) {
         checkThread();
-        final List<List<SegmentHeader>> values =
+        // buffered: the caller's writer may be network- or file-bound, and
+        // this runs on the actor - foreign I/O must not stall it
+        final StringWriter buffer = new StringWriter();
+        final PrintWriter out = new PrintWriter(buffer);
+        final List<Set<SegmentHeader>> values =
             new ArrayList<>(
                 bitkeyMap.values());
-        Collections.sort(
-            values,
-            new Comparator<List<SegmentHeader>>() {
-                @Override
-				public int compare(
-                    List<SegmentHeader> o1,
-                    List<SegmentHeader> o2)
-                {
-                    if (o1.isEmpty()) {
-                        return -1;
-                    }
-                    if (o2.isEmpty()) {
-                        return 1;
-                    }
-                    return o1.getFirst().getUniqueID()
-                        .compareTo(o2.getFirst().getUniqueID());
-                }
-            });
-        for (List<SegmentHeader> key : values) {
-            final List<SegmentHeader> headerList =
+        values.sort((o1, o2) -> {
+            if (o1.isEmpty()) {
+                return -1;
+            }
+            if (o2.isEmpty()) {
+                return 1;
+            }
+            return o1.iterator().next().getUniqueID()
+                .compareTo(o2.iterator().next().getUniqueID());
+        });
+        for (Set<SegmentHeader> key : values) {
+            final List<SegmentHeader> headers =
                 new ArrayList<>(key);
-            Collections.sort(
-                headerList,
-                new Comparator<SegmentHeader>() {
-                    @Override
-					public int compare(SegmentHeader o1, SegmentHeader o2) {
-                        return o1.getUniqueID().compareTo(o2.getUniqueID());
-                    }
-                });
-            for (SegmentHeader header : headerList) {
-                pw.println(header.getDescription());
+            headers.sort(Comparator.comparing(SegmentHeader::getUniqueID));
+            for (SegmentHeader header : headers) {
+                out.println(header.getDescription());
             }
         }
+        out.flush();
+        pw.print(buffer);
     }
 
     @Override
 	public Future<SegmentBody> getFuture(Execution exec, SegmentHeader header) {
         checkThread();
         HeaderInfo hi = headerMap.get(header);
-        if (!hi.clients.contains(exec)) {
-            hi.clients.add(exec);
+        if (hi == null) {
+            return null;
+        }
+        // link the client only while a load is pending: load completion (or
+        // remove) drops the links, and an already-loaded header would keep
+        // the Execution graph pinned forever
+        if (hi.slot != null && hi.clients.add(exec)) {
+            headersByClient.computeIfAbsent(exec, k -> new LinkedHashSet<>()).add(header);
         }
         return hi.slot;
     }
 
     @Override
-	public void linkSqlStatement(SegmentHeader header, Statement stmt) {
+	public void linkSqlStatement(SegmentHeader header, GuardedStatement stmt) {
         checkThread();
-        headerMap.get(header).stmt = stmt;
+        HeaderInfo hi = headerMap.get(header);
+        if (hi != null) {
+            hi.stmt = stmt;
+        }
     }
 
     @Override
 	public boolean contains(SegmentHeader header) {
+        checkThread();
         return headerMap.containsKey(header);
+    }
+
+    @Override
+	public boolean isRegistered(SegmentHeader header) {
+        checkThread();
+        final HeaderInfo headerInfo = headerMap.get(header);
+        return headerInfo != null && !headerInfo.removeAfterLoad;
     }
 
     @Override
 	public void cancel(Execution exec) {
         checkThread();
-        List<SegmentHeader> toRemove = new ArrayList<>();
-        for (Entry<SegmentHeader, HeaderInfo> entry : headerMap.entrySet()) {
-            if (entry.getValue().clients.remove(exec)
-                && entry.getValue().slot != null
-                && !entry.getValue().slot.isDone()
-                && entry.getValue().clients.isEmpty())
+        final Set<SegmentHeader> mine = headersByClient.remove(exec);
+        if (mine == null) {
+            return;
+        }
+        final List<SegmentHeader> toRemove = new ArrayList<>();
+        for (SegmentHeader header : mine) {
+            final HeaderInfo headerInfo = headerMap.get(header);
+            if (headerInfo == null) {
+                continue;
+            }
+            if (headerInfo.clients.remove(exec)
+                && headerInfo.slot != null
+                && !headerInfo.slot.isDone()
+                && headerInfo.clients.isEmpty())
             {
-                toRemove.add(entry.getKey());
+                toRemove.add(header);
             }
         }
         // Make sure to cleanup the orphaned segments.
         for (SegmentHeader header : toRemove) {
-            final Statement stmt = headerMap.get(header).stmt;
+            // the guard is captured BEFORE loadFailed - loadFailed nulls
+            // hi.stmt, so a task reading the field at run time would always
+            // see null and silently never cancel. The guard's handshake
+            // makes the late cancel safe: the loader marks it closed before
+            // its pooled connection is recycled, and a cancel after that is
+            // a guaranteed no-op with no JDBC call (see GuardedStatement -
+            // an isClosed() pre-check would block on most drivers).
+            final GuardedStatement stmt = headerMap.get(header).stmt;
             loadFailed(
                 header,
                 new QueryCanceledException(
@@ -613,161 +671,35 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             // there. It is therefore important to close and release the
             // resources on the proper thread, namely, the thread which
             // runs the actual statement.
-            Util.cancelStatement(stmt);
+            //
+            // cancel() itself is a JDBC NETWORK round-trip (PG/MySQL open a
+            // new connection for it) - fired off-thread so a dead database
+            // cannot stall the actor for n x driver timeout per cancel.
+            // stmt is null when the load registered but the SQL thread has
+            // not linked its statement yet.
+            if (stmt != null) {
+                try {
+                    statementCancelExecutor.execute(stmt::cancel);
+                } catch (RuntimeException e) {
+                    // a rejected submit (executor shut down) must not abort
+                    // the cleanup loop - the remaining headers still need
+                    // their loadFailed
+                    LOGGER.warn("statement cancel task rejected", e);
+                }
+            }
         }
     }
 
-    @Override
-	public SegmentBuilder.SegmentConverter getConverter(
-        String schemaName,
-        ByteString schemaChecksum,
-        String cubeName,
-        String rolapStarFactTableName,
-        String measureName,
-        List<String> compoundPredicates)
-    {
-        checkThread();
-
-        final List factKey = makeFactKey(
-            schemaName,
-            schemaChecksum,
-            cubeName,
-            rolapStarFactTableName,
-            measureName,
-            compoundPredicates);
-        final FactInfo factInfo = factMap.get(factKey);
-        if (factInfo == null) {
-            return null;
-        }
-        return factInfo.converter;
-    }
-
-    @Override
-	public void setConverter(
-        String schemaName,
-        ByteString schemaChecksum,
-        String cubeName,
-        String rolapStarFactTableName,
-        String measureName,
-        List<String> compoundPredicates,
-        SegmentBuilder.SegmentConverter converter)
-    {
-        checkThread();
-
-        final List factKey = makeFactKey(
-            schemaName,
-            schemaChecksum,
-            cubeName,
-            rolapStarFactTableName,
-            measureName,
-            compoundPredicates);
-        final FactInfo factInfo = factMap.get(factKey);
-        if (factInfo == null) {
-            throw new IllegalArgumentException("setConverter: should have called 'add' first");
-        }
-        factInfo.converter = converter;
-    }
-
-    private List makeBitkeyKey(SegmentHeader header) {
-        return makeBitkeyKey(
-            header.schemaName,
-            header.schemaChecksum,
-            header.cubeName,
-            header.rolapStarFactTableName,
-            header.constrainedColsBitKey,
-            header.measureName,
-            header.compoundPredicates);
-    }
-
-    private List makeBitkeyKey(
-        String schemaName,
-        ByteString schemaChecksum,
-        String cubeName,
-        String rolapStarFactTableName,
-        BitKey constrainedColsBitKey,
-        String measureName,
-        List<String> compoundPredicates)
-    {
-        return List.of(
-            schemaName,
-            schemaChecksum,
-            cubeName,
-            rolapStarFactTableName,
-            constrainedColsBitKey,
-            measureName,
-            compoundPredicates);
-    }
-
-    private List makeFactKey(SegmentHeader header) {
-        return makeFactKey(
-            header.schemaName,
-            header.schemaChecksum,
-            header.cubeName,
-            header.rolapStarFactTableName,
-            header.measureName,
-            header.compoundPredicates);
-    }
-
-    private List makeFactKey(
-        String schemaName,
-        ByteString schemaChecksum,
-        String cubeName,
-        String rolapStarFactTableName,
-        String measureName,
-        List<String> compoundPredicates)
-    {
-        return List.of(
-            schemaName,
-            schemaChecksum,
-            cubeName,
-            rolapStarFactTableName,
-            measureName,
-            compoundPredicates);
-    }
-
-    private List makeFuzzyFactKey(SegmentHeader header) {
-        return makeFuzzyFactKey(
-            header.schemaName,
-            header.schemaChecksum,
-            header.cubeName,
-            header.rolapStarFactTableName,
-            header.measureName);
-    }
-
-    private List makeFuzzyFactKey(
-        String schemaName,
-        ByteString schemaChecksum,
-        String cubeName,
-        String rolapStarFactTableName,
-        String measureName)
-    {
-        return List.of(
-            schemaName,
-            schemaChecksum,
-            cubeName,
-            rolapStarFactTableName,
-            measureName);
-    }
 
     @Override
 	public List<List<SegmentHeader>> findRollupCandidates(
-        String schemaName,
-        ByteString schemaChecksum,
-        String cubeName,
-        String measureName,
-        String rolapStarFactTableName,
-        BitKey constrainedColsBitKey,
-        Map<String, Comparable> coordinates,
-        List<String> compoundPredicates)
+        SegmentIdentity identity,
+        Map<String, Comparable> coordinates)
     {
-        final List factKey = makeFactKey(
-            schemaName,
-            schemaChecksum,
-            cubeName,
-            rolapStarFactTableName,
-            measureName,
-            compoundPredicates);
-        final FactInfo factInfo = factMap.get(factKey);
+        checkThread();
+        final BitKey constrainedColsBitKey = identity.constrainedColsBitKey();
+        final List<SegmentPredicate> compoundPredicates = identity.compoundPredicates();
+        final FactInfo factInfo = factMap.get(identity.factKey());
         if (factInfo == null) {
             return Collections.emptyList();
         }
@@ -781,19 +713,22 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
 
         final List<List<SegmentHeader>> list =
             new ArrayList<>();
-        final List<BitKey> ancestors =
-            factInfo.bitkeyPoset.getAncestors(constrainedColsBitKey);
+        final List<BitKey> ancestors = factInfo.ancestorMemo
+            .computeIfAbsent(constrainedColsBitKey, factInfo::ancestorsOf);
         for (BitKey bitKey : ancestors) {
-            final List bitkeyKey = makeBitkeyKey(
-                schemaName,
-                schemaChecksum,
-                cubeName,
-                rolapStarFactTableName,
-                bitKey,
-                measureName,
-                compoundPredicates);
-            final List<SegmentHeader> headers = bitkeyMap.get(bitkeyKey);
-            assert headers != null : "bitkeyPoset / bitkeyMap inconsistency";
+            final var bitkeyKey = new SegmentIdentity(
+                identity.schemaName(),
+                identity.schemaChecksum(),
+                identity.cubeName(),
+                identity.rolapStarFactTableName(),
+                identity.measureName(),
+                compoundPredicates,
+                bitKey);
+            final Set<SegmentHeader> headers = bitkeyMap.get(bitkeyKey);
+            if (headers == null) {
+                // dimensionality exists for other compound predicates only
+                continue;
+            }
 
             // For columns that are still present after roll up, make sure that
             // the required value is in the range covered by the segment.
@@ -802,7 +737,47 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             // will need to combine with other segments later.
             findRollupCandidatesAmong(coordinates, list, headers);
         }
+        if (BitKeyExplain.enabled()) {
+            BitKeyExplain.EXPLAIN.debug(
+                "rollup search for {} over {} ancestor dimensionalities: {} candidate set(s)",
+                BitKeyExplain.explain(coordinates), ancestors.size(), list.size());
+            for (List<SegmentHeader> candidates : list) {
+                for (SegmentHeader header : candidates) {
+                    BitKeyExplain.EXPLAIN.debug("  candidate {}",
+                        BitKeyExplain.explain(header));
+                }
+            }
+        }
         return list;
+    }
+
+    /**
+     * Whether one of the header's excluded regions, widened to the columns
+     * the rollup keeps, contains the requested coordinates. Region columns
+     * missing from the coordinates are aggregated away and no longer
+     * constrain the box.
+     */
+    private static boolean excludedRegionHitsRequest(
+        SegmentHeader header,
+        Map<String, Comparable> coordinates)
+    {
+        regionLoop:
+        for (SegmentRegion region : header.getExcludedRegions()) {
+            for (SegmentColumn column : region.columns()) {
+                if (!coordinates.containsKey(column.columnExpression)) {
+                    continue;
+                }
+                Comparable value = coordinates.get(column.columnExpression);
+                if (value == null) {
+                    value = Util.sqlNullValue;
+                }
+                if (column.values != null && !column.values.contains(value)) {
+                    continue regionLoop;
+                }
+            }
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -858,27 +833,42 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
     private void findRollupCandidatesAmong(
         Map<String, Comparable> coordinates,
         List<List<SegmentHeader>> list,
-        List<SegmentHeader> headers)
+        Collection<SegmentHeader> headers)
     {
         final List<Pair<SegmentHeader, List<SegmentColumn>>> matchingHeaders =
             new ArrayList<>();
         headerLoop:
         for (SegmentHeader header : headers) {
-            // Skip headers that have exclusions.
-            //
-            // TODO: This is a bit harsh.
-            if (!header.getExcludedRegions().isEmpty()) {
+            // mirror locate/intersectRegion: a header flagged for removal
+            // after its load (flushed while loading) must not seed a
+            // rollup - its store body still exists in the flush window,
+            // and the rollup would publish the flushed cells permanently.
+            // A header whose load is still OPEN is no candidate either:
+            // its body exists nowhere yet, and the reader's store miss
+            // would remove the loading segment (store-without-index ghost
+            // plus the foreign load's work lost).
+            final HeaderInfo stale = headerMap.get(header);
+            if (stale != null
+                && (stale.removeAfterLoad
+                    || (stale.slot != null && !stale.slot.isDone()))) {
+                continue;
+            }
+            // A header with excluded regions can still roll up: the
+            // regions ride into the target header widened to the kept
+            // columns (SegmentBuilder.rollup sums the physically present
+            // flushed cells into exactly those boxes and keeps refusing
+            // them). Only a region whose kept columns all hit the requested
+            // coordinates makes the rollup useless: the requested cell
+            // itself would be excluded from the result.
+            if (excludedRegionHitsRequest(header, coordinates)) {
                 continue;
             }
 
             List<SegmentColumn> nonWildcards =
                 new ArrayList<>();
             for (SegmentColumn column : header.getConstrainedColumns()) {
-                final SegmentColumn constrainedColumn =
-                    header.getConstrainedColumn(column.columnExpression);
+                final SegmentColumn constrainedColumn = column;
 
-                // REVIEW: How are null key values represented in coordinates?
-                // Assuming that they are represented by null ref.
                 if (coordinates.containsKey(column.columnExpression)) {
                     // Matching column. Will not be aggregated away. Needs
                     // to be in range.
@@ -917,9 +907,10 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
         // Collect the list of non-wildcarded columns.
         final List<SegmentColumn> columnList = new ArrayList<>();
         final List<String> columnNameList = new ArrayList<>();
+        final Set<String> columnNames = new HashSet<>();
         for (Pair<SegmentHeader, List<SegmentColumn>> pair : matchingHeaders) {
             for (SegmentColumn column : pair.right) {
-                if (!columnNameList.contains(column.columnExpression)) {
+                if (columnNames.add(column.columnExpression)) {
                     final long valueCount = column.getValueCount();
                     if (valueCount <= 0) {
                         // Impossible to safely roll up. If we don't know the
@@ -942,28 +933,29 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             final SortedMap<Comparable, BitSet> valueMap =
                 new TreeMap<>(RolapUtil.ROLAP_COMPARATOR);
 
+            // Two passes: listed values first (they create the entries),
+            // then wildcard headers mark THEIR bit on every value — a
+            // wildcard covers each value, not values 0..n, and must also
+            // cover entries created after its iteration position.
             int h = -1;
+            final BitSet wildcardHeaders = new BitSet();
             for (SegmentHeader header : Pair.leftIter(matchingHeaders)) {
                 ++h;
                 final SegmentColumn column1 =
                     header.getConstrainedColumn(
                         column.columnExpression);
                 if (column1.getValues() == null) {
-                    // Wildcard. Mark all values as present.
-                    for (Entry<Comparable, BitSet> entry : valueMap.entrySet())
-                    {
-                        for (int pos = 0;
-                            pos < entry.getValue().cardinality();
-                            pos++)
-                        {
-                            entry.getValue().set(pos);
-                        }
-                    }
+                    wildcardHeaders.set(h);
                 } else {
                     for (Comparable value : column1.getValues()) {
                         BitSet bitSet = valueMap.computeIfAbsent(value, k -> new BitSet());
                         bitSet.set(h);
                     }
+                }
+            }
+            if (!wildcardHeaders.isEmpty()) {
+                for (Entry<Comparable, BitSet> entry : valueMap.entrySet()) {
+                    entry.getValue().or(wildcardHeaders);
                 }
             }
 
@@ -993,7 +985,7 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             // this case, from 8 values to 4 classes.) We can use any value in a
             // class to stand for all values.
             final Map<BitSet, Comparable> eqclassPrimaryValues =
-                new HashMap<>();
+                new LinkedHashMap<>();
             for (Map.Entry<Comparable, BitSet> entry : valueMap.entrySet()) {
                 final BitSet bitSet = entry.getValue();
                 eqclassPrimaryValues.computeIfAbsent(bitSet, k -> entry.getKey());
@@ -1026,9 +1018,10 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
             }
             // Does one of the unused segments contain it? Use the first one we
             // find.
-            for (SegmentHeader segment : unusedSegments) {
+            for (int i = 0; i < unusedSegments.size(); i++) {
+                final SegmentHeader segment = unusedSegments.get(i);
                 if (contains(segment, tuple, columnNameList)) {
-                    unusedSegments.remove(segment);
+                    unusedSegments.remove(i);
                     usedSegments.add(segment);
                     continue tupleLoop;
                 }
@@ -1058,31 +1051,48 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
     }
 
     private static class FactInfo {
-        private static final PartiallyOrderedSet.Ordering<BitKey> ORDERING =
-            new PartiallyOrderedSet.Ordering<>() {
-                @Override
-				public boolean lessThan(BitKey e1, BitKey e2) {
-                    return e2.isSuperSetOf(e1);
+        private final Set<SegmentHeader> headers =
+            new LinkedHashSet<>();
+
+        /** Headers per dimensionality; a bit key drops out at zero. */
+        private final Map<BitKey, Integer> bitkeyCounts = new HashMap<>();
+
+        /**
+         * Ancestor lists per requested dimensionality, cleared whenever a
+         * dimensionality appears or disappears. Keys are frozen request bit
+         * keys; cached lists are never mutated. Bounded by the distinct
+         * dimensionalities requested between changes.
+         */
+        private final Map<BitKey, List<BitKey>> ancestorMemo = new HashMap<>();
+
+        /**
+         * The dimensionalities a request can roll up FROM: every known bit
+         * key that is a strict superset, fewest bits first — cheaper
+         * rollups (fewer columns to aggregate away) are tried first. A
+         * linear filter over the known dimensionalities; the counts are
+         * few and the result is memoized per request key.
+         */
+        private List<BitKey> ancestorsOf(BitKey request) {
+            final List<BitKey> result = new ArrayList<>();
+            for (BitKey candidate : bitkeyCounts.keySet()) {
+                if (!candidate.equals(request)
+                        && candidate.isSuperSetOf(request)) {
+                    result.add(candidate);
                 }
-            };
-
-        private final List<SegmentHeader> headerList =
-            new ArrayList<>();
-
-        private final PartiallyOrderedSet<BitKey> bitkeyPoset =
-            new PartiallyOrderedSet<>(ORDERING);
-
-        private SegmentBuilder.SegmentConverter converter;
+            }
+            result.sort(Comparator.comparingInt(BitKey::cardinality));
+            return result;
+        }
 
         FactInfo() {
         }
     }
 
-    private static class FuzzyFactInfo {
-        private final List<SegmentHeader> headerList =
-            new ArrayList<>();
+    private static class RegionFactInfo {
+        private final Set<SegmentHeader> headers =
+            new LinkedHashSet<>();
 
-        FuzzyFactInfo() {
+        RegionFactInfo() {
         }
     }
 
@@ -1093,19 +1103,22 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
      */
     private static class HeaderInfo {
         /**
-         * The SQL statement populating this header.
-         * Will be null until the SQL thread calls us back to register it.
+         * In-flight guarded SQL statement of a loading segment; null until
+         * the SQL thread calls us back to register it. Actor-confined
+         * (written and read on the cache manager thread), handed to the
+         * cancel executor only as a captured reference - the guard's
+         * handshake makes a late cancel a safe no-op.
          */
-        private Statement stmt;
+        private GuardedStatement stmt;
         /**
          * The future object to pass on to clients.
          */
         private SlotFuture<SegmentBody> slot;
         /**
-         * A list of clients interested in this segment.
+         * The clients interested in this segment.
          */
-        private final List<Execution> clients =
-            new CopyOnWriteArrayList<>();
+        private final Set<Execution> clients =
+            new LinkedHashSet<>();
         /**
          * Whether this segment is already considered stale and must
          * be deleted after it is done loading. This can happen

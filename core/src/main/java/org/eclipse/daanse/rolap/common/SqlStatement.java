@@ -39,6 +39,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
@@ -47,6 +48,7 @@ import org.eclipse.daanse.sql.model.type.BestFitColumnType;
 import org.eclipse.daanse.olap.api.Context;
 import org.eclipse.daanse.olap.api.execution.Execution.Purpose;
 import org.eclipse.daanse.olap.api.execution.ExecutionContext;
+import org.eclipse.daanse.olap.api.execution.GuardedStatement;
 import org.eclipse.daanse.olap.api.monitor.event.EventCommon;
 import org.eclipse.daanse.olap.api.monitor.event.SqlStatementEndEvent;
 import org.eclipse.daanse.olap.api.monitor.event.SqlStatementEventCommon;
@@ -106,8 +108,11 @@ public class SqlStatement implements SqlStatementI {
   private final List<Accessor> accessors = new ArrayList<>();
   private State state = State.FRESH;
   private final long id;
-  private Consumer<Statement> callback;
-  public final static String javaDoubleOverflow = "Big decimal value in ''{0}'' exceeds double size.";
+  private final Consumer<GuardedStatement> callback;
+  // ownership handshake between this (running/closing) thread and any
+  // canceling thread; null until the JDBC statement exists
+  private GuardedStatement guard;
+  public static final String JAVA_DOUBLE_OVERFLOW = "Big decimal value in ''{0}'' exceeds double size.";
 
     /**
    * Creates a SqlStatement.
@@ -121,6 +126,7 @@ public class SqlStatement implements SqlStatementI {
    * @param executionContext                Execution context of this statement
    * @param resultSetType        Result set type
    * @param resultSetConcurrency Result set concurrency
+   * @param callback             Receives the {@link GuardedStatement} once the JDBC statement exists
    */
   public SqlStatement(
     Context context,
@@ -131,7 +137,7 @@ public class SqlStatement implements SqlStatementI {
     ExecutionContext executionContext,
     int resultSetType,
     int resultSetConcurrency,
-    Consumer<Statement>  callback ) {
+    Consumer<GuardedStatement>  callback ) {
     this.callback = callback;
     this.id = ID_GENERATOR.getAndIncrement();
     this.context = context;
@@ -151,7 +157,6 @@ public class SqlStatement implements SqlStatementI {
   public void execute() {
     long startTimeNanos;
     assert state == State.FRESH : "cannot re-execute";
-    state = State.ACTIVE;
     Counters.SQL_STATEMENT_EXECUTE_COUNT.incrementAndGet();
     Counters.SQL_STATEMENT_EXECUTING_IDS.add( id );
     String status = "failed";
@@ -163,7 +168,13 @@ public class SqlStatement implements SqlStatementI {
       // Slot first, connection second. The other way round a thread blocked on the
       // semaphore is already holding a physical connection, so queryLimit throttles
       // execution while the connections it was meant to bound pile up regardless.
-      context.getQueryLimitSemaphore().acquire();
+      //
+      // Acquire in slices with a cancel check between them: a canceled query
+      // queued behind a saturated query limit has no statement to cancel and
+      // nothing else can wake it - it pinned its shepherd pool slot forever.
+      while ( !context.getQueryLimitSemaphore().tryAcquire( 1, TimeUnit.SECONDS ) ) {
+        executionContext.getExecution().checkCancelOrTimeout();
+      }
       haveSemaphore = true;
       this.jdbcConnection = context.getDataSource().getConnection();
       // Trace start of execution.
@@ -205,13 +216,14 @@ public class SqlStatement implements SqlStatementI {
       if ( maxRows > 0 ) {
         statement.setMaxRows( maxRows );
       }
+      guard = new GuardedStatement( statement );
 
       // First make sure to register with the execution instance.
-      if ( getPurpose() != org.eclipse.daanse.olap.api.execution.Execution.Purpose.CELL_SEGMENT ) {
-        executionContext.registerStatement(statement);
+      if ( getPurpose() != Purpose.CELL_SEGMENT ) {
+        executionContext.registerStatement(guard);
       } else {
         if ( callback != null ) {
-          callback.accept(statement);
+          callback.accept(guard);
         }
       }
 
@@ -220,14 +232,6 @@ public class SqlStatement implements SqlStatementI {
         new SqlStatementEventCommon(new EventCommon(startTime), id, mdxStatementId, sql, getPurpose()),
         getCellRequestCount());
     executionContext.getExecution().getDaanseStatement().getDaanseConnection().getContext().getMonitor().accept(event);
-
-//        new SqlStatementStartEvent(
-//          startTimeMillis,
-//          id,
-//          executionContext,
-//          sql,
-//          getPurpose(),
-//          getCellRequestCount() )
 
 
       this.resultSet = statement.executeQuery( sql );
@@ -245,19 +249,16 @@ public class SqlStatement implements SqlStatementI {
       }
 
       // skip to first row specified in request
-      this.state = State.ACTIVE;
       if ( firstRowOrdinal > 0 ) {
         if ( resultSetType == ResultSet.TYPE_FORWARD_ONLY ) {
           for ( int i = 0; i < firstRowOrdinal; ++i ) {
             if ( !this.resultSet.next() ) {
-              this.state = State.DONE;
               break;
             }
           }
         } else {
-          if ( !this.resultSet.absolute( firstRowOrdinal ) ) {
-            this.state = State.DONE;
-          }
+          // side-effecting positioning; a short result set is fine
+          this.resultSet.absolute( firstRowOrdinal );
         }
       }
 
@@ -274,19 +275,22 @@ public class SqlStatement implements SqlStatementI {
 
     executionContext.getExecution().getDaanseStatement().getDaanseConnection().getContext().getMonitor().accept(execEvent);
 
-//      new SqlStatementExecuteEvent(
-//          timeMillis,
-//          id,
-//          executionContext,
-//          sql,
-//          getPurpose(),
-//          executeNanos )
-
     } catch ( Throwable e ) {
+      if ( e instanceof InterruptedException ) {
+        // keep the interrupt visible to the caller's cleanup instead of
+        // silently downgrading it to a SQL error
+        Thread.currentThread().interrupt();
+      }
       status = new StringBuilder(", failed (").append(e).append(")").toString();
 
       // This statement was leaked to us. It is our responsibility
-      // to dispose of it.
+      // to dispose of it. The guard is marked closed FIRST: the callback
+      // above may already have published it (segment index link), and a
+      // cancel arriving after this close must be a no-op - the pooled
+      // connection is about to be recycled.
+      if ( guard != null ) {
+        guard.markClosed();
+      }
       Util.close( null, statement, null );
 
       // Now handle this exception.
@@ -305,7 +309,9 @@ public class SqlStatement implements SqlStatementI {
   }
 
   /**
-   * Closes all resources (statement, result set) held by this SqlStatement.
+   * Closes the result set and the JDBC connection; the statement is closed
+   * implicitly with the connection - only its guard is marked closed here,
+   * BEFORE the pooled connection is recycled.
    *
    * If any of them fails, wraps them in a
    * {@link RuntimeException} describing the high-level operation which this statement was performing. No further
@@ -323,6 +329,15 @@ public class SqlStatement implements SqlStatementI {
     if ( haveSemaphore ) {
       haveSemaphore = false;
       context.getQueryLimitSemaphore().release();
+    }
+
+    if ( guard != null ) {
+      // closed BEFORE the connection returns to the pool: a cancel that
+      // arrives later is a guaranteed no-op (never reaches a recycled
+      // connection). markClosed releases the guard monitor before the
+      // unregister below - no nested locks.
+      guard.markClosed();
+      executionContext.unregisterStatement( guard );
     }
 
     // According to the JDBC spec, closing a statement automatically closes
@@ -383,16 +398,6 @@ public class SqlStatement implements SqlStatementI {
       false, null);
 
   executionContext.getExecution().getDaanseStatement().getDaanseConnection().getContext().getMonitor().accept(endEvent);
-
-//      new SqlStatementEndEvent(
-//        endTime,
-//        id,
-//        executionContext,
-//        sql,
-//        getPurpose(),
-//        rowCount,
-//        false,
-//        null )
   }
 
   public String formatTimingStatus( Duration duration, int rowCount ) {
@@ -483,13 +488,16 @@ public class SqlStatement implements SqlStatementI {
               @Override
         public Object get() throws SQLException {
                 final BigDecimal decimal = resultSet.getBigDecimal( columnPlusOne );
-                if ( decimal == null && resultSet.wasNull() ) {
+                if ( decimal == null ) {
+                  // null-check the value itself: coupling it to wasNull()
+                  // left an NPE path, and the second getBigDecimal doubled
+                  // the JDBC access per cell
                   return null;
                 }
-                final double val = resultSet.getBigDecimal( columnPlusOne ).doubleValue();
+                final double val = decimal.doubleValue();
                 if ( val == Double.NEGATIVE_INFINITY || val == Double.POSITIVE_INFINITY ) {
                   throw new SQLDataException(
-                      MessageFormat.format(javaDoubleOverflow, resultSet.getMetaData().getColumnName( columnPlusOne ) ));
+                      MessageFormat.format(JAVA_DOUBLE_OVERFLOW, resultSet.getMetaData().getColumnName( columnPlusOne ) ));
                 }
                 return val;
               }
@@ -553,41 +561,6 @@ public class SqlStatement implements SqlStatementI {
     return executionContext.metadata().cellRequestCount();
   }
 
-  /**
-   * The approximate JDBC type of a column.
-   *
-   * This type affects which {@link ResultSet} method we use to get values
-   * of this column: the default is {@link java.sql.ResultSet#getObject(int)}, but we'd prefer to use native values
-   * {@code getInt} and {@code getDouble} if possible.
-   * Note that the DECIMAL type was added to provide a workaround for a bug
-   * in the Snowflake JDBC driver.  There is no plan to support it further than that.
-   */
-  public enum Type {
-    OBJECT,
-    DOUBLE,
-    INT,
-    LONG,
-    STRING,
-    DECIMAL;
-
-    public Object get( ResultSet resultSet, int column ) throws SQLException {
-      return switch (this) {
-      case OBJECT -> resultSet.getObject( column + 1 );
-      case STRING -> resultSet.getString( column + 1 );
-      case INT -> resultSet.getInt( column + 1 );
-      case LONG -> resultSet.getLong( column + 1 );
-      case DOUBLE -> resultSet.getDouble( column + 1 );
-      case DECIMAL -> {
-        // this lacks the range checking done in the createAccessor method above, but nothing seems
-          // to call this method anyway.
-          BigDecimal decimal = resultSet.getBigDecimal( column + 1 );
-        yield decimal == null ? null : decimal.doubleValue();
-      }
-      default -> throw Util.unexpected( this );
-      };
-    }
-  }
-
   public interface Accessor {
     Object get() throws SQLException;
   }
@@ -634,8 +607,6 @@ public class SqlStatement implements SqlStatementI {
 
   private enum State {
     FRESH,
-    ACTIVE,
-    DONE,
     CLOSED
   }
 

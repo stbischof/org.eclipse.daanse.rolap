@@ -22,6 +22,10 @@
  */
 
 package org.eclipse.daanse.rolap.common.agg;
+import org.eclipse.daanse.olap.spi.body.DenseIntSegmentBody;
+import org.eclipse.daanse.olap.spi.body.DenseDoubleSegmentBody;
+import org.eclipse.daanse.olap.spi.body.DenseObjectSegmentBody;
+import org.eclipse.daanse.olap.spi.body.SparseSegmentBody;
 
 import static java.util.Arrays.asList;
 import static java.util.Collections.singleton;
@@ -45,6 +49,8 @@ import org.eclipse.daanse.olap.key.BitKey;
 import org.eclipse.daanse.olap.spi.SegmentBody;
 import org.eclipse.daanse.olap.spi.SegmentColumn;
 import org.eclipse.daanse.olap.spi.SegmentHeader;
+import org.eclipse.daanse.olap.spi.SegmentPredicate;
+import org.eclipse.daanse.olap.spi.SegmentRegion;
 import org.eclipse.daanse.olap.util.ByteString;
 import org.eclipse.daanse.olap.util.Pair;
 import org.eclipse.daanse.rolap.aggregator.SumAggregator;
@@ -436,10 +442,89 @@ class SegmentBuilderTest {
                 "dummyCubeName",
                 "dummyMeasureName",
                 constrainedColumns,
-                Collections.<String>emptyList(),
+                Collections.<SegmentPredicate>emptyList(),
                 "dummyFactTable",
                 BitKey.Factory.makeBitKey(3),
-                Collections.<SegmentColumn>emptyList());
+                Collections.<SegmentRegion>emptyList());
+    }
+
+    @Test
+    void rollupWidensExcludedRegionsToTheKeptColumns() {
+        Map<SegmentHeader, SegmentBody> map = makeSegmentMap(
+                new String[]{"col1", "col2"}, null, 3, 9, true, null);
+        Map.Entry<SegmentHeader, SegmentBody> entry =
+                map.entrySet().iterator().next();
+        // box (col1=c0v0, col2=c1v1); col1 is aggregated away: the box
+        // widens to (col2=c1v1), exactly the tainted target cell
+        SegmentHeader constrained = entry.getKey().constrain(
+                new SegmentColumn[]{
+                    new SegmentColumn("col1", 3, toSortedSet("c0v0")),
+                    new SegmentColumn("col2", 3, toSortedSet("c1v1"))});
+        Pair<SegmentHeader, SegmentBody> rollup = SegmentBuilder.rollup(
+                singletonMap(constrained, entry.getValue()),
+                singleton("col2"),
+                null, SumAggregator.INSTANCE, Datatype.NUMERIC, 1000, 0.5);
+        List<SegmentRegion> regions = rollup.getKey().getExcludedRegions();
+        assertThat(regions).hasSize(1);
+        assertThat(regions.get(0).columns()).hasSize(1);
+        assertThat(regions.get(0).columns().get(0).columnExpression)
+                .isEqualTo("col2");
+        assertThat(rollup.getKey().isCellExcluded(
+                Map.<String, Comparable>of("col2", "c1v1"))).isTrue();
+        assertThat(rollup.getKey().isCellExcluded(
+                Map.<String, Comparable>of("col2", "c1v0"))).isFalse();
+    }
+
+    @Test
+    void rollupTurnsARegionWithNoKeptColumnIntoAWholeTargetBox() {
+        Map<SegmentHeader, SegmentBody> map = makeSegmentMap(
+                new String[]{"col1", "col2"}, null, 3, 9, true, null);
+        Map.Entry<SegmentHeader, SegmentBody> entry =
+                map.entrySet().iterator().next();
+        // the box constrains only the aggregated-away column: every target
+        // cell sums one of its flushed cells, so the whole target is refused
+        SegmentHeader constrained = entry.getKey().constrain(
+                new SegmentColumn[]{
+                    new SegmentColumn("col1", 3, toSortedSet("c0v0"))});
+        Pair<SegmentHeader, SegmentBody> rollup = SegmentBuilder.rollup(
+                singletonMap(constrained, entry.getValue()),
+                singleton("col2"),
+                null, SumAggregator.INSTANCE, Datatype.NUMERIC, 1000, 0.5);
+        List<SegmentRegion> regions = rollup.getKey().getExcludedRegions();
+        assertThat(regions).hasSize(1);
+        assertThat(regions.get(0).columns().get(0).values).isNull();
+        assertThat(rollup.getKey().isCellExcluded(
+                Map.<String, Comparable>of("col2", "c1v0"))).isTrue();
+    }
+
+    @Test
+    void overlappingSegmentsCountEachSourceCellOnceIncludingNullAxes() {
+        // two headers over the SAME physical cells (one wildcarded, one
+        // value-constrained) with null axis values on both columns: the
+        // rollup must sum every origin cell exactly once
+        String[][] colVals = dummyColumnValues(2, 2);
+        Pair<SegmentHeader, SegmentBody> wildcarded = makeDummyHeaderBodyPair(
+                new String[]{"col1", "col2"}, colVals, 9, true,
+                new boolean[]{true, true});
+        Pair<SegmentHeader, SegmentBody> constrained = makeDummyHeaderBodyPair(
+                new String[]{"col1", "col2"}, colVals, 9, false,
+                new boolean[]{true, true});
+        Map<SegmentHeader, SegmentBody> overlapping = new HashMap<>();
+        overlapping.put(wildcarded.left, wildcarded.right);
+        overlapping.put(constrained.left, constrained.right);
+
+        Pair<SegmentHeader, SegmentBody> deduped = SegmentBuilder.rollup(
+                overlapping, singleton("col2"),
+                null, SumAggregator.INSTANCE, Datatype.NUMERIC, 1000, 0.5);
+        Pair<SegmentHeader, SegmentBody> single = SegmentBuilder.rollup(
+                singletonMap(wildcarded.left, wildcarded.right),
+                singleton("col2"),
+                null, SumAggregator.INSTANCE, Datatype.NUMERIC, 1000, 0.5);
+
+        assertThat((double[]) deduped.getValue().getValueArray())
+                .isEqualTo((double[]) single.getValue().getValueArray());
+        assertThat(deduped.getValue().getAxisValueSets())
+                .isEqualTo(single.getValue().getAxisValueSets());
     }
 
     private String[][] dummyColumnValues(int cols, int numVals) {

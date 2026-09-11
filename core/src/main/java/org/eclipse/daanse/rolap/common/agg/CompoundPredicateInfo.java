@@ -36,13 +36,12 @@ import org.eclipse.daanse.olap.api.evaluator.Evaluator;
 import org.eclipse.daanse.olap.api.query.component.Expression;
 import org.eclipse.daanse.olap.api.type.SetType;
 import org.eclipse.daanse.olap.api.type.Type;
-import org.eclipse.daanse.olap.common.ConfigConstants;
 import org.eclipse.daanse.olap.common.Util;
 import org.eclipse.daanse.olap.exceptions.UnsupportedCalculatedMemberException;
 import org.eclipse.daanse.olap.key.BitKey;
+import org.eclipse.daanse.olap.spi.SegmentPredicate;
 import org.eclipse.daanse.olap.query.component.ResolvedFunCallImpl;
-import  org.eclipse.daanse.olap.util.Pair;
-import org.eclipse.daanse.rolap.common.SqlRender;
+import org.eclipse.daanse.olap.util.Pair;
 import org.eclipse.daanse.rolap.common.agg.AndPredicate;
 import org.eclipse.daanse.rolap.common.agg.ListColumnPredicate;
 import org.eclipse.daanse.rolap.common.agg.OrPredicate;
@@ -60,17 +59,16 @@ import org.eclipse.daanse.rolap.element.RolapStoredMeasure;
 import org.eclipse.daanse.rolap.element.VisualTotalMember;
 
 /**
- * Constructs a Pair with BitKey and StarPredicate based on an tuple list and measure, along with the string representation of
- * the predicate. Also sets the isSatisfiable flag based on whether a predicate is compatible with the measure.
- *
- * This logic was extracted from RolapAggregationManager and AggregationKey.
+ * Constructs a Pair of BitKey and StarPredicate for a tuple list and
+ * measure, and sets the isSatisfiable flag based on whether the predicate
+ * is compatible with the measure.
  */
 public class CompoundPredicateInfo {
 
   private final Pair<BitKey, StarPredicate> predicate;
-  private final String predicateString;
   private final RolapMeasure measure;
   private boolean satisfiable = true;
+  private SegmentPredicate wirePredicate;
 
   public CompoundPredicateInfo( List<List<Member>> tupleList, RolapMeasure measure, Evaluator evaluator ) {
       if (measure == null) {
@@ -78,19 +76,22 @@ public class CompoundPredicateInfo {
       }
       this.measure = measure;
       this.predicate = predicateFromTupleList( tupleList, measure, evaluator );
-      this.predicateString = getPredicateString( getStar( measure ), getPredicate() );
   }
 
   public StarPredicate getPredicate() {
     return predicate == null ? null : predicate.right;
   }
 
-  public BitKey getBitKey() {
-    return predicate == null ? null : predicate.left;
+  /** Wire form of the predicate; translated once, reused per cell request. */
+  public SegmentPredicate getWirePredicate() {
+    if ( wirePredicate == null && getPredicate() != null ) {
+      wirePredicate = SegmentPredicates.toWire( getPredicate() );
+    }
+    return wirePredicate;
   }
 
-  public String getPredicateString() {
-    return predicateString;
+  public BitKey getBitKey() {
+    return predicate == null ? null : predicate.left;
   }
 
   public boolean isSatisfiable() {
@@ -99,16 +100,6 @@ public class CompoundPredicateInfo {
 
   public RolapCube getCube() {
     return measure.isCalculated() ? null : ( (RolapStoredMeasure) measure ).getCube();
-  }
-
-  /**
-   * Returns a string representation of the predicate
-   */
-  public static String getPredicateString( RolapStar star, StarPredicate predicate ) {
-    if ( star == null || predicate == null ) {
-      return null;
-    }
-    return SqlRender.renderPredicate( org.eclipse.daanse.rolap.common.sqlbuild.StarPredicateTranslator.toPredicate( predicate ), star.getDialect() );
   }
 
   private static RolapStar getStar( RolapMeasure measure ) {
@@ -137,7 +128,6 @@ public class CompoundPredicateInfo {
     int starColumnCount = rolapStar != null ? rolapStar.getColumnCount() : 0;
 
     compoundBitKey = BitKey.Factory.makeBitKey( starColumnCount );
-    compoundBitKey.clear();
     compoundGroupMap = new LinkedHashMap<>();
     unsatisfiable = makeCompoundGroup( starColumnCount, cube, tupleList, compoundGroupMap );
 

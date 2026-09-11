@@ -24,6 +24,7 @@
 
 
 package org.eclipse.daanse.rolap.common.agg;
+import org.eclipse.daanse.olap.spi.body.DenseIntSegmentBody;
 
 import java.util.BitSet;
 import java.util.List;
@@ -33,7 +34,7 @@ import org.eclipse.daanse.sql.model.type.BestFitColumnType;
 import org.eclipse.daanse.olap.common.Util;
 import org.eclipse.daanse.olap.key.CellKey;
 import org.eclipse.daanse.olap.spi.SegmentBody;
-import  org.eclipse.daanse.olap.util.Pair;
+import org.eclipse.daanse.olap.util.Pair;
 
 /**
  * Implementation of {@link DenseSegmentDataset} that stores

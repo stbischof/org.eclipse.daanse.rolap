@@ -63,7 +63,7 @@ import org.eclipse.daanse.olap.util.ByteString;
 import  org.eclipse.daanse.olap.util.Pair;
 import org.eclipse.daanse.rolap.aggregator.SumAggregator;
 import org.eclipse.daanse.rolap.common.RolapUtil;
-import org.eclipse.daanse.rolap.common.agg.DenseObjectSegmentBody;
+import org.eclipse.daanse.olap.spi.body.DenseObjectSegmentBody;
 import org.eclipse.daanse.rolap.common.agg.SegmentBuilder;
 import org.eclipse.daanse.rolap.common.agg.SegmentCacheManager;
 import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.FoodmartTestInstance;
@@ -466,7 +466,7 @@ class SegmentBuilderTest {
 
     private void clearAggregationCache(Connection connection) {
         OlapSegmentCacheManager cacheMgr = ((AbstractBasicContext)connection.getContext()).getAggregationManager()
-        .getCacheMgr();
+        .getSegmentCacheManager();
     	SegmentCache segmentCache = ((SegmentCacheManager)cacheMgr).compositeCache;
     	segmentCache.getSegmentHeaders().stream().forEach(it -> segmentCache.remove(it));
 	}
@@ -603,15 +603,22 @@ class SegmentBuilderTest {
             BitKey.Factory.makeBitKey(new BitSet()),
             SumAggregator.INSTANCE,
             Datatype.NUMERIC, 1000, 0.5);
-        // Now try reversing the order the segments are retrieved
-        loadCacheWithQueries(connection, cachePopulatingQueries);
-        map = getReversibleTestMap(connection, Order.REVERSE);
+        // Now try reversing the order the segments are processed. Order
+        // independence is a property of the rollup, so it runs over the SAME
+        // snapshot in reverse iteration order — a second cache load would
+        // race the asynchronous segment cleanup of the schema flush.
+        map = orderedView(map, Order.REVERSE);
         Pair<SegmentHeader, SegmentBody> rolledReverse = SegmentBuilder.rollup(
             map,
             keepColumnsSet,
             BitKey.Factory.makeBitKey(new BitSet()),
             SumAggregator.INSTANCE,
             Datatype.NUMERIC, 1000, 0.5);
+        if (!expectedHeader.equals(removeJdkDependentStrings(rolledForward.getKey().toString()))) {
+            for (SegmentHeader h : map.keySet()) {
+                System.out.println("[SBT-SNAPSHOT] " + h);
+            }
+        }
         assertEquals(expectedHeader, removeJdkDependentStrings(rolledForward.getKey().toString()));
         // the header of the rolled up segment should be the same
         // regardless of the order the segments were processed
@@ -624,7 +631,10 @@ class SegmentBuilderTest {
 
     private void loadCacheWithQueries(Connection connection, String [] queries) {
         flushSchemaCache(connection);
-        //TestContext<?> context = getTestContext().withFreshConnection();
+        // the schema flush drops segments asynchronously; empty the composite
+        // cache here so the rollup input map holds exactly the segments the
+        // queries below load, never stale same-shaped ones
+        clearAggregationCache(connection);
         for (String query : queries) {
             executeQuery(connection, query);
         }
@@ -646,10 +656,32 @@ class SegmentBuilderTest {
         final Order order)
     {
         OlapSegmentCacheManager cacheMgr = ((AbstractBasicContext)connection.getContext()).getAggregationManager()
-        .getCacheMgr();
+        .getSegmentCacheManager();
         SegmentCache cache = ((SegmentCacheManager)cacheMgr).compositeCache;
 
         List<SegmentHeader> headers = cache.getSegmentHeaders();
+        // keep only the CURRENT catalog's segments: asynchronous publications
+        // of earlier tests (priming, schema-flush cleanup) may still land in
+        // the shared composite cache under an older schema checksum
+        final org.eclipse.daanse.olap.util.ByteString currentChecksum =
+            ((org.eclipse.daanse.rolap.element.RolapCatalog) connection.getCatalog()).getChecksum();
+        Map<SegmentHeader, SegmentBody> snapshot = new HashMap<>();
+        for (SegmentHeader header : headers) {
+            if (header.schemaChecksum.equals(currentChecksum)) {
+                snapshot.put(header, cache.get(header));
+            }
+        }
+        assertFalse(snapshot.isEmpty(), String.format(
+                "SegmentMap is empty. No segmentIds matched test parameters. "
+                        + "Full segment cache: %s", headers));
+        return orderedView(snapshot, order);
+    }
+
+    /** A view over {@code source} whose entrySet()/keySet() iterate sorted by
+     * header unique id, in the given order. */
+    private Map<SegmentHeader, SegmentBody> orderedView(
+        Map<SegmentHeader, SegmentBody> source, final Order order)
+    {
         Map<SegmentHeader, SegmentBody> testMap =
             new HashMap<>() {
             @Override
@@ -698,12 +730,9 @@ class SegmentBuilderTest {
                 return orderedSet;
             }
         };
-        for (SegmentHeader header : headers) {
-            testMap.put(header, cache.get(header));
+        for (Map.Entry<SegmentHeader, SegmentBody> entry : source.entrySet()) {
+            testMap.put(entry.getKey(), entry.getValue());
         }
-        assertFalse(testMap.isEmpty(), String.format(
-                "SegmentMap is empty. No segmentIds matched test parameters. "
-                        + "Full segment cache: %s", headers));
         return testMap;
     }
 
@@ -780,10 +809,10 @@ class SegmentBuilderTest {
             "dummyCubeName",
             "dummyMeasureName",
             constrainedColumns,
-            Collections.<String>emptyList(),
+            Collections.<org.eclipse.daanse.olap.spi.SegmentPredicate>emptyList(),
             "dummyFactTable",
             BitKey.Factory.makeBitKey(3),
-            Collections.<SegmentColumn>emptyList());
+            Collections.<org.eclipse.daanse.olap.spi.SegmentRegion>emptyList());
     }
 
     private String [][] dummyColumnValues(int cols, int numVals) {

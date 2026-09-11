@@ -64,7 +64,7 @@ import org.eclipse.daanse.rolap.common.agg.AggregationManager;
 import org.eclipse.daanse.rolap.common.agg.CellRequest;
 import org.eclipse.daanse.rolap.common.agg.ValueColumnPredicate;
 import org.eclipse.daanse.rolap.common.aggmatcher.AggStar;
-import org.eclipse.daanse.rolap.common.result.FastBatchingCellReader;
+import org.eclipse.daanse.rolap.common.result.BatchingCellReader;
 import org.eclipse.daanse.rolap.common.star.RolapStar;
 import org.eclipse.daanse.rolap.element.RolapCatalog;
 import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.CatalogSupplier;
@@ -140,8 +140,8 @@ class TestAggregationManager extends BatchTestCase {
     void testFemaleUnitSales(Context<?> context) {
         prepareContext(context);
         Connection connection = context.getConnectionWithDefaultRole();
-        final FastBatchingCellReader fbcr =
-            new FastBatchingCellReader(execution, getCube(connection,"Sales"), aggMgr);
+        final BatchingCellReader fbcr =
+            new BatchingCellReader(execution, getCube(connection,"Sales"), aggMgr);
         CellRequest request = CellRequestFixture.of(connection).request()
             .cube("Sales").measure("[Measures].[Unit Sales]").where("customer", "gender", "F").build();
         Object value = aggMgr.getCellFromCache(request);
@@ -158,8 +158,8 @@ class TestAggregationManager extends BatchTestCase {
     @Test
     void testFemaleCustomerCount(Context<?> context) {
         prepareContext(context);
-        final FastBatchingCellReader fbcr =
-            new FastBatchingCellReader(execution, getCube(context.getConnectionWithDefaultRole(), "Sales"), aggMgr);
+        final BatchingCellReader fbcr =
+            new BatchingCellReader(execution, getCube(context.getConnectionWithDefaultRole(), "Sales"), aggMgr);
         CellRequest request =
             CellRequestFixture.of(context.getConnectionWithDefaultRole()).request()
                 .cube("Sales").measure("[Measures].[Customer Count]")
@@ -200,8 +200,8 @@ class TestAggregationManager extends BatchTestCase {
                 .constrain(CellRequestFixture.Constraint.yearQuarterMonth(
                     new String[] {"1997", "Q1", "1"}, new String[] {"1997", "Q2", "5"})).build();
 
-        FastBatchingCellReader fbcr =
-            new FastBatchingCellReader(execution, getCube(connection, "Sales"), aggMgr);
+        BatchingCellReader fbcr =
+            new BatchingCellReader(execution, getCube(connection, "Sales"), aggMgr);
 
         Object value = aggMgr.getCellFromCache(request1);
         assertNull(value); // before load, the cell is not found

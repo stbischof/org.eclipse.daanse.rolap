@@ -85,8 +85,9 @@ public abstract class ListPredicate implements StarPredicate {
         if (columnBitKey == null) {
             for (StarPredicate predicate : children) {
                 if (columnBitKey == null) {
+                    // shared read-only; or() below never mutates it
                     columnBitKey =
-                        predicate.getConstrainedColumnBitKey().copy();
+                        predicate.getConstrainedColumnBitKey();
                 } else {
                     columnBitKey =
                         columnBitKey.or(predicate.getConstrainedColumnBitKey());

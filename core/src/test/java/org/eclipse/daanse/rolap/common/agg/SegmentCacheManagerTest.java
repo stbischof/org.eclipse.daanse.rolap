@@ -114,8 +114,22 @@ class SegmentCacheManagerTest {
     BlockingQueue<Object> execResults = new ArrayBlockingQueue( 20 );
 
     SegmentCacheManager man = new SegmentCacheManager( context );
-    // submit 2 commands for exec
-    executeNtimes( execResults, man, 2 );
+    // submit 2 commands and wait until at least one runs on the actor —
+    // otherwise shutdown can win the pool race and reject all 20
+    CountDownLatch firstRunning = new CountDownLatch( 1 );
+    for ( int i = 0; i < 2; i++ ) {
+      executor.submit( () -> {
+        try {
+          putInQueue( execResults, man.execute( new MockCommand( () -> {
+            firstRunning.countDown();
+            sleep();
+          } ) ) );
+        } catch ( RuntimeException re ) {
+          putInQueue( execResults, re );
+        }
+      } );
+    }
+    assertThat( firstRunning.await( 5, TimeUnit.SECONDS ) ).isTrue();
     // submit shutdown
     executor.submit( man::shutdown );
     // submit 18 commands post-shutdown

@@ -11,7 +11,8 @@
 *   SmartCity Jena - initial
 *   Stefan Bischof (bipolis.org) - initial
 */
-//TODO: RM EXPORT
+// stays exported: the legacy mondrian test suite and the testkit probes
+// consume these internals directly
 @org.osgi.annotation.bundle.Export
 @org.osgi.annotation.versioning.Version("0.0.1")
 package org.eclipse.daanse.rolap.common.agg;

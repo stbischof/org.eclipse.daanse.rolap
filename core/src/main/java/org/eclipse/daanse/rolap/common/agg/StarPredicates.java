@@ -41,6 +41,11 @@ public class StarPredicates {
      * @return Optimized predicate
      */
     public static StarColumnPredicate optimize(StarColumnPredicate predicate) {
+        // DISABLED by the '&& false': collapsing a one-element IN-list to a
+        // value predicate (and an empty one to FALSE) changes the generated
+        // SQL shape, and the golden-SQL pins in the TCK assert the current
+        // form. Enabling is a deliberate follow-up with a re-pin, not a
+        // drive-by - until then this method is a documented no-op.
         if (predicate instanceof ListColumnPredicate listColumnPredicate && false) {
             switch (listColumnPredicate.getPredicates().size()) {
             case 0:

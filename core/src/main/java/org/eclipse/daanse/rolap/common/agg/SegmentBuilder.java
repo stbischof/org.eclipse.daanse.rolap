@@ -22,6 +22,11 @@
  *   SmartCity Jena - initial
  */
 package org.eclipse.daanse.rolap.common.agg;
+import org.eclipse.daanse.olap.api.DataTypeJdbc;
+import org.eclipse.daanse.olap.spi.body.DenseIntSegmentBody;
+import org.eclipse.daanse.olap.spi.body.DenseDoubleSegmentBody;
+import org.eclipse.daanse.olap.spi.body.DenseObjectSegmentBody;
+import org.eclipse.daanse.olap.spi.body.SparseSegmentBody;
 
 import static org.eclipse.daanse.rolap.common.util.SqlExpressionResolver.genericSql;
 
@@ -33,7 +38,9 @@ import java.util.BitSet;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -44,15 +51,16 @@ import java.util.TreeSet;
 
 import org.eclipse.daanse.sql.model.type.Datatype;
 import org.eclipse.daanse.olap.api.aggregator.Aggregator;
-import org.eclipse.daanse.olap.common.ConfigConstants;
 import org.eclipse.daanse.olap.common.Util;
 import org.eclipse.daanse.olap.key.BitKey;
 import org.eclipse.daanse.olap.key.CellKey;
 import org.eclipse.daanse.olap.spi.SegmentBody;
 import org.eclipse.daanse.olap.spi.SegmentColumn;
 import org.eclipse.daanse.olap.spi.SegmentHeader;
-import  org.eclipse.daanse.olap.util.ArraySortedSet;
-import  org.eclipse.daanse.olap.util.Pair;
+import org.eclipse.daanse.olap.spi.SegmentPredicate;
+import org.eclipse.daanse.olap.spi.SegmentRegion;
+import org.eclipse.daanse.olap.util.ArraySortedSet;
+import org.eclipse.daanse.olap.util.Pair;
 import org.eclipse.daanse.rolap.common.EnumConvertor;
 import org.eclipse.daanse.rolap.common.RolapUtil;
 import org.eclipse.daanse.rolap.common.agg.Segment.ExcludedRegion;
@@ -87,7 +95,7 @@ public class SegmentBuilder {
         LoggerFactory.getLogger(SegmentBuilder.class);
     /**
      * Converts a segment plus a {@link SegmentBody} into a
-     * {@link org.eclipse.daanse.rolap.common.agg.SegmentWithData}.
+     * {@link SegmentWithData}.
      *
      * @param segment Segment
      * @param sb Segment body
@@ -210,7 +218,8 @@ public class SegmentBuilder {
             predicateList.toArray(
                 new StarColumnPredicate[predicateList.size()]),
             new ExcludedRegionList(header),
-            compoundPredicates);
+            compoundPredicates,
+            header);
     }
 
     /**
@@ -223,8 +232,10 @@ public class SegmentBuilder {
      * @param targetBitkey The column bit key to match with the
      * resulting segment.
      * @param rollupAggregator The aggregator to use to rollup.
-     * @return Segment header and body of requested dimensionality
      * @param datatype The data type to use.
+     * @param sparseSegmentCountThreshold Sparse-decision cell count threshold
+     * @param sparseSegmentDensityThreshold Sparse-decision density threshold
+     * @return Segment header and body of requested dimensionality
      */
     public static Pair<SegmentHeader, SegmentBody> rollup(
         Map<SegmentHeader, SegmentBody> map,
@@ -296,7 +307,7 @@ public class SegmentBuilder {
                         // they may not have all values present.
                         // Make sure we don't lose any values.
                         filteredValues = axis.valueSet;
-                        filteredValues.addAll(new TreeSet<>(values));
+                        filteredValues.addAll(values);
                         filteredHasNull = hasNull || axis.hasNull;
                     } else if (axis.requestedValues == null) {
                         filteredValues = values;
@@ -351,15 +362,37 @@ public class SegmentBuilder {
         // a stripe of values from the and add them up into a single cell.
         final Map<CellKey, List<Object>> cellValues =
             new HashMap<>();
-        TreeSet<ColumnValues> addedIntersections =
-            new TreeSet <>();
 
-        for (Map.Entry<SegmentHeader, SegmentBody> entry : map.entrySet()) {
+        // De-duping across overlapping segments identifies a SOURCE cell by
+        // its ordinal tuple over ALL axes: kept axes use the target
+        // ordinals, projected-away axes a union value space built once —
+        // O(1) per cell instead of a value-list tree.
+        final boolean dedupe = map.size() > 1;
+        final Comparable[][] unionValues =
+            new Comparable[firstHeaderConstrainedColumns.size()][];
+        final boolean[] unionHasNull =
+            new boolean[firstHeaderConstrainedColumns.size()];
+        if (dedupe) {
+            for (int i = 0; i < firstHeaderConstrainedColumns.size(); i++) {
+                if (keepColumns.contains(
+                        firstHeaderConstrainedColumns.get(i).columnExpression)) {
+                    continue;
+                }
+                final SortedSet<Comparable> union = new TreeSet<>();
+                for (Map.Entry<SegmentHeader, SegmentBody> entry : segments) {
+                    union.addAll(entry.getValue().getAxisValueSets()[i]);
+                    unionHasNull[i] |= entry.getValue().getNullAxisFlags()[i];
+                }
+                unionValues[i] = union.toArray(Comparable[]::new);
+            }
+        }
+        final Set<CellKey> seenSourceCells = dedupe ? new HashSet<>() : null;
+
+        for (Map.Entry<SegmentHeader, SegmentBody> entry : segments) {
             final int[] pos = new int[axes.size()];
             final Comparable[][] valueArrays =
                 new Comparable[firstHeaderConstrainedColumns.size()][];
             final SegmentBody body = entry.getValue();
-            ArrayList<List<Comparable>> axisValueSetsAsArrays = null;
 
             // Copy source value sets into arrays. For axes that are being
             // projected away, store null.
@@ -371,62 +404,93 @@ public class SegmentBuilder {
                         : null;
                 ++z;
             }
+            // The source-ordinal -> target-ordinal mapping is fixed per
+            // (segment, axis): binary-search each source value ONCE instead
+            // of per cell. The extra slot at the end resolves the source's
+            // null cell (ordinal == valueArray.length); -1 drops the cell.
+            final int[][] ordinalMaps = new int[valueArrays.length][];
+            z = 0;
+            for (int i = 0; i < valueArrays.length; i++) {
+                final Comparable[] valueArray = valueArrays[i];
+                if (valueArray == null) {
+                    continue;
+                }
+                final AxisInfo axis = axes.get(z);
+                final int nullOrdinal = axis.hasNull ? axis.valueSet.size() : -1;
+                final int[] ordinalMap = new int[valueArray.length + 1];
+                for (int s = 0; s < valueArray.length; s++) {
+                    final Comparable value = valueArray[s];
+                    ordinalMap[s] = value == null ? nullOrdinal
+                            : Util.binarySearch(axis.values, 0, axis.values.length, value);
+                }
+                ordinalMap[valueArray.length] = nullOrdinal;
+                ordinalMaps[i] = ordinalMap;
+                z++;
+            }
+            // ordinal maps of the projected-away axes into their union
+            // value spaces, for the source-cell identity when de-duping
+            final int[][] dedupeMaps = dedupe
+                ? new int[valueArrays.length][] : null;
+            if (dedupe) {
+                for (int i = 0; i < valueArrays.length; i++) {
+                    if (valueArrays[i] != null) {
+                        continue;
+                    }
+                    final Comparable[] union = unionValues[i];
+                    final Comparable[] source =
+                        body.getAxisValueSets()[i].toArray(Comparable[]::new);
+                    final int nullOrdinal =
+                        unionHasNull[i] ? union.length : -1;
+                    final int[] dedupeMap = new int[source.length + 1];
+                    for (int s = 0; s < source.length; s++) {
+                        dedupeMap[s] = source[s] == null ? nullOrdinal
+                            : Util.binarySearch(union, 0, union.length, source[s]);
+                    }
+                    dedupeMap[source.length] = nullOrdinal;
+                    dedupeMaps[i] = dedupeMap;
+                }
+            }
+
             Map<CellKey, Object> v = body.getValueMap();
             entryLoop:
             for (Map.Entry<CellKey, Object> vEntry : v.entrySet()) {
                 z = 0;
                 for (int i = 0; i < vEntry.getKey().size(); i++) {
-                    final Comparable[] valueArray = valueArrays[i];
-                    if (valueArray == null) {
+                    final int[] ordinalMap = ordinalMaps[i];
+                    if (ordinalMap == null) {
                         continue;
                     }
-                    final int ordinal = vEntry.getKey().getOrdinals()[i];
-                    final int targetOrdinal;
-                    if (axes.get(z).hasNull && ordinal == valueArray.length) {
-                        targetOrdinal = axes.get(z).valueSet.size();
-                    } else {
-                        final Comparable value = valueArray[ordinal];
-                        if (value == null) {
-                            targetOrdinal = axes.get(z).valueSet.size();
-                        } else {
-                            targetOrdinal =
-                                Util.binarySearch(
-                                    axes.get(z).values,
-                                    0, axes.get(z).values.length,
-                                    value);
-                        }
-                    }
+                    final int targetOrdinal = ordinalMap[vEntry.getKey().getAxis(i)];
                     if (targetOrdinal >= 0) {
                         pos[z++] = targetOrdinal;
                     } else {
-                        // This happens when one of the rollup candidate doesn't
-                        // contain the requested cell.
+                        // a rollup candidate that does not contain the
+                        // requested cell
                         continue entryLoop;
                     }
                 }
                 final CellKey ck = CellKey.Generator.newCellKey(pos);
-                if (!cellValues.containsKey(ck)) {
-                    cellValues.put(ck, new ArrayList<>());
-                }
-                if ( map.size() == 1 ) {
-                  // No de-duping needed when rolling up only 1 segment
-                  cellValues.get(ck).add(vEntry.getValue());
+                final List<Object> cellList =
+                    cellValues.computeIfAbsent(ck, k -> new ArrayList<>());
+                if (!dedupe) {
+                    // no de-duping needed when rolling up only 1 segment
+                    cellList.add(vEntry.getValue());
                 } else {
-                  if ( axisValueSetsAsArrays == null ) {
-                    // Cache segment axis values as lists for fast lookup
-                    axisValueSetsAsArrays = new ArrayList<>();
-                    for ( int i = 0; i < body.getAxisValueSets().length; i++ ) {
-                      List<Comparable> columnVals = new ArrayList<>(body.getAxisValueSets()[i]);
-                      axisValueSetsAsArrays.add( columnVals );
+                    // the same origin cell may live in several overlapping
+                    // segments and must be summed once: identify it by its
+                    // full ordinal tuple (kept axes in target space,
+                    // projected-away axes in the union space)
+                    final int[] origin = new int[vEntry.getKey().size()];
+                    for (int i = 0; i < origin.length; i++) {
+                        final int sourceOrdinal = vEntry.getKey().getAxis(i);
+                        origin[i] = ordinalMaps[i] != null
+                            ? ordinalMaps[i][sourceOrdinal]
+                            : dedupeMaps[i][sourceOrdinal];
                     }
-                  }
-                  ColumnValues colValues = new ColumnValues(body, vEntry.getKey(), axisValueSetsAsArrays);
-                  if (!addedIntersections.contains(colValues)) {
-                      // only add the cell value if we haven't already.
-                      // there is a potential double add if segments overlap
-                      cellValues.get(ck).add(vEntry.getValue());
-                      addedIntersections.add(colValues);
-                  }
+                    if (seenSourceCells.add(
+                            CellKey.Generator.newCellKey(origin))) {
+                        cellList.add(vEntry.getValue());
+                    }
                 }
             }
         }
@@ -436,7 +500,10 @@ public class SegmentBuilder {
             new ArrayList<>();
         BigInteger bigValueCount = BigInteger.ONE;
         for (AxisInfo axis : axes) {
-            axisList.add(Pair.of(axis.valueSet, axis.hasNull));
+            // the body ships the compact sorted-array view, not a TreeSet
+            axisList.add(Pair.of(
+                (SortedSet<Comparable>) new ArraySortedSet(axis.values),
+                axis.hasNull));
             int size = axis.values.length;
             bigValueCount = bigValueCount.multiply(
                 BigInteger.valueOf(axis.hasNull ? size + 1 : size));
@@ -456,6 +523,14 @@ public class SegmentBuilder {
                     sparseSegmentDensityThreshold);
         final int[] axisMultipliers =
             computeAxisMultipliers(axisList);
+        final DataTypeJdbc jdbcType =
+            EnumConvertor.toDataTypeJdbc(datatype);
+
+        // grand-total rollup (no axes kept): every source cell collapses
+        // into the single zero-arity key, and the dense path below stores
+        // exactly one value (bigValueCount == 1, offset 0)
+        assert !axisList.isEmpty() || cellValues.size() <= 1
+            : "grand-total rollup must collapse to a single cell, got " + cellValues.size();
 
         final SegmentBody body;
         // Peak at the values and determine the best way to store them
@@ -474,11 +549,12 @@ public class SegmentBuilder {
             for (Entry<CellKey, List<Object>> entry
                 : cellValues.entrySet())
             {
+                // keys come out of newCellKey and are never mutated — share
                 data.put(
-                    CellKey.Generator.newCellKey(entry.getKey().getOrdinals()),
+                    entry.getKey(),
                     rollupAggregator.aggregate(
                         entry.getValue(),
-                        EnumConvertor.toDataTypeJdbc(datatype)));
+                        jdbcType));
             }
             body =
                 new SparseSegmentBody(
@@ -495,12 +571,11 @@ public class SegmentBuilder {
                     : cellValues.entrySet())
                 {
                     final int offset =
-                        CellKey.Generator.getOffset(
-                            entry.getKey().getOrdinals(), axisMultipliers);
+                        entry.getKey().getOffset(axisMultipliers);
                     final Object value =
                         rollupAggregator.aggregate(
                             entry.getValue(),
-                            EnumConvertor.toDataTypeJdbc(datatype));
+                            jdbcType);
                     if (value != null) {
                         ints[offset] = (Integer) value;
                         nullValues.clear(offset);
@@ -519,12 +594,11 @@ public class SegmentBuilder {
                     : cellValues.entrySet())
                 {
                     final int offset =
-                        CellKey.Generator.getOffset(
-                            entry.getKey().getOrdinals(), axisMultipliers);
+                        entry.getKey().getOffset(axisMultipliers);
                     final Object value =
                         rollupAggregator.aggregate(
                             entry.getValue(),
-                            EnumConvertor.toDataTypeJdbc(datatype));
+                            jdbcType);
                     if (value != null) {
                         doubles[offset] = (Double) value;
                         nullValues.clear(offset);
@@ -542,12 +616,11 @@ public class SegmentBuilder {
                     : cellValues.entrySet())
                 {
                     final int offset =
-                        CellKey.Generator.getOffset(
-                            entry.getKey().getOrdinals(), axisMultipliers);
+                        entry.getKey().getOffset(axisMultipliers);
                     objects[offset] =
                         rollupAggregator.aggregate(
                             entry.getValue(),
-                            EnumConvertor.toDataTypeJdbc(datatype));
+                            jdbcType);
                 }
                 body =
                     new DenseObjectSegmentBody(
@@ -570,6 +643,45 @@ public class SegmentBuilder {
                         ? axisList.get(i).left
                         : axisInfo.column.values));
         }
+        // Excluded regions survive the rollup, widened to the kept columns:
+        // the flushed cells stay physically in the source bodies and are
+        // summed into exactly the target cells the widened box marks, so
+        // the target header keeps refusing them. A region that loses every
+        // column spans the whole target and becomes a wildcard-column box.
+        final Set<SegmentRegion> excludedRegions = new LinkedHashSet<>();
+        for (Map.Entry<SegmentHeader, SegmentBody> sourceEntry : segments) {
+            final SegmentHeader sourceHeader = sourceEntry.getKey();
+            for (SegmentRegion region : sourceHeader.getExcludedRegions()) {
+                final List<SegmentColumn> keptBox = new ArrayList<>();
+                for (SegmentColumn column : region.columns()) {
+                    if (keepColumns.contains(column.columnExpression)) {
+                        keptBox.add(column);
+                    }
+                }
+                if (keptBox.isEmpty() && !constrainedColumns.isEmpty()) {
+                    keptBox.add(new SegmentColumn(
+                        constrainedColumns.get(0).columnExpression,
+                        constrainedColumns.get(0).valueCount,
+                        null));
+                }
+                if (!keptBox.isEmpty()) {
+                    excludedRegions.add(new SegmentRegion(keptBox));
+                } else {
+                    // grand-total rollup of a constrained source: the region
+                    // is inexpressible on a zero-column target and the
+                    // flushed cells were still summed in. Reaching this
+                    // would publish resurrected data - today it is
+                    // unreachable ONLY because excludedRegionHitsRequest
+                    // (SegmentCacheIndexImpl) rejects constrained headers
+                    // as grand-total rollup candidates. A data-corruption
+                    // guard must hold in production too (-da), so this
+                    // throws instead of asserting: aborting the rollup is
+                    // strictly better than publishing resurrected data.
+                    throw new IllegalStateException(
+                        "rollup dropped an inexpressible excluded region");
+                }
+            }
+        }
         final SegmentHeader header =
             new SegmentHeader(
                 firstHeader.schemaName,
@@ -580,7 +692,7 @@ public class SegmentBuilder {
                 firstHeader.compoundPredicates,
                 firstHeader.rolapStarFactTableName,
                 targetBitkey,
-                Collections.<SegmentColumn>emptyList());
+                List.copyOf(excludedRegions));
         if (LOGGER.isDebugEnabled()) {
             StringBuilder builder = new StringBuilder();
             builder.append("SegmentBuilder.rollup: done rolling up segments with parameters: \n");
@@ -657,20 +769,33 @@ public class SegmentBuilder {
         private final SegmentHeader header;
         public ExcludedRegionList(SegmentHeader header) {
             this.header = header;
-            int cellCount = 1;
-            for (SegmentColumn cc : header.getExcludedRegions()) {
+            int cellCount = 0;
+            for (SegmentRegion region : header.getExcludedRegions()) {
                 // TODO find a way to approximate the cardinality
                 // of wildcard columns.
-                if (cc.values != null) {
-                    cellCount *= cc.values.size();
+                int regionCells = 1;
+                for (SegmentColumn cc : region.columns()) {
+                    if (cc.values != null) {
+                        regionCells *= cc.values.size();
+                    }
                 }
+                cellCount += regionCells;
             }
+            // 0 when the header carries no excluded regions: getCellCount
+            // consumers subtract this from the live cell count
             this.cellCount = cellCount;
         }
 
         @Override
 		public void describe(StringBuilder buf) {
-            // TODO
+            for (SegmentRegion region : header.getExcludedRegions()) {
+                buf.append('(');
+                for (SegmentColumn cc : region.columns()) {
+                    buf.append(cc.columnExpression).append('=')
+                            .append(cc.values == null ? "*" : cc.values).append(';');
+                }
+                buf.append(')');
+            }
         }
 
         @Override
@@ -686,18 +811,32 @@ public class SegmentBuilder {
         @Override
 		public boolean wouldContain(Object[] keys) {
             assert keys.length == header.getConstrainedColumns().size();
-            for (int i = 0; i < keys.length; i++) {
-                final SegmentColumn excl =
-                    header.getExcludedRegion(
-                        header.getConstrainedColumns().get(i).columnExpression);
-                if (excl == null) {
-                    continue;
+            // a cell is excluded only when it lies inside one region box:
+            // every column of the box must match
+            for (SegmentRegion region : header.getExcludedRegions()) {
+                boolean inside = true;
+                for (SegmentColumn excl : region.columns()) {
+                    int i = indexOfColumn(excl.columnExpression);
+                    if (i < 0 || (excl.values != null && !excl.values.contains(keys[i]))) {
+                        inside = false;
+                        break;
+                    }
                 }
-                if (excl.values.contains(keys[i])) {
+                if (inside) {
                     return true;
                 }
             }
             return false;
+        }
+
+        private int indexOfColumn(String columnExpression) {
+            final List<SegmentColumn> columns = header.getConstrainedColumns();
+            for (int i = 0; i < columns.size(); i++) {
+                if (columns.get(i).columnExpression.equals(columnExpression)) {
+                    return i;
+                }
+            }
+            return -1;
         }
 
         @Override
@@ -707,44 +846,12 @@ public class SegmentBuilder {
 
         @Override
 		public int size() {
-            return 1;
+            // no excluded regions: an empty list, so nothing is subtracted
+            // from the cell count and describe prints no excluded block
+            return header.getExcludedRegions().isEmpty() ? 0 : 1;
         }
     }
 
-    /**
-     * Tells if the passed segment is a subset of this segment
-     * and could be used for a rollup in cache operation.
-     * @param segment A segment which might be a subset of the
-     * current segment.
-     * @return True or false.
-     */
-    public static boolean isSubset(
-        SegmentHeader header,
-        Segment segment)
-    {
-        if (!segment.getStar().getCatalog().getName()
-            .equals(header.schemaName))
-        {
-            return false;
-        }
-        if (!segment.getStar().getFactTable().getAlias()
-                .equals(header.rolapStarFactTableName))
-        {
-            return false;
-        }
-        if (!segment.measure.getName().equals(header.measureName)) {
-            return false;
-        }
-        if (!segment.measure.getCubeName().equals(header.cubeName)) {
-            return false;
-        }
-        if (segment.getConstrainedColumnsBitKey()
-                .equals(header.constrainedColsBitKey))
-        {
-            return true;
-        }
-        return false;
-    }
 
     public static List<SegmentColumn> toConstrainedColumns(
         StarColumnPredicate[] predicates)
@@ -781,8 +888,7 @@ public class SegmentBuilder {
         StarColumnPredicate predicate, SortedSet<Comparable> set)
     {
         return new SegmentColumn(
-            genericSql(predicate.getConstrainedColumn()
-                .getExpression()),
+            predicate.getConstrainedColumn().genericSql(),
             predicate.getConstrainedColumn().getCardinality(),
             set);
     }
@@ -798,14 +904,8 @@ public class SegmentBuilder {
     public static SegmentHeader toHeader(Segment segment) {
         final List<SegmentColumn> cc =
             SegmentBuilder.toConstrainedColumns(segment.predicates);
-        final List<String> cp = new ArrayList<>();
-
-        final org.eclipse.daanse.sql.statement.render.DialectSqlRenderer predicateRenderer =
-            new org.eclipse.daanse.sql.statement.render.DialectSqlRenderer(segment.star.getDialect());
-        for (StarPredicate compoundPredicate : segment.compoundPredicateList) {
-            cp.add(predicateRenderer.renderPredicate(
-                org.eclipse.daanse.rolap.common.sqlbuild.StarPredicateTranslator.toPredicate(compoundPredicate)));
-        }
+        final List<SegmentPredicate> cp =
+            SegmentPredicates.toWire(segment.compoundPredicateList);
         final RolapCatalog schema = segment.star.getCatalog();
         return new SegmentHeader(
             schema.getName(),
@@ -816,7 +916,7 @@ public class SegmentBuilder {
             cp,
             segment.star.getFactTable().getAlias(),
             segment.constrainedColumnsBitKey,
-            Collections.<SegmentColumn>emptyList());
+            Collections.<SegmentRegion>emptyList());
     }
 
     private static RolapStar.Column[] getConstrainedColumns(
@@ -825,7 +925,17 @@ public class SegmentBuilder {
     {
         final List<RolapStar.Column> list =
             new ArrayList<>();
-        for (int bit : bitKey) {
+        for (int bit = bitKey.nextSetBit(0); bit >= 0;
+                bit = bitKey.nextSetBit(bit + 1)) {
+            if (bit >= star.getColumnCount()) {
+                // a wire-decoded header whose key carries bits this star
+                // does not know cannot be converted - name the mismatch
+                // instead of dying in ArrayList.get
+                throw new IllegalArgumentException(
+                    "segment key bit " + bit + " beyond star '"
+                    + star.getFactTable().getAlias() + "' with "
+                    + star.getColumnCount() + " columns");
+            }
             list.add(star.getColumn(bit));
         }
         return list.toArray(new RolapStar.Column[list.size()]);
@@ -833,56 +943,12 @@ public class SegmentBuilder {
 
     /**
      * Functor to convert a segment header and body into a
-     * {@link org.eclipse.daanse.rolap.common.agg.SegmentWithData}.
+     * {@link SegmentWithData}.
      */
     public static interface SegmentConverter {
         SegmentWithData convert(
             SegmentHeader header,
             SegmentBody body);
-    }
-
-    /**
-     * Implementation of {@link SegmentConverter} that uses an
-     * {@link org.eclipse.daanse.rolap.common.agg.AggregationKey}
-     * and {@link org.eclipse.daanse.rolap.common.agg.CellRequest} as context to
-     * convert a org.eclipse.daanse.olap.spi.SegmentHeader.
-     *
-     * This is nasty. A converter might be used for several headers, not
-     * necessarily with the context as the cell request and aggregation key.
-     * Converters only exist for fact tables and compound predicate combinations
-     * for which we have already done a load request.
-     *
-     * It would be much better if there was a way to convert compound
-     * predicates from strings to predicates. Then we could obsolete the
-     * messy context inside converters, and maybe obsolete converters
-     * altogether.
-     */
-    public static class SegmentConverterImpl implements SegmentConverter {
-        private final AggregationKey key;
-        private final CellRequest request;
-
-        public SegmentConverterImpl(AggregationKey key, CellRequest request) {
-            this.key = key;
-            this.request = request;
-        }
-
-        @Override
-		public SegmentWithData convert(
-            SegmentHeader header,
-            SegmentBody body)
-        {
-            final Segment segment =
-                toSegment(
-                    header,
-                    key.getStar(),
-                    header.getConstrainedColumnsBitKey(),
-                    getConstrainedColumns(
-                        key.getStar(),
-                        header.getConstrainedColumnsBitKey()),
-                    request.getMeasure(),
-                    key.getCompoundPredicateList());
-            return addData(segment, body);
-        }
     }
 
     /**
@@ -897,17 +963,9 @@ public class SegmentBuilder {
             RolapStar.Measure measure,
             List<StarPredicate> compoundPredicateList)
         {
-            // The measure is wrapped in a weak reference because
-            // converters are put into the SegmentCacheIndex,
-            // but the registry of indexes is based as a weak
-            // list of the RolapStars.
-            // Simply put, the fact that converters have a hard
-            // link on the measure would prevents the GC from
-            // ever cleaning the registry. The circular references
-            // are a well known issue with weak lists.
-            // It is harmless to use a weak reference here because
-            // the measure is referenced by cubes and what-not,
-            // so it can't be GC'd before its time has come.
+            // a plain hard reference: converters live in the per-catalog
+            // index, which dies with its catalog - the measure never
+            // outlives the index that references it
             this.measure = measure;
             this.compoundPredicateList = compoundPredicateList;
         }
@@ -931,72 +989,6 @@ public class SegmentBuilder {
         }
     }
 
-    /**
-     * Converts a segment's CellKey into axis values
-     * so that they can be compared across segments.
-     *
-     * Ex. (0, 2, 0) to [1997, 21, M]
-     */
-    private static class ColumnValues implements Comparable {
-
-      List<Comparable> colVals;
-
-      ColumnValues( SegmentBody body, CellKey cellKey, ArrayList<List<Comparable>> axisValues ) {
-        colVals = new ArrayList<>();
-        for ( int i = 0; i < body.getAxisValueSets().length; i++ ) {
-          int ordinal = cellKey.getAxis( i );
-          if ( ordinal == axisValues.get( i ).size() ) {
-            assert ( body.getNullAxisFlags()[i] );
-            colVals.add( null );
-          } else {
-            colVals.add( axisValues.get( i ).get( ordinal ) );
-          }
-        }
-      }
-
-      @Override
-      public int compareTo( Object o ) {
-        ColumnValues other = (ColumnValues) o;
-        for ( int i = 0; i < colVals.size(); i++ ) {
-          Comparable thisVal = colVals.get( i );
-          Comparable otherVal = other.colVals.get( i );
-
-          int result = -1;
-          if ( thisVal != null && otherVal != null ) {
-            result = thisVal.compareTo( otherVal );
-          } else if ( thisVal == null && otherVal == null ) {
-              result = 0;
-          } else {
-            if ( thisVal == null ) {
-              result = 1;
-            } else {
-              result = -1;
-            }
-          }
-          if ( result != 0 ) {
-            return result;
-          }
-        }
-        return 0;
-      }
-
-      @Override
-      public String toString() {
-        return colVals.toString();
-      }
-
-      @Override
-      public int hashCode() {
-        throw new UnsupportedOperationException();
-      }
-
-      @Override
-      public boolean equals( Object obj ) {
-        throw new UnsupportedOperationException();
-      }
-
-
-    }
 
 
 }

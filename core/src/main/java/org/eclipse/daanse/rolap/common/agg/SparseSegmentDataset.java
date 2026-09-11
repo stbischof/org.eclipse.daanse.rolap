@@ -24,9 +24,9 @@
 
 
 package org.eclipse.daanse.rolap.common.agg;
+import org.eclipse.daanse.olap.spi.body.SparseSegmentBody;
 
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.SortedSet;
@@ -34,7 +34,7 @@ import java.util.SortedSet;
 import org.eclipse.daanse.sql.model.type.BestFitColumnType;
 import org.eclipse.daanse.olap.key.CellKey;
 import org.eclipse.daanse.olap.spi.SegmentBody;
-import  org.eclipse.daanse.olap.util.Pair;
+import org.eclipse.daanse.olap.util.Pair;
 
 /**
  * A SparseSegmentDataset is a means of storing segment values
@@ -99,17 +99,6 @@ class SparseSegmentDataset implements SegmentDataset {
 
     public void put(CellKey key, Object value) {
         values.put(key, value);
-    }
-
-    @Override
-	public Iterator<Map.Entry<CellKey, Object>> iterator() {
-        return values.entrySet().iterator();
-    }
-
-    @Override
-	public double getBytes() {
-        // assume a slot, key, and value are each 4 bytes
-        return values.size() * 12d;
     }
 
     @Override

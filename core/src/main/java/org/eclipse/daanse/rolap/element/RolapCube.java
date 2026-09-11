@@ -2020,11 +2020,6 @@ public abstract class RolapCube extends CubeBase {
         }
     }
 
-    @Override
-	public Member[] getMembersForQuery(String query, List<Member> calcMembers) {
-        throw new UnsupportedOperationException();
-    }
-
     /**
      * Returns the time hierarchy for this cube. If there is no time hierarchy,
      * throws.

@@ -31,14 +31,13 @@ package org.eclipse.daanse.rolap.common.agg;
 
 import static org.eclipse.daanse.rolap.common.util.SqlExpressionResolver.genericSql;
 
-import java.io.PrintWriter;
-import java.util.AbstractList;
 import java.util.List;
 
 import org.eclipse.daanse.sql.model.type.BestFitColumnType;
 import org.eclipse.daanse.olap.common.Util;
 import org.eclipse.daanse.olap.key.BitKey;
 import org.eclipse.daanse.olap.spi.SegmentHeader;
+import org.eclipse.daanse.olap.spi.SegmentIdentity;
 import org.eclipse.daanse.rolap.common.star.RolapStar;
 import org.eclipse.daanse.rolap.common.star.StarColumnPredicate;
 import org.eclipse.daanse.rolap.common.star.StarPredicate;
@@ -65,18 +64,10 @@ import org.eclipse.daanse.rolap.common.star.StarPredicate;
  *
  *
  *
- * Note that different measures (in the same Star) occupy the same Aggregation. Aggregations belong to the
- * AggregationManager, a singleton.
- *
- *
- *
- * Segments are pinned during the evaluation of a single MDX query. The query evaluates the expressions twice. The first
- * pass, it finds which cell values it needs, pins the segments containing the ones which are already present (one
- * pin-count for each cell value used), and builds a {@link CellRequest cell request} for those which are not present.
- * It executes the cell request to bring the required cell values into the cache, again, pinned. Then it evalutes the
- * query a second time, knowing that all cell values are available. Finally, it releases the pins.
- *
- *
+ * A query evaluates twice: the first pass answers cells from the working
+ * store and records a {@link CellRequest cell request} for every miss, the
+ * batch load brings the missing segments in, and the second pass finds
+ * every cell value available.
  *
  * A Segment may have a list of {@link ExcludedRegion} objects. These are caused by cache flushing. Usually a segment is
  * a hypercube: it is defined by a set of values on each of its axes. But after a cache flush request, a segment may
@@ -99,7 +90,8 @@ import org.eclipse.daanse.rolap.common.star.StarPredicate;
  * @since 21 March, 2002
  */
 public class Segment {
-  private static int nextId = 0; // generator for "id"
+  // segments are constructed on SQL, actor and query threads alike
+  private static final java.util.concurrent.atomic.AtomicInteger nextId = new java.util.concurrent.atomic.AtomicInteger();
 
   final int id; // for debug
   private String desc;
@@ -126,7 +118,6 @@ public class Segment {
    */
   protected final List<ExcludedRegion> excludedRegions;
 
-  private final int aggregationKeyHashCode;
   protected final List<StarPredicate> compoundPredicateList;
 
   private final SegmentHeader segmentHeader;
@@ -146,7 +137,15 @@ public class Segment {
   public Segment( RolapStar star, BitKey constrainedColumnsBitKey, RolapStar.Column[] columns,
       RolapStar.Measure measure, StarColumnPredicate[] predicates, List<ExcludedRegion> excludedRegions,
       final List<StarPredicate> compoundPredicateList ) {
-    this.id = nextId++;
+    this( star, constrainedColumnsBitKey, columns, measure, predicates, excludedRegions,
+        compoundPredicateList, null );
+  }
+
+  /** As above, with the header already known — a reconstructed segment need not rebuild it. */
+  public Segment( RolapStar star, BitKey constrainedColumnsBitKey, RolapStar.Column[] columns,
+      RolapStar.Measure measure, StarColumnPredicate[] predicates, List<ExcludedRegion> excludedRegions,
+      final List<StarPredicate> compoundPredicateList, SegmentHeader knownHeader ) {
+    this.id = nextId.getAndIncrement();
     this.star = star;
     this.constrainedColumnsBitKey = constrainedColumnsBitKey;
     this.columns = columns;
@@ -154,20 +153,7 @@ public class Segment {
     this.predicates = predicates;
     this.excludedRegions = excludedRegions;
     this.compoundPredicateList = compoundPredicateList;
-    final List<BitKey> compoundPredicateBitKeys = compoundPredicateList == null ? null : new AbstractList<>() {
-      @Override
-	public BitKey get( int index ) {
-        return compoundPredicateList.get( index ).getConstrainedColumnBitKey();
-      }
-
-      @Override
-	public int size() {
-        return compoundPredicateList.size();
-      }
-    };
-    this.aggregationKeyHashCode =
-        AggregationKey.computeHashCode( constrainedColumnsBitKey, star, compoundPredicateBitKeys );
-    this.segmentHeader = SegmentBuilder.toHeader( this );
+    this.segmentHeader = knownHeader != null ? knownHeader : SegmentBuilder.toHeader( this );
   }
 
   /**
@@ -182,13 +168,6 @@ public class Segment {
    */
   public RolapStar getStar() {
     return star;
-  }
-
-  /**
-   * Returns the list of compound predicates.
-   */
-  public List<StarPredicate> getCompoundPredicateList() {
-    return compoundPredicateList;
   }
 
   /**
@@ -264,20 +243,6 @@ public String toString() {
     return false;
   }
 
-  /**
-   * Prints the state of this Segment, including constraints and values. Blocks the current thread until
-   * the segment is loaded.
-   *
-   * @param pw
-   *          Writer
-   */
-  public void print( PrintWriter pw ) {
-    final StringBuilder buf = new StringBuilder();
-    describe( buf, true );
-    pw.print( buf.toString() );
-    pw.println();
-  }
-
   public List<ExcludedRegion> getExcludedRegions() {
     return excludedRegions;
   }
@@ -295,17 +260,13 @@ public String toString() {
     }
   }
 
-  public boolean matches( AggregationKey aggregationKey, RolapStar.Measure measure ) {
-    // Perform high-selectivity comparisons first.
-    return aggregationKeyHashCode == aggregationKey.hashCode() && this.measure == measure && matchesInternal(
-        aggregationKey );
+  public boolean matches( SegmentIdentity identity, RolapStar.Measure measure ) {
+    // measure by reference; the identity digests bit key, star fact table
+    // and compound predicates in canonical wire form
+    return this.measure == measure && segmentHeader.identity().equals( identity );
   }
 
-  private boolean matchesInternal( AggregationKey aggKey ) {
-    return constrainedColumnsBitKey.equals( aggKey.getConstrainedColumnsBitKey() ) && star.equals( aggKey.getStar() )
-        && AggregationKey.equalAggregationKey( compoundPredicateList, aggKey.compoundPredicateList );
-  }
-
+  
   /**
    * Definition of a region of values which are not in a segment.
    */

@@ -255,7 +255,7 @@ public class BasicContext extends AbstractRolapContext implements RolapContext {
 
         this.eventBus = new LoggingEventBus();
 
-        schemaCache = new RolapCatalogCache(this);
+        catalogCache = new RolapCatalogCache(this);
         queryLimitSemaphore = new Semaphore(
                 getConfig().queryLimit());
 

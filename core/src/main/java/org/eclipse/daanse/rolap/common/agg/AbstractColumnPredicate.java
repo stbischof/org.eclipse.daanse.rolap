@@ -27,13 +27,10 @@
 
 package org.eclipse.daanse.rolap.common.agg;
 
-import static org.eclipse.daanse.rolap.common.util.SqlExpressionResolver.genericSql;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import org.eclipse.daanse.olap.common.Util;
 import org.eclipse.daanse.olap.key.BitKey;
 import org.eclipse.daanse.rolap.common.star.RolapStar;
 import org.eclipse.daanse.rolap.common.star.StarColumnPredicate;
@@ -59,7 +56,7 @@ public abstract class AbstractColumnPredicate implements StarColumnPredicate {
     @Override
 	public String toString() {
         final StringBuilder buf = new StringBuilder();
-        buf.append(genericSql(constrainedColumn.getExpression()));
+        buf.append(constrainedColumn.genericSql());
         describe(buf);
         return buf.toString();
     }
@@ -77,7 +74,7 @@ public abstract class AbstractColumnPredicate implements StarColumnPredicate {
     @Override
 	public BitKey getConstrainedColumnBitKey() {
         // Check whether constrainedColumn are null.
-        // Example: FastBatchingCellReaderTest.testAggregateDistinctCount5().
+        // Example: BatchingCellReaderTest.testAggregateDistinctCount5().
         if (constrainedColumnBitKey == null
             && constrainedColumn != null
             && constrainedColumn.getTable() != null)
@@ -199,15 +196,6 @@ public abstract class AbstractColumnPredicate implements StarColumnPredicate {
             List<StarColumnPredicate> list)
         {
             return new ListColumnPredicate(column, list);
-        }
-
-        /**
-         * Returns a predicate which always evaluates to TRUE or FALSE.
-         * @param b Truth value
-         * @return Predicate which always evaluates to truth value
-         */
-        public static LiteralStarPredicate bool(boolean b) {
-            return b ? LiteralStarPredicate.TRUE : LiteralStarPredicate.FALSE;
         }
 
         /**

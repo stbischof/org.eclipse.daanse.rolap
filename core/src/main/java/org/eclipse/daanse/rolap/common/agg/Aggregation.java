@@ -29,10 +29,8 @@
 
 package org.eclipse.daanse.rolap.common.agg;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.BitSet;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -44,45 +42,17 @@ import org.eclipse.daanse.olap.api.element.Level;
 import org.eclipse.daanse.olap.api.element.Member;
 import org.eclipse.daanse.olap.common.Util;
 import org.eclipse.daanse.olap.key.BitKey;
-import org.eclipse.daanse.olap.key.CellKey;
 import org.eclipse.daanse.rolap.common.result.GroupingSetsCollector;
 import org.eclipse.daanse.rolap.common.star.RolapStar;
 import org.eclipse.daanse.rolap.common.star.StarColumnPredicate;
 import org.eclipse.daanse.rolap.common.star.StarPredicate;
 
 /**
- * A Aggregation is a pre-computed aggregation over a set of
- * columns.
- *
- * Rollup operations:
- * drop an unrestricted column (e.g. state=*)
- * tighten any restriction (e.g. year={1997,1998} becomes
- * year={1997})
- * restrict an unrestricted column (e.g. year=* becomes
- * year={1997})
- *
- *
- * Representation of aggregations. Sparse and dense representations are
- * necessary for different data sets. Should adapt automatically. Use an
- * interface to hold the data set, so the segment doesn't care.
- *
- * Suppose we have a segment {year=1997, quarter={1,2,3},
- * state={CA,WA}}. We want to roll up to a segment for {year=1997,
- * state={CA,WA}}.  We need to know that we have all quarters.  We don't.
- * Because year and quarter are independent, we know that we have all of
- * the ...
- *
- * Suppose we have a segment specified by {region=West, state=*,
- * year=*}, which materializes to ({West}, {CA,WA,OR}, {1997,1998}).
- * Because state=*, we can rollup to {region=West, year=*} or {region=West,
- * year=1997}.
- *
- * The space required for a segment depends upon the dimensionality (d),
- * cell count (c) and the value count (v). We don't count the space
- * required for the actual values, which is the same in any scheme.
- *
- * @author jhyde
- * @since 28 August, 2001
+ * Per-batch helper around one (star, constrained columns, compound
+ * predicates) shape: it optimizes the predicates and constructs the
+ * segments a load produces. Instances are created per batch and thrown
+ * away — no aggregation state is cached here (segments live in the
+ * cache manager's index and stores).
  */
 public class Aggregation {
 
@@ -96,38 +66,26 @@ public class Aggregation {
     private final int maxConstraints;
 
     /**
-     * Timestamp of when the aggregation was created.
-     */
-    private final Instant creationTimestamp;
-
-    /**
      * Creates an Aggregation.
      *
-     * @param aggregationKey the key specifying the axes, the context and
-     *                       the RolapStar for this Aggregation
+     * @param star Star this aggregation belongs to
+     * @param constrainedColumnsBitKey Constrained columns (the dimensionality)
+     * @param compoundPredicateList Compound predicates
+     * @param maxConstraints Setting for optimizing SQL predicates
      */
     public Aggregation(
-        AggregationKey aggregationKey, final int maxConstraints)
+        RolapStar star, BitKey constrainedColumnsBitKey,
+        List<StarPredicate> compoundPredicateList, final int maxConstraints)
     {
-        this.compoundPredicateList = aggregationKey.getCompoundPredicateList();
-        this.star = aggregationKey.getStar();
-        this.constrainedColumnsBitKey =
-            aggregationKey.getConstrainedColumnsBitKey();
+        this.compoundPredicateList = compoundPredicateList;
+        this.star = star;
+        this.constrainedColumnsBitKey = constrainedColumnsBitKey;
         this.maxConstraints = maxConstraints;
-        this.creationTimestamp = Instant.now();
-    }
-
-    /**
-     * @return Returns the timestamp when the aggregation was created
-     */
-    public Instant getCreationTimestamp() {
-        return creationTimestamp;
     }
 
     /**
      * Loads a set of segments into this aggregation, one per measure,
-     * each constrained by the same set of column values, and each pinned
-     * once.
+     * each constrained by the same set of column values.
      *
      * A Column and its constraints are accessed at the same level in their
      * respective arrays.
@@ -200,7 +158,7 @@ public class Aggregation {
         // It is important to sort the segments per measure bitkey.
         // The order in which the measures come in is not deterministic.
         // It actually depends on the order of the CellRequests.
-        // See: mondrian.rolap.BatchLoader.Batch.add(CellRequest request).
+        // See: org.eclipse.daanse.rolap.common.result.BatchLoader.Batch#add(CellRequest).
         // Failure to sort them will give out wrong results (uses the wrong
         // column) if we have more than one column in the grouping set.
         Collections.sort(segments,
@@ -391,211 +349,6 @@ public class Aggregation {
     }
 
     // -- classes -------------------------------------------------------------
-
-    /**
-     * Helper class to figure out which axis values evaluate to true at least
-     * once by a given predicate.
-     *
-     * Consider, for example, the flush predicate
-     *
-     * member between [Time].[1997].[Q3] and [Time].[1999].[Q1]
-     *
-     * applied to the segment
-     *
-     * year in (1996, 1997, 1998, 1999)<br/>
-     * quarter in (Q1, Q2, Q3, Q4)
-     *
-     *  The predicate evaluates to true for the pairs
-     *
-     *
-     * {(1997, Q3), (1997, Q4),
-     * (1998, Q1), (1998, Q2), (1998, Q3), (1998, Q4), (1999, Q1)}
-     *
-     *  and therefore we wish to eliminate these pairs from
-     * the segment. But we can eliminate a value only if <em>all</em> of its
-     * values are eliminated.
-     *
-     * In this case, year=1998 is the only value which can be eliminated from
-     * the segment.
-     */
-    private static class ValuePruner {
-        /**
-         * Multi-column predicate. If the predicate evaluates to true, a cell
-         * will be removed from the segment. But we can only eliminate a value
-         * if all of its cells are eliminated.
-         */
-        private final StarPredicate flushPredicate;
-        /**
-         * Number of columns predicate depends on.
-         */
-        private final int arity;
-        /**
-         * For each column, the segment axis which the column corresponds to, or
-         * null.
-         */
-        private final SegmentAxis[] axes;
-        /**
-         * For each column, a bitmap of values for which the predicate is
-         * sometimes false. These values cannot be eliminated from the axis.
-         */
-        private final BitSet[] keepBitSets;
-        /**
-         * For each segment axis, the predicate column which depends on the
-         * axis, or -1.
-         */
-        private final int[] axisInverseOrdinals;
-        /**
-         * Workspace which contains the current key value for each column.
-         */
-        private final Object[] values;
-        /**
-         * View onto {@link #values} as a list.
-         */
-        private final List<Object> valueList;
-        /**
-         * Workspace which contains the ordinal of the current value of each
-         * column on its axis.
-         */
-        private final int[] ordinals;
-
-        private final SegmentDataset data;
-
-        private final CellKey cellKey;
-
-        /**
-         * Creates a ValuePruner.
-         *
-         * @param flushPredicate Multi-column predicate to test
-         * @param segmentAxes    Axes of the segment. (The columns that the
-         *                       predicate may not be present, or may
-         *                       be in a different order.)
-         * @param data           Segment dataset, which allows pruner
-         *                       to determine whether a particular
-         *                       cell is currently empty
-         */
-        ValuePruner(
-            StarPredicate flushPredicate,
-            SegmentAxis[] segmentAxes,
-            SegmentDataset data)
-        {
-            this.flushPredicate = flushPredicate;
-            this.arity = flushPredicate.getConstrainedColumnList().size();
-            this.axes = new SegmentAxis[arity];
-            this.keepBitSets = new BitSet[arity];
-            this.axisInverseOrdinals = new int[segmentAxes.length];
-            Arrays.fill(axisInverseOrdinals, -1);
-            this.values = new Object[arity];
-            this.valueList = Arrays.asList(values);
-            this.ordinals = new int[arity];
-            assert data != null;
-            this.data = data;
-            this.cellKey = CellKey.Generator.newCellKey(segmentAxes.length);
-
-            // Pair up constraint columns with axes. If one of the constraint's
-            // columns is not in this segment, it gets the null axis. The
-            // constraint will have to evaluate to true for all possible values
-            // of that column.
-            for (int i = 0; i < arity; i++) {
-                RolapStar.Column column =
-                    flushPredicate.getConstrainedColumnList().get(i);
-                int axisOrdinal =
-                    findAxis(segmentAxes, column.getBitPosition());
-                if (axisOrdinal < 0) {
-                    this.axes[i] = null;
-                    values[i] = StarPredicate.WILDCARD;
-                    keepBitSets[i] = new BitSet(1); // dummy
-                } else {
-                    axes[i] = segmentAxes[axisOrdinal];
-                    axisInverseOrdinals[axisOrdinal] = i;
-                    final int keyCount = axes[i].getKeys().length;
-                    keepBitSets[i] = new BitSet(keyCount);
-                }
-            }
-        }
-
-        private int findAxis(SegmentAxis[] axes, int bitPosition) {
-            for (int i = 0; i < axes.length; i++) {
-                SegmentAxis axis = axes[i];
-                if (axis.getPredicate().getConstrainedColumn().getBitPosition()
-                    == bitPosition)
-                {
-                    return i;
-                }
-            }
-            return -1;
-        }
-
-        /**
-         * Applies this ValuePruner's predicate and sets bits in axisBitSets
-         * to indicate extra values which can be removed.
-         *
-         * @param axisKeepBitSets Array containing, for each axis, a bitset
-         *                        of values to keep (not flush)
-         */
-        void go(BitSet[] axisKeepBitSets) {
-            evaluatePredicate(0);
-
-            // Clear bits in the axis bit sets (indicating that a value is never
-            // used) if this predicate evaluates to true for every combination
-            // of values which this axis value appears in.
-            for (int i = 0; i < axisKeepBitSets.length; i++) {
-                if (axisInverseOrdinals[i] < 0) {
-                    continue;
-                }
-                BitSet axisKeepBitSet = axisKeepBitSets[axisInverseOrdinals[i]];
-                final BitSet keepBitSet = keepBitSets[i];
-                axisKeepBitSet.and(keepBitSet);
-            }
-        }
-
-        /**
-         * Evaluates the predicate for axes i and higher, and marks
-         * {@link #keepBitSets} if the predicate ever evaluates to false.
-         * The result is that discardBitSets[i] will be false for column #i if
-         * the predicate evaluates to true for all cells in the segment which
-         * have that column value.
-         *
-         * @param axisOrdinal Axis ordinal
-         */
-        private void evaluatePredicate(int axisOrdinal) {
-            if (axisOrdinal == arity) {
-                // If the flush predicate evaluates to false for this cell,
-                // and this cell currently has some data (*),
-                // then none of the values which are the coordinates of this
-                // cell can be discarded.
-                //
-                // * Important when there is sparsity. Consider the cell
-                // {year=1997, quarter=Q1, month=12}. This cell would never have
-                // data, so there's no point keeping it.
-                if (!flushPredicate.evaluate(valueList) && data.getObject(cellKey) != null) {
-                    // REVIEW: getObject forces an int or double dataset to
-                    // create a boxed object; use exists() instead?
-                    for (int k = 0; k < arity; k++) {
-                        keepBitSets[k].set(ordinals[k]);
-                    }
-                }
-            } else {
-                final SegmentAxis axis = axes[axisOrdinal];
-                if (axis == null) {
-                    evaluatePredicate(axisOrdinal + 1);
-                } else {
-                    final Comparable[] keys = axis.getKeys();
-                    for (int keyOrdinal = 0;
-                        keyOrdinal < keys.length;
-                        keyOrdinal++)
-                    {
-                        Object key = keys[keyOrdinal];
-                        values[axisOrdinal] = key;
-                        ordinals[axisOrdinal] = keyOrdinal;
-                        cellKey.setAxis(
-                            axisInverseOrdinals[axisOrdinal],
-                            keyOrdinal);
-                        evaluatePredicate(axisOrdinal + 1);
-                    }
-                }
-            }
-        }
-    }
 
     private static class ConstraintComparator implements Comparator<Integer> {
         private final double[] bloats;

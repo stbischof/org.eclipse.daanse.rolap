@@ -59,14 +59,16 @@ public class ScenarioImpl implements Scenario {
 
     private final int id;
 
+    // copy-on-write: setCellValue appends, evaluation iterates concurrently
     private final List<WritebackCell> writebackCells =
-        new ArrayList<>();
+        new java.util.concurrent.CopyOnWriteArrayList<>();
 
     private String cubeName;
 
     private Member member;
 
-    private static int nextId;
+    private static final java.util.concurrent.atomic.AtomicInteger NEXT_ID =
+        new java.util.concurrent.atomic.AtomicInteger();
 
     /**
      * Pending rows, by the cube they were produced for.
@@ -75,13 +77,14 @@ public class ScenarioImpl implements Scenario {
      * to another rewrites that cube's facts with values never meant for it, and a
      * commit would write it into the wrong writeback table.
      */
-    private final Map<Cube, List<Map<String, Map.Entry<DataTypeJdbc, Object>>>> pending = new LinkedHashMap<>();
+    private final Map<Cube, List<Map<String, Map.Entry<DataTypeJdbc, Object>>>> pending =
+        java.util.Collections.synchronizedMap(new LinkedHashMap<>());
 
     /**
      * Creates a ScenarioImpl.
  */
     public ScenarioImpl() {
-        id = nextId++;
+        id = NEXT_ID.getAndIncrement();
     }
 
     @Override
@@ -242,15 +245,14 @@ public class ScenarioImpl implements Scenario {
         Object[] compactKeyValues =
             new Object[constrainedColumnsBitKey.cardinality()];
         int k = 0;
-        for (int bitPos : constrainedColumnsBitKey) {
+        for (int bitPos = constrainedColumnsBitKey.nextSetBit(0); bitPos >= 0;
+                bitPos = constrainedColumnsBitKey.nextSetBit(bitPos + 1)) {
             compactKeyValues[k++] = keyValues[bitPos];
         }
 
         // Record the override.
         //
         // TODO: add a mechanism for persisting the overrides to a file.
-        //
-        // FIXME: make thread-safe
         WritebackCellImpl writebackCell =
             new WritebackCellImpl(
                 baseCube,
@@ -367,7 +369,8 @@ public class ScenarioImpl implements Scenario {
     @Override
     public List<Map<String, Map.Entry<DataTypeJdbc, Object>>> pendingRows(Cube cube) {
         List<Map<String, Map.Entry<DataTypeJdbc, Object>>> rows = pending.get(cube);
-        return rows == null ? List.of() : rows;
+        // snapshot: callers iterate outside the row list's lock
+        return rows == null ? List.of() : List.copyOf(rows);
     }
 
     @Override
@@ -382,8 +385,14 @@ public class ScenarioImpl implements Scenario {
         return Set.copyOf(pending.keySet());
     }
 
+    @Override
+    public void clearPendingRows(Cube cube) {
+        pending.remove(cube);
+    }
+
     private List<Map<String, Map.Entry<DataTypeJdbc, Object>>> pendingFor(Cube cube) {
-        return pending.computeIfAbsent(cube, key -> new ArrayList<>());
+        return pending.computeIfAbsent(cube,
+            key -> java.util.Collections.synchronizedList(new ArrayList<>()));
     }
 
     /**
@@ -630,11 +639,6 @@ public class ScenarioImpl implements Scenario {
         }
 
         @Override
-        public Member[] getMembersByOrdinal() {
-            return membersByOrdinal;
-        }
-
-        @Override
         public double getAtomicCellCount() {
             return atomicCellCount;
         }
@@ -825,6 +829,11 @@ public class ScenarioImpl implements Scenario {
                 evaluator.restore(savepoint);
             }
         }
+    }
+
+    @Override
+    public boolean hasPendingChanges() {
+        return !writebackCells.isEmpty() || !pending.isEmpty();
     }
 
     @Override

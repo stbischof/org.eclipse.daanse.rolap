@@ -100,12 +100,4 @@ public class GroupingSet {
         return columns;
     }
 
-    /**
-     * Sets all the segments which are in loading state as failed
-     */
-    public void setSegmentsFailed() {
-        for (Segment segment : segments) {
-            // TODO: segment.setFailIfStillLoading();
-        }
-    }
 }

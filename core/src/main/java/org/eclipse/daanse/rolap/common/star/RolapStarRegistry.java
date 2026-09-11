@@ -59,18 +59,27 @@ public class RolapStarRegistry {
 	 *
 	 * {@link RolapStar.Table#addJoin} works in a similar way.
 	 */
-	public synchronized RolapStar getOrCreateStar(final org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource fact) {
+	public RolapStar getOrCreateStar(final org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource fact) {
 		final List<String> rolapStarKey = RolapUtil.makeRolapStarKey(fact);
-		RolapStar star = stars.get(rolapStarKey);
-		if (star == null) {
-			star = makeRolapStar(fact);
-			stars.put(rolapStarKey, star);
-			// let cache manager load pending segments
-			// from external cache if needed
+		RolapStar star;
+		boolean created = false;
+		synchronized (this) {
+			star = stars.get(rolapStarKey);
+			if (star == null) {
+				star = makeRolapStar(fact);
+				stars.put(rolapStarKey, star);
+				created = true;
+			}
+		}
+		if (created) {
+			// priming OUTSIDE the monitor: the actor takes this monitor via
+			// getStar(header) on every external store event, and priming
+			// must never make it wait behind store I/O. Star setup is
+			// catalog-wide and always primes the shared manager.
 			Connection internalConnection = schema.getInternalConnection();
 			AbstractBasicContext abc = (AbstractBasicContext) internalConnection.getContext();
-			OlapSegmentCacheManager segmentCacheManager = abc.getAggregationManager().getCacheMgr(internalConnection);
-			((SegmentCacheManager)segmentCacheManager).loadCacheForStar(star);
+			OlapSegmentCacheManager segmentCacheManager = abc.getAggregationManager().getSegmentCacheManager();
+			((SegmentCacheManager) segmentCacheManager).schedulePrimingIfPending(star);
 		}
 		return star;
 	}
@@ -79,6 +88,12 @@ public class RolapStarRegistry {
 		return getStar(makeRolapStarKey(factTableName));
 	}
 
+	/**
+	 * Builds a star OUTSIDE the registry: not primed, not resolvable from
+	 * segment headers. {@link #getOrCreateStar} is the normal path; this one
+	 * serves only a fact whose alias collides with a registered star (a
+	 * writeback session view).
+	 */
 	public RolapStar makeRolapStar(final org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource fact) {
 		return new RolapStar(schema, context, fact);
 	}
@@ -87,8 +102,9 @@ public class RolapStarRegistry {
 		return stars.get(starKey);
 	}
 
+	/** Snapshot: callers iterate outside the lock. */
 	public synchronized Collection<RolapStar> getStars() {
-		return stars.values();
+		return List.copyOf(stars.values());
 	}
 
 	/**

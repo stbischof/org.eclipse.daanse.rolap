@@ -29,6 +29,7 @@
 
 package org.eclipse.daanse.rolap.common;
 
+import org.eclipse.daanse.olap.api.execution.GuardedStatement;
 import org.eclipse.daanse.olap.common.ExecutionConfig;
 import static org.eclipse.daanse.rolap.common.util.RelationUtil.getAlias;
 
@@ -37,11 +38,8 @@ import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.StringTokenizer;
 import java.util.WeakHashMap;
 import java.util.function.Consumer;
 
@@ -52,6 +50,9 @@ import org.eclipse.daanse.cwm.model.cwm.resource.relational.RowSet;
 import org.eclipse.daanse.cwm.model.cwm.resource.relational.util.ColumnSets;
 import org.eclipse.daanse.cwm.model.cwm.resource.relational.util.RowSets;
 import org.eclipse.daanse.cwm.model.cwm.resource.relational.util.Rows;
+import org.eclipse.daanse.rolap.mapping.model.database.source.InlineTableSource;
+import org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource;
+import org.eclipse.daanse.rolap.mapping.model.database.source.TableSource;
 import org.eclipse.daanse.sql.model.type.BestFitColumnType;
 import org.eclipse.daanse.olap.api.Context;
 import org.eclipse.daanse.olap.api.agg.Segment;
@@ -68,7 +69,6 @@ import org.eclipse.daanse.olap.exceptions.NativeEvaluationUnsupportedException;
 import org.eclipse.daanse.olap.fun.FunUtil;
 import org.eclipse.daanse.olap.key.BitKey;
 import org.eclipse.daanse.rolap.api.element.RolapMember;
-import org.eclipse.daanse.rolap.common.connection.AbstractRolapConnection;
 import org.eclipse.daanse.rolap.common.member.MemberReader;
 import org.eclipse.daanse.rolap.common.star.RolapStar;
 import org.eclipse.daanse.rolap.element.RolapCube;
@@ -78,12 +78,11 @@ import org.eclipse.daanse.rolap.element.RolapHierarchy;
 import org.eclipse.daanse.rolap.element.RolapHierarchy.LimitedRollupMember;
 import org.eclipse.daanse.rolap.element.RolapLevel;
 import org.eclipse.daanse.rolap.element.RolapProperty;
-import org.eclipse.daanse.rolap.util.ClassResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Utility methods for classes in the mondrian.rolap package.
+ * Utility methods for the rolap engine classes.
  *
  * @author jhyde
  * @since 22 December, 2001
@@ -127,8 +126,16 @@ public class RolapUtil {
     private static final Map<Context<?>, ExecuteQueryHook> QUERY_HOOKS =
         Collections.synchronizedMap(new WeakHashMap<>());
 
-    public static Consumer<java.sql.Statement> getDefaultCallback(final ExecutionContext executionContext) {
-        return stmt -> executionContext.registerStatement(stmt);
+    /**
+     * Fast path for the per-statement hook lookup: stays false until the
+     * first hook is installed, never resets (weak keys may vanish silently
+     * anyway) — a JVM without hooks skips the synchronized map entirely.
+     */
+    private static volatile boolean anyHooks;
+
+    public static Consumer<GuardedStatement> getDefaultCallback(
+            final ExecutionContext executionContext) {
+        return executionContext::registerStatement;
     }
 
     /**
@@ -138,7 +145,7 @@ public class RolapUtil {
      * @return query execution hook, or null if none is installed
      */
     public static ExecuteQueryHook getHook(Context<?> context) {
-        return context == null ? null : QUERY_HOOKS.get(context);
+        return anyHooks && context != null ? QUERY_HOOKS.get(context) : null;
     }
 
     /**
@@ -156,6 +163,7 @@ public class RolapUtil {
             QUERY_HOOKS.remove(context);
         } else {
             QUERY_HOOKS.put(context, hook);
+            anyHooks = true;
         }
     }
 
@@ -188,8 +196,8 @@ public class RolapUtil {
      * A comparator singleton instance which can handle the presence of
      * RolapUtilComparable instances in a collection.
      */
-    public static final Comparator ROLAP_COMPARATOR =
-        new RolapUtilComparator();
+    public static final Comparator<Comparable> ROLAP_COMPARATOR =
+        new RolapUtilComparator<>();
 
     private static final class RolapUtilComparator<T extends Comparable<T>>
         implements Comparator<T>
@@ -207,8 +215,6 @@ public class RolapUtil {
         }
     }
 
-    public static final String SQL_NULL_LITERAL = "null";
-
     /**
      * How a null member renders in MDX.
      *
@@ -222,13 +228,6 @@ public class RolapUtil {
     public static String mdxNullLiteral() {
         return ExecutionConfig.current().nullMemberRepresentation();
     }
-    /**
-     * Names of classes of drivers we've loaded (or have tried to load).
-     *
-     * NOTE: Synchronization policy: Lock the {@link AbstractRolapConnection} class
-     * before modifying or using this member.
-     */
-    private static final Set<String> loadedDrivers = new HashSet<>();
 
     static RolapMember[] toArray(List<RolapMember> v) {
         return v.isEmpty()
@@ -345,7 +344,7 @@ public class RolapUtil {
      * @param resultSetType Result set type, or -1 to use default
      * @param resultSetConcurrency Result set concurrency, or -1 to use default
      * @param callback callback
-     * @return ResultSet
+     * @return SqlStatement
      */
     public static SqlStatement executeQuery(
         Context context,
@@ -356,7 +355,7 @@ public class RolapUtil {
         ExecutionContext executionContext,
         int resultSetType,
         int resultSetConcurrency,
-        Consumer<java.sql.Statement> callback)
+        Consumer<GuardedStatement> callback)
     {
         SqlStatement stmt =
             new SqlStatement(
@@ -372,7 +371,7 @@ public class RolapUtil {
     /**
      * Raises an alert that native SQL evaluation could not be used
      * in a case where it might have been beneficial, but some
-     * limitation in Mondrian's implementation prevented it.
+     * limitation in the engine's implementation prevented it.
      * (Do not call this in cases where native evaluation would
      * have been wasted effort.)
      *
@@ -402,30 +401,6 @@ public class RolapUtil {
             LOGGER.error(alertMsg);
             throw new NativeEvaluationUnsupportedException(MessageFormat.format(nativeEvaluationUnsupported,
                 functionName));
-        }
-    }
-
-    /**
-     * Loads a set of JDBC drivers.
-     *
-     * @param jdbcDrivers A string consisting of the comma-separated names
-     *  of JDBC driver classes. For example
-     *  "sun.jdbc.odbc.JdbcOdbcDriver,com.mysql.jdbc.Driver".
-     */
-    public static synchronized void loadDrivers(String jdbcDrivers) {
-        StringTokenizer tok = new StringTokenizer(jdbcDrivers, ",");
-        while (tok.hasMoreTokens()) {
-            String jdbcDriver = tok.nextToken();
-            if (loadedDrivers.add(jdbcDriver)) {
-                try {
-                    ClassResolver.INSTANCE.forName(jdbcDriver, true);
-                    LOGGER.info(
-                        "Daanse: JDBC driver {} loaded successfully", jdbcDriver);
-                } catch (ClassNotFoundException e) {
-                    LOGGER.warn(
-                        "Daanse: Warning: JDBC driver {} not found", jdbcDriver);
-                }
-            }
         }
     }
 
@@ -522,7 +497,7 @@ public class RolapUtil {
 
     /** Extracts the {@link InlineTableData} from an inline-table source (no dialect — see {@link InlineTableData}). */
     public static InlineTableData inlineTableData(
-            org.eclipse.daanse.rolap.mapping.model.database.source.InlineTableSource inlineTable) {
+            InlineTableSource inlineTable) {
         List<Column> cols = ColumnSets.columns(inlineTable.getTable());
         List<String> columnNames = cols.stream().map(Column::getName).toList();
         List<String> columnTypes = cols.stream().map(c -> c.getType().getName()).toList();
@@ -631,12 +606,12 @@ public class RolapUtil {
      * @return the rolap star key
      */
     public static List<String> makeRolapStarKey(
-        final org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource fact)
+        final RelationalSource fact)
     {
       List<String> rlStarKey = new ArrayList<>();
       rlStarKey.add(getAlias(fact));
       // Add SQL filter to the key
-      if (fact instanceof org.eclipse.daanse.rolap.mapping.model.database.source.TableSource table) {
+      if (fact instanceof TableSource table) {
         org.eclipse.daanse.rolap.mapping.model.database.source.SqlStatement sqlWhere = table.getSqlWhereExpression();
         String sql = sqlWhere != null ? sqlWhere.getBody() : null;
         if (sql != null && !sql.isBlank()) {
