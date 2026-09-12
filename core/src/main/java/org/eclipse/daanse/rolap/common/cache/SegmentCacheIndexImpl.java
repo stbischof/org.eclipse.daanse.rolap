@@ -628,6 +628,18 @@ public class SegmentCacheIndexImpl implements SegmentCacheIndex {
     }
 
     @Override
+	public boolean hasInterestedParties(SegmentHeader header) {
+        checkThread();
+        final HeaderInfo headerInfo = headerMap.get(header);
+        if (headerInfo == null) {
+            return false;
+        }
+        // loadSucceeded hands the body to the parked clients before it acts
+        // on the flag, so a flagged header with clients is still owed a load
+        return !headerInfo.removeAfterLoad || !headerInfo.clients.isEmpty();
+    }
+
+    @Override
 	public void cancel(Execution exec) {
         checkThread();
         final Set<SegmentHeader> mine = headersByClient.remove(exec);

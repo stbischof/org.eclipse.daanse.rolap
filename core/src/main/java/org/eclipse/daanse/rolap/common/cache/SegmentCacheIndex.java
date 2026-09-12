@@ -197,6 +197,21 @@ public interface SegmentCacheIndex {
     public boolean isRegistered(SegmentHeader header);
 
     /**
+     * Whether anyone is still waiting for this header's load: it is either
+     * registered, or a flush flagged it while peers were already parked on
+     * its slot. Those peers are handed the body and only then is the header
+     * evicted, so abandoning the load under them fails their queries for an
+     * administrative action they had no part in.
+     *
+     * The loader's abort check asks THIS rather than {@link #isRegistered}: a
+     * flagged header with no waiting client is nobody's business and its SQL
+     * should stop, but a flagged header with clients still owes them a result.
+     * The store-put gate keeps asking {@link #isRegistered} - a flushed body
+     * must not reach the external stores even while it is handed to peers.
+     */
+    public boolean hasInterestedParties(SegmentHeader header);
+
+    /**
      * Allows to link a {@link GuardedStatement} to a segment. This allows
      * the index to cleanup when {@link #cancel(Execution)} is
      * invoked and orphaned segments are left.
