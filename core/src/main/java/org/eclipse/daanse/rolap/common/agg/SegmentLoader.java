@@ -541,11 +541,14 @@ public class SegmentLoader {
               // exists in the index. It could have been
               // removed by a cancellation request since
               // then.
-              // isRegistered, not contains: a segment a flush flagged for
-              // removal-after-load has no interested party left - counting
-              // it as active kept the SQL running just to feed the
-              // late-put ghost
-              if ( index.isRegistered( seg.getHeader() ) ) {
+              // hasInterestedParties, not contains: a flush that flags a
+              // still-loading header for removal usually leaves nobody
+              // behind, and then the SQL should stop rather than burn on to
+              // feed the late-put ghost. But peers may already be parked on
+              // the slot - they are handed the body before the flag is acted
+              // on, so abandoning the load here failed THEIR queries for a
+              // flush they had no part in.
+              if ( index.hasInterestedParties( seg.getHeader() ) ) {
                 index.linkSqlStatement( seg.getHeader(), stmt );
                 atLeastOneActive = true;
               }

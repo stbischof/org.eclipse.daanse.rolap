@@ -26,6 +26,7 @@ package org.eclipse.daanse.rolap.common.cache;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -41,6 +42,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
+import org.eclipse.daanse.olap.api.execution.Execution;
 import org.eclipse.daanse.olap.key.BitKey;
 import org.eclipse.daanse.olap.spi.SegmentBody;
 import org.eclipse.daanse.olap.spi.SegmentColumn;
@@ -550,5 +552,54 @@ class SegmentCacheIndexImplTest {
         // once loaded, the header becomes a candidate
         index.loadSucceeded(fine, mock(SegmentBody.class));
         assertEquals(1, index.findRollupCandidates(target, Map.of("[f].[a]", "x")).size());
+    }
+
+    /**
+     * A flush that hits a still-loading header must not abandon the load while
+     * peers are parked on its slot: they are handed the body first and only
+     * then is the header evicted. isRegistered says "do not put this in the
+     * stores"; hasInterestedParties says "somebody is still owed a result".
+     */
+    @Test
+    void flushedHeaderKeepsItsInterestedParties() {
+        final SegmentCacheIndexImpl index =
+            new SegmentCacheIndexImpl(Thread.currentThread());
+        final SegmentHeader header = header("x");
+        index.add(header, true);
+
+        // a peer parks on the pending slot
+        final Execution peer = mock(Execution.class);
+        assertNotNull(index.getFuture(peer, header), "peer should get the pending slot");
+
+        // an administrative flush lands mid-load
+        index.remove(header);
+
+        assertFalse(index.isRegistered(header),
+            "a flushed header must stay out of the external stores");
+        assertTrue(index.hasInterestedParties(header),
+            "the parked peer is still owed the body it is waiting for");
+    }
+
+    /** Without a waiting peer the flushed load is nobody's business and may stop. */
+    @Test
+    void flushedHeaderWithoutClientsHasNoInterestedParties() {
+        final SegmentCacheIndexImpl index =
+            new SegmentCacheIndexImpl(Thread.currentThread());
+        final SegmentHeader header = header("x");
+        index.add(header, true);
+
+        index.remove(header);
+
+        assertFalse(index.isRegistered(header));
+        assertFalse(index.hasInterestedParties(header),
+            "nobody waits, so the SQL should not burn on to feed a ghost");
+    }
+
+    /** An unknown header has nobody waiting either. */
+    @Test
+    void unknownHeaderHasNoInterestedParties() {
+        final SegmentCacheIndexImpl index =
+            new SegmentCacheIndexImpl(Thread.currentThread());
+        assertFalse(index.hasInterestedParties(header("x")));
     }
 }
