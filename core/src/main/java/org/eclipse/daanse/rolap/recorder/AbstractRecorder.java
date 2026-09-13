@@ -70,7 +70,6 @@ public abstract class AbstractRecorder implements MessageRecorder {
     private int warningMsgCount;
     private int infoMsgCount;
     private String contextMsgCache;
-    private long startTime;
 
     protected AbstractRecorder() {
         this(DEFAULT_MSG_LIMIT);
@@ -79,7 +78,6 @@ public abstract class AbstractRecorder implements MessageRecorder {
     protected AbstractRecorder(final int errorMsgLimit) {
         this.errorMsgLimit = errorMsgLimit;
         this.contexts = new ArrayList<>();
-        this.startTime = System.currentTimeMillis();
     }
 
     /**
@@ -92,17 +90,6 @@ public abstract class AbstractRecorder implements MessageRecorder {
         infoMsgCount = 0;
         contextMsgCache = null;
         contexts.clear();
-        this.startTime = System.currentTimeMillis();
-    }
-
-    @Override
-    public long getStartTimeMillis() {
-        return this.startTime;
-    }
-
-    @Override
-    public long getRunTimeMillis() {
-        return (System.currentTimeMillis() - this.startTime);
     }
 
     @Override
@@ -118,14 +105,6 @@ public abstract class AbstractRecorder implements MessageRecorder {
     @Override
     public boolean hasErrors() {
         return (errorMsgCount > 0);
-    }
-
-    public int getInfoCount() {
-        return infoMsgCount;
-    }
-
-    public int getWarningCount() {
-        return warningMsgCount;
     }
 
     public int getErrorCount() {
@@ -193,7 +172,7 @@ public abstract class AbstractRecorder implements MessageRecorder {
 
         if (errorMsgCount >= errorMsgLimit) {
             final String errorMsg = MessageFormat.format(tooManyMessageRecorderErrors, getContext(),
-                    String.valueOf(errorMsgCount));
+                    errorMsgCount);
             throw new RecorderException(errorMsg);
         }
     }

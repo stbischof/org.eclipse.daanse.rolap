@@ -28,7 +28,7 @@ import java.util.List;
 import org.eclipse.daanse.sql.model.type.Datatype;
 import org.eclipse.daanse.olap.api.evaluator.Evaluator;
 import org.eclipse.daanse.olap.api.sql.SqlExpression;
-import  org.eclipse.daanse.olap.util.Pair;
+import org.eclipse.daanse.olap.util.Pair;
 import org.eclipse.daanse.rolap.api.element.RolapMember;
 import org.eclipse.daanse.rolap.common.aggmatcher.AggStar;
 import org.eclipse.daanse.rolap.element.RolapCube;

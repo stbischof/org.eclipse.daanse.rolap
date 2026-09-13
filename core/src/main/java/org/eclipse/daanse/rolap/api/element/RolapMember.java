@@ -25,7 +25,6 @@
  */
 package org.eclipse.daanse.rolap.api.element;
 
-import org.eclipse.daanse.olap.api.element.Level;
 import org.eclipse.daanse.olap.api.element.ParentChildMember;
 import org.eclipse.daanse.rolap.common.evaluator.RolapCalculation;
 import org.eclipse.daanse.rolap.element.RolapCalculatedMember;
@@ -48,9 +47,5 @@ public interface RolapMember extends ParentChildMember, RolapCalculation {
     @Override
 	RolapLevel getLevel();
 
-    /** @deprecated will be removed in mondrian-4.0 */
-    @Deprecated
 	boolean isAllMember();
-    
-    void setLevel(Level level);
 }

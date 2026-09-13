@@ -115,15 +115,6 @@ public class AggStar {
         AggStar aggStar = new AggStar(star, dbTable, approxRowCount);
         AggStar.FactTable aggStarFactTable = aggStar.getFactTable();
 
-        // load measure fact count
-        for (Iterator<JdbcSchema.Table.Column.Usage> it =
-             dbTable.getColumnUsages(UsageType.MEASURE_FACT_COUNT);
-             it.hasNext();)
-        {
-            JdbcSchema.Table.Column.Usage usage = it.next();
-            aggStarFactTable.loadMeasureFactCount(usage);
-        }
-
         // 1. load fact count
         for (Iterator<JdbcSchema.Table.Column.Usage> it =
                  dbTable.getColumnUsages(JdbcSchema.UsageType.FACT_COUNT);
@@ -264,7 +255,7 @@ public class AggStar {
     /**
      * A map of bit positions to columns which need to
      * be joined and are not collapsed. If the aggregate table
-     * includes an {AggLevel} element which is not
+     * includes an AggLevel element which is not
      * collapsed, it will appear in that list. We use this
      * list later on to create the join paths in AggQuerySpec.
      */
@@ -301,23 +292,11 @@ public class AggStar {
         return aggTable;
     }
 
-    /**
-     * Find a table by name (alias) that is a descendant of the base
-     * fact table.
-     *
-     * @param name the table to find
-     * @return the table or null
-     */
-    public Table findTable(String name) {
-        AggStar.FactTable table = getFactTable();
-        return table.findDescendant(name);
-    }
-
 
     /**
      * Returns a measure of the IO cost of querying this table. It can be
      * either the row count or the row count times the size of a row.
-     * If the property ChooseAggregateByVolume}
+     * If the ChooseAggregateByVolume setting
      * is true, then volume is returned, otherwise row count.
      */
     public long getSize(boolean chooseAggregateByVolume) {
@@ -383,10 +362,6 @@ public class AggStar {
     /**
      * Return true if AggStar has levels
      */
-    public boolean hasLevels() {
-        return getFactTable().hasLevels();
-    }
-
     /**
      * Returns whether this AggStar has foreign keys.
      */
@@ -493,9 +468,6 @@ public class AggStar {
         columns[column.getBitPosition()] = column;
     }
 
-    private static final Logger JOIN_CONDITION_LOGGER =
-            LoggerFactory.getLogger(AggStar.class);
-
     public boolean hasIgnoredColumns() {
         return hasIgnoredColumns;
     }
@@ -520,7 +492,7 @@ public class AggStar {
                 final SqlExpression right)
             {
                 if (!(left instanceof org.eclipse.daanse.rolap.element.RolapColumn)) {
-                    JOIN_CONDITION_LOGGER.debug("JoinCondition.left NOT Column: {}",
+                    LOGGER.debug("JoinCondition.left NOT Column: {}",
                         left.getClass().getName());
                 }
                 this.left = left;
@@ -899,13 +871,6 @@ public class AggStar {
         }
 
         /**
-         * Return true if table has levels.
-         */
-        public boolean hasLevels() {
-            return ! levels.isEmpty();
-        }
-
-        /**
          * Add a child DimTable table.
          */
         protected void addTable(final DimTable child) {
@@ -920,26 +885,6 @@ public class AggStar {
          */
         public List<DimTable> getChildTables() {
             return children;
-        }
-
-        /**
-         * Find descendant of fact table with given name or return null.
-         *
-         * @param name the child table name (alias).
-         * @return the child table or null.
-         */
-        public Table findDescendant(String name) {
-            if (getName().equals(name)) {
-                return this;
-            }
-
-            for (Table child : getChildTables()) {
-                Table found = child.findDescendant(name);
-                if (found != null) {
-                    return found;
-                }
-            }
-            return null;
         }
 
         /**
@@ -1234,7 +1179,6 @@ public class AggStar {
         }
 
         private Column factCountColumn;
-        private Set<Column> measureFactCountColumns = new HashSet<>();
         private final List<Measure> measures;
         private final int totalColumnSize;
         private long numberOfRows;
@@ -1304,13 +1248,6 @@ public class AggStar {
                 makeNumberOfRows();
             }
             return numberOfRows;
-        }
-
-        /**
-         * This is for testing ONLY.
-         */
-        void setNumberOfRows(int numberOfRows) {
-            this.numberOfRows = numberOfRows;
         }
 
         /**
@@ -1446,32 +1383,6 @@ public class AggStar {
                     bitPosition);
 
             factCountColumn = aggColumn;
-        }
-
-        /**
-         * Create a fact_count column for a usage of type fact count.
-         */
-        private void loadMeasureFactCount
-        (final JdbcSchema.Table.Column.Usage usage) {
-            String name = usage.getColumn().getName();
-            String symbolicName = usage.getSymbolicName();
-            if (symbolicName == null) {
-                symbolicName = name;
-            }
-
-            RolapSqlExpression expression =
-                    new org.eclipse.daanse.rolap.element.RolapColumn(getName(), name);
-            Datatype datatype = usage.getColumn().getDatatype();
-            int bitPosition = -1;
-
-            Column aggColumn =
-                    new Column(
-                        symbolicName,
-                        expression,
-                        datatype,
-                        bitPosition);
-
-            measureFactCountColumns.add(aggColumn);
         }
 
         /**
@@ -1612,7 +1523,7 @@ public class AggStar {
                 star.getCatalog().getInternalConnection().getInternalStatement(),
                 ExecuteDurationUtil.executeDurationValue(star.getCatalog().getInternalConnection().getContext()));
             ExecutionMetadata metadata = ExecutionMetadata.of(
-                "AggStar.DimTable.makeNumberOfRows",
+                "AggStar.FactTable.makeNumberOfRows",
                 "Getting row count for aggregate table " + getName(),
                 Purpose.OTHER,
                 0

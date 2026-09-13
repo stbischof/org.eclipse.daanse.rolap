@@ -501,7 +501,7 @@ public final class MemberSqlMapper {
         if (needsGroupBy) {
             q.groupOn(ref);
         }
-        // ASC, nulls-last (SortSpec(ASC, nullable=true, NullOrder.LAST)).
+        // ASC, nulls-first (SortSpec(ASC, nullable=true, NullOrder.FIRST)).
         q.orderOn(ref, sortSpec(SortingDirection.ASC));
         if (needsGroupBy) {
             q.completeNonAggregatesGroupBy();
@@ -963,9 +963,13 @@ public final class MemberSqlMapper {
                         .equals(((org.eclipse.daanse.rolap.element.RolapColumn) b).getName());
     }
 
-    /** ROLAP sort direction → builder {@link SortSpec} (nullable, nulls-last). */
+    /**
+     * ROLAP sort direction → builder {@link SortSpec}: nullable, nulls FIRST —
+     * a null-key member is the calc engine's oldest sibling, and the SQL
+     * order matches it.
+     */
     private static SortSpec sortSpec(SortingDirection direction) {
         SortDirection dir = direction == SortingDirection.DESC ? SortDirection.DESC : SortDirection.ASC;
-        return new SortSpec(dir, true, NullOrder.LAST, false);
+        return new SortSpec(dir, true, NullOrder.FIRST, false);
     }
 }

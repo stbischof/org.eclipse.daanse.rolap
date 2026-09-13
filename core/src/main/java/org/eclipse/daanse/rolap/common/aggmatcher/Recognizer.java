@@ -32,11 +32,9 @@ import static org.eclipse.daanse.rolap.common.util.RelationUtil.getAlias;
 import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
@@ -96,8 +94,6 @@ public abstract class Recognizer {
     No aggregator found while converting fact table aggregator: for usage
             ''{0}'', fact aggregator ''{1}'' and sibling aggregator ''{2}''
             """;
-    private final static String noColumnNameFromExpression =
-        "Could not get a column name from a level key expression: ''{0}''.";
     private final static String noFactCountColumns =
         "Candidate aggregate table ''{0}'' for fact table ''{1}'' has no fact count columns.";
     private final static String noMeasureColumns =
@@ -596,20 +592,7 @@ public abstract class Recognizer {
     }
 
     /**
-     * Debug method: Print out not seen foreign key list.
-     */
-    private void printNotSeenForeignKeys(List<JdbcSchema.Table.Column.Usage> notSeenForeignKeys) {
-        LOGGER.debug(
-            "Recognizer.printNotSeenForeignKeys: {}", aggTable.getName());
-        for (Iterator<JdbcSchema.Table.Column.Usage> it = notSeenForeignKeys.iterator(); it.hasNext(); ) {
-            JdbcSchema.Table.Column.Usage usage = it.next();
-            String msg = new StringBuilder("  ").append(usage.getColumn().getName()).toString();
-            LOGGER.debug(msg);
-        }
-    }
-
-    /**
-     * Here a measure ussage is created and the right join condition is
+     * Here a foreign-key usage is created and the right join condition is
      * explicitly supplied. This is needed is when the aggregate table's column
      * names may not match those found in the RolapStar.
      */
@@ -724,8 +707,7 @@ public abstract class Recognizer {
                     factTable.findDescendant(tableAlias);
 
                 if (descTable == null) {
-                    // TODO: what to do here???
-                    StringBuilder buf = new StringBuilder(256);
+                                        StringBuilder buf = new StringBuilder(256);
                     buf.append("descendant table is null for factTable=");
                     buf.append(factTable.getAlias());
                     buf.append(", tableAlias=");
@@ -888,7 +870,7 @@ public abstract class Recognizer {
      * calling the getRollup() method of the fact table column's
      * RolapAggregator. But in the case that the fact table column's
      * RolapAggregator is the "Avg" aggregator, then the special
-     * RolapAggregator.AvgFromSum is used.
+     * AvgFromSumAggregator is used.
      * 
      * Note: this code assumes that the aggregate table does not have an
      * explicit average aggregation column.
@@ -913,12 +895,12 @@ public abstract class Recognizer {
      *
      * If the fact table column's aggregator was "Avg":
      *   then if the sibling aggregator was "Avg":
-     *      the new aggregator is RolapAggregator.AvgFromAvg
+     *      the new aggregator is AvgFromAvgAggregator
      *   else if the sibling aggregator was "Sum":
-     *      the new aggregator is RolapAggregator.AvgFromSum
+     *      the new aggregator is AvgFromSumAggregator
      * else if the fact table column's aggregator was "Sum":
      *   if the sibling aggregator was "Avg":
-     *      the new aggregator is RolapAggregator.SumFromAvg
+     *      the new aggregator is SumFromAvgAggregator
      *
      * Note that there is no SumFromSum since that is not a special case
      * requiring a special aggregator.
@@ -964,37 +946,6 @@ public abstract class Recognizer {
 
         msgRecorder.popContextName();
         return rollupAgg;
-    }
-
-    protected void checkMeasureFactCount() {
-        JdbcSchema.Table.Column factColumn = null;
-        Set<String> allowedMeasureFactColumnNames = new HashSet<>();
-
-        for (Iterator<JdbcSchema.Table.Column.Usage> it =
-             aggTable.getColumnUsages(JdbcSchema.UsageType.FACT_COUNT);
-             it.hasNext(); ) {
-            JdbcSchema.Table.Column.Usage usage = it.next();
-            factColumn = usage.getColumn();
-        }
-
-        if (factColumn != null) {
-            for (Iterator<JdbcSchema.Table.Column.Usage> it =
-                 aggTable.getColumnUsages(JdbcSchema.UsageType.MEASURE);
-                 it.hasNext(); ) {
-                JdbcSchema.Table.Column.Usage usage = it.next();
-                JdbcSchema.Table.Column measureColumn = usage.getColumn();
-                allowedMeasureFactColumnNames.add
-                    (new StringBuilder(factColumn.getName()).append("_").append(measureColumn.getName()).toString());
-            }
-
-            for (JdbcSchema.Table.Column aggColumn : aggTable.getColumns()) {
-                if (!aggColumn.hasUsage()
-                    && allowedMeasureFactColumnNames.contains
-                    (aggColumn.getName())) {
-                    makeMeasureFactCount(aggColumn);
-                }
-            }
-        }
     }
 
     /**
@@ -1058,11 +1009,11 @@ public abstract class Recognizer {
     }
 
     /**
-     * Given a MappingExpression, returns
+     * Given a SqlExpression, returns
      * the associated column name.
      *
-     * Note: if the MappingExpression is
-     * not a MappingColumn or mondrian.olap.KeyExpression, returns null. This
+     * Note: if the SqlExpression is
+     * not a MappingColumn or a key expression, returns null. This
      * will result in an error.
      */
     protected String getColumnName(SqlExpression expr) {

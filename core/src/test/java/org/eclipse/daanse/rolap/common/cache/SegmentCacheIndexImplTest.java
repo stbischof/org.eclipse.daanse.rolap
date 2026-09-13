@@ -503,10 +503,9 @@ class SegmentCacheIndexImplTest {
     }
 
     /**
-     * A flush that constrains a segment which is STILL LOADING must fail
-     * the load slot: update() used to move the HeaderInfo (open slot
-     * included) under the new key, loadSucceeded(oldHeader) then ran into
-     * "data arrived late" and the waiters hung forever. Red before N1.
+     * A flush that constrains a segment which is STILL LOADING fails the
+     * load slot: the waiters are told, rather than parked on a slot whose
+     * header the flush has moved out from under them.
      */
     @org.junit.jupiter.api.Test
     void updateOfLoadingHeaderFailsItsWaiters() {
@@ -529,9 +528,10 @@ class SegmentCacheIndexImplTest {
     }
 
     /**
-     * A header whose load is still open must never seed a rollup: the
-     * candidate's body is nowhere yet, the reader's miss would remove the
-     * loading segment (store-without-index ghost + lost work). Red before N2.
+     * A header whose load is still open never seeds a rollup: its body is
+     * nowhere yet, so a reader taking it as a candidate would miss and
+     * remove the loading segment, losing the work and leaving a
+     * store-without-index ghost.
      */
     @org.junit.jupiter.api.Test
     void rollupCandidatesSkipHeadersStillLoading() {

@@ -200,13 +200,13 @@ class TupleSqlMapperTupleReadTest {
                 + " on \"sales_fact_1997\".\"store_id\" = \"store\".\"store_id\""
                 + " group by \"customer\".\"country\", \"customer\".\"state_province\","
                 + " \"customer\".\"city\", \"store\".\"store_sqft\""
-                + " order by CASE WHEN \"customer\".\"country\" IS NULL THEN 1 ELSE 0 END,"
+                + " order by CASE WHEN \"customer\".\"country\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"customer\".\"country\" ASC,"
-                + " CASE WHEN \"customer\".\"state_province\" IS NULL THEN 1 ELSE 0 END,"
+                + " CASE WHEN \"customer\".\"state_province\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"customer\".\"state_province\" ASC,"
-                + " CASE WHEN \"customer\".\"city\" IS NULL THEN 1 ELSE 0 END,"
+                + " CASE WHEN \"customer\".\"city\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"customer\".\"city\" ASC,"
-                + " CASE WHEN \"store\".\"store_sqft\" IS NULL THEN 1 ELSE 0 END,"
+                + " CASE WHEN \"store\".\"store_sqft\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"store\".\"store_sqft\" ASC");
     }
 
@@ -252,11 +252,11 @@ class TupleSqlMapperTupleReadTest {
                 + " where (\"store\".\"store_state\" in ('BC', 'CA', 'OR'))"
                 + " group by \"store\".\"store_country\", \"store\".\"store_state\","
                 + " \"product_class\".\"product_family\""
-                + " order by CASE WHEN \"store\".\"store_country\" IS NULL THEN 1 ELSE 0 END,"
+                + " order by CASE WHEN \"store\".\"store_country\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"store\".\"store_country\" ASC,"
-                + " CASE WHEN \"store\".\"store_state\" IS NULL THEN 1 ELSE 0 END,"
+                + " CASE WHEN \"store\".\"store_state\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"store\".\"store_state\" ASC,"
-                + " CASE WHEN \"product_class\".\"product_family\" IS NULL THEN 1 ELSE 0 END,"
+                + " CASE WHEN \"product_class\".\"product_family\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"product_class\".\"product_family\" ASC");
     }
 
@@ -337,9 +337,9 @@ class TupleSqlMapperTupleReadTest {
                 + " join \"position\" as \"position\""
                 + " on \"employee\".\"position_id\" = \"position\".\"position_id\""
                 + " group by \"store\".\"store_country\", \"position\".\"pay_type\""
-                + " order by CASE WHEN \"store\".\"store_country\" IS NULL THEN 1 ELSE 0 END,"
+                + " order by CASE WHEN \"store\".\"store_country\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"store\".\"store_country\" ASC,"
-                + " CASE WHEN \"position\".\"pay_type\" IS NULL THEN 1 ELSE 0 END,"
+                + " CASE WHEN \"position\".\"pay_type\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"position\".\"pay_type\" ASC");
     }
 
@@ -385,11 +385,11 @@ class TupleSqlMapperTupleReadTest {
             " where (\"store\".\"store_name\" = 'Store 14')"
             + " group by \"customer\".\"country\", \"product_class\".\"product_family\","
             + " \"product\".\"product_name\""
-            + " order by CASE WHEN \"customer\".\"country\" IS NULL THEN 1 ELSE 0 END,"
+            + " order by CASE WHEN \"customer\".\"country\" IS NULL THEN 0 ELSE 1 END,"
             + " \"customer\".\"country\" ASC,"
-            + " CASE WHEN \"product_class\".\"product_family\" IS NULL THEN 1 ELSE 0 END,"
+            + " CASE WHEN \"product_class\".\"product_family\" IS NULL THEN 0 ELSE 1 END,"
             + " \"product_class\".\"product_family\" ASC,"
-            + " CASE WHEN \"product\".\"product_name\" IS NULL THEN 1 ELSE 0 END,"
+            + " CASE WHEN \"product\".\"product_name\" IS NULL THEN 0 ELSE 1 END,"
             + " \"product\".\"product_name\" ASC";
 
     /**
@@ -503,11 +503,11 @@ class TupleSqlMapperTupleReadTest {
                 + " from \"store\" as \"store\""
                 + " group by \"store\".\"store_type\", \"store\".\"store_country\","
                 + " \"store\".\"store_state\""
-                + " order by CASE WHEN \"store\".\"store_type\" IS NULL THEN 1 ELSE 0 END,"
+                + " order by CASE WHEN \"store\".\"store_type\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"store\".\"store_type\" ASC,"
-                + " CASE WHEN \"store\".\"store_country\" IS NULL THEN 1 ELSE 0 END,"
+                + " CASE WHEN \"store\".\"store_country\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"store\".\"store_country\" ASC,"
-                + " CASE WHEN \"store\".\"store_state\" IS NULL THEN 1 ELSE 0 END,"
+                + " CASE WHEN \"store\".\"store_state\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"store\".\"store_state\" ASC");
     }
 
@@ -551,9 +551,9 @@ class TupleSqlMapperTupleReadTest {
                 + " from \"store\" as \"store\""
                 + " group by \"store\".\"store_name\", \"store\".\"store_type\""
                 + " having not ((sum(\"store\".\"store_sqft\") is null))"
-                + " order by CASE WHEN \"store\".\"store_name\" IS NULL THEN 1 ELSE 0 END,"
+                + " order by CASE WHEN \"store\".\"store_name\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"store\".\"store_name\" ASC,"
-                + " CASE WHEN \"store\".\"store_type\" IS NULL THEN 1 ELSE 0 END,"
+                + " CASE WHEN \"store\".\"store_type\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"store\".\"store_type\" ASC");
     }
 
@@ -659,11 +659,11 @@ class TupleSqlMapperTupleReadTest {
                 + " group by \"store\".\"store_country\", \"store\".\"store_state\","
                 + " \"product_class\".\"product_family\""
                 + " having \"store\".\"store_state\" is not null and \"store\".\"store_state\" like '%A%'"
-                + " order by CASE WHEN \"store\".\"store_country\" IS NULL THEN 1 ELSE 0 END,"
+                + " order by CASE WHEN \"store\".\"store_country\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"store\".\"store_country\" ASC,"
-                + " CASE WHEN \"store\".\"store_state\" IS NULL THEN 1 ELSE 0 END,"
+                + " CASE WHEN \"store\".\"store_state\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"store\".\"store_state\" ASC,"
-                + " CASE WHEN \"product_class\".\"product_family\" IS NULL THEN 1 ELSE 0 END,"
+                + " CASE WHEN \"product_class\".\"product_family\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"product_class\".\"product_family\" ASC");
     }
 
@@ -721,7 +721,7 @@ class TupleSqlMapperTupleReadTest {
                 + " from \"store\" as \"store\""
                 + " where (\"store\".\"store_id\" in (select distinct \"store_id\" from \"tinysales\"))"
                 + " group by \"store\".\"store_state\""
-                + " order by CASE WHEN \"store\".\"store_state\" IS NULL THEN 1 ELSE 0 END,"
+                + " order by CASE WHEN \"store\".\"store_state\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"store\".\"store_state\" ASC");
     }
 
@@ -759,7 +759,7 @@ class TupleSqlMapperTupleReadTest {
                 + " from \"store\" where \"store\".\"store_state\" = 'CA'))"
                 + " and (\"store\".\"store_country\" = 'USA')"
                 + " group by \"store\".\"store_state\""
-                + " order by CASE WHEN \"store\".\"store_state\" IS NULL THEN 1 ELSE 0 END,"
+                + " order by CASE WHEN \"store\".\"store_state\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"store\".\"store_state\" ASC");
     }
 
@@ -812,7 +812,7 @@ class TupleSqlMapperTupleReadTest {
                 + " group by \"employee\".\"supervisor_id\", \"employee\".\"employee_id\""
                 + " order by CASE WHEN \"employee\".\"supervisor_id\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"employee\".\"supervisor_id\" ASC,"
-                + " CASE WHEN \"employee\".\"employee_id\" IS NULL THEN 1 ELSE 0 END,"
+                + " CASE WHEN \"employee\".\"employee_id\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"employee\".\"employee_id\" ASC");
     }
 
@@ -964,7 +964,7 @@ class TupleSqlMapperTupleReadTest {
                 + " group by RTRIM(supervisor_id), \"employee\".\"employee_id\""
                 + " order by CASE WHEN RTRIM(supervisor_id) = 0 THEN 0 ELSE 1 END,"
                 + " RTRIM(supervisor_id) ASC,"
-                + " CASE WHEN \"employee\".\"employee_id\" IS NULL THEN 1 ELSE 0 END,"
+                + " CASE WHEN \"employee\".\"employee_id\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"employee\".\"employee_id\" ASC");
     }
 

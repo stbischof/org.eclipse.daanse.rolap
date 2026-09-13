@@ -806,16 +806,6 @@ public class QueryRecorder {
         track(new QueryTape.GroupByNode(node, alias));
     }
 
-    /** ORDER BY over a pre-built statement node: the same {@code OrderByNode} op the
-     *  olap-expression form records, without the expression→node conversion. */
-    public void addOrderByNode(SqlExpression node, String alias, SortingDirection sortingDirection,
-            boolean prepend, boolean nullable, boolean collateNullsLast) {
-        if (SortingDirection.NONE.equals(sortingDirection)) {
-            return;
-        }
-        track(new QueryTape.OrderByNode(node, alias, sortingDirection, prepend, nullable, collateNullsLast));
-    }
-
     /**
      * The SELECT alias previously assigned to {@code expression}, resolved by the dialect-free builder node
      * (render-equality) rather than a dialect-rendered string, or {@code null}. Used by the native-filter

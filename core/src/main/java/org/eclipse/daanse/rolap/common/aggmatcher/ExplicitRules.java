@@ -51,7 +51,6 @@ import org.eclipse.daanse.olap.api.element.Hierarchy;
 import org.eclipse.daanse.olap.api.element.Member;
 import org.eclipse.daanse.olap.api.query.NameSegment;
 import org.eclipse.daanse.olap.api.sql.SqlExpression;
-import org.eclipse.daanse.olap.common.StandardProperty;
 import org.eclipse.daanse.olap.common.Util;
 import org.eclipse.daanse.rolap.aggregator.countbased.AbstractFactCountBasedAggregator;
 import org.eclipse.daanse.rolap.aggregator.countbased.AvgFromAvgAggregator;
@@ -64,7 +63,6 @@ import org.eclipse.daanse.rolap.recorder.MessageRecorder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.eclipse.daanse.rolap.mapping.model.database.aggregation.AggregationFactory;
 /**
  * A class containing a RolapCube's Aggregate tables exclude/include
  * criteria.
@@ -119,7 +117,7 @@ public class ExplicitRules {
     public static class Group {
 
         private final static String cubeRelationNotTable =
-            "The Cube ''{0}'' relation is not a DaanseDef.Table but rather ''{1}''.";
+            "The Cube ''{0}'' relation is not a table but rather ''{1}''.";
 
         /**
          * Make an ExplicitRules.Group for a given RolapCube given the
@@ -403,9 +401,10 @@ public class ExplicitRules {
 
         @Override
 		public boolean isExcluded(final String tableName) {
+            // ignoreCase=true means case-INSENSITIVE matching
             return (this.ignoreCase)
-                ? this.name.equals(tableName)
-                : this.name.equalsIgnoreCase(tableName);
+                ? this.name.equalsIgnoreCase(tableName)
+                : this.name.equals(tableName);
         }
 
         @Override
@@ -416,33 +415,6 @@ public class ExplicitRules {
                 checkAttributeString(msgRecorder, nameInner, "name");
 
 
-// RME TODO
-//                // If name does not match the PatternTableDef pattern,
-//                // then issue warning.
-//                // Why, because no table with the exclude's name will
-//                // ever match the pattern, so the exclude is superfluous.
-//                // This is best effort.
-//                Pattern pattern =
-//                    ExplicitRules.PatternTableDef.this.getPattern();
-//                boolean patternIgnoreCase =
-//                    ExplicitRules.PatternTableDef.this.isIgnoreCase();
-//                boolean ignoreCase = isIgnoreCase();
-//
-//                // If pattern is ignoreCase and name is any case or pattern
-//                // is not ignoreCase and name is not ignoreCase, then simply
-//                // see if name matches.
-//                // Else pattern in not ignoreCase and name is ignoreCase,
-//                // then pattern could be "AB.*" and name "abc".
-//                // Here "abc" would name, but not pattern - but who cares
-//                if (patternIgnoreCase || ! ignoreCase) {
-//                    if (! pattern.matcher(name).matches()) {
-//                        msgRecorder.reportWarning(
-//                            mres.getSuperfluousExludeName(
-//                                        msgRecorder.getContext(),
-//                                        name,
-//                                        pattern.pattern()));
-//                    }
-//                }
             } finally {
                 msgRecorder.popContextName();
             }
@@ -494,8 +466,7 @@ public class ExplicitRules {
                     msgRecorder,
                     pattern.pattern(),
                     "pattern");
-                //String context = msgRecorder.getContext();
-                // Is there any way to determine if the exclude pattern
+                                // Is there any way to determine if the exclude pattern
                 // is never a sub-set of the table pattern.
                 // I will have to think about this.
                 // Until then, this method is empty.
@@ -637,14 +608,13 @@ public class ExplicitRules {
         }
 
         /**
-         * nameColumn is mapped to the internal property $name
+         * NOT implemented: a declared nameColumn is currently ignored (the
+         * built property is never attached). The WARN makes the silent gap
+         * visible until the $name mapping is wired up.
          */
         private static void handleNameColumn(org.eclipse.daanse.rolap.mapping.model.database.aggregation.AggregationLevel aggLevel) {
-        	org.eclipse.daanse.rolap.mapping.model.database.aggregation.AggregationLevelProperty nameProp = AggregationFactory.eINSTANCE.createAggregationLevelProperty();
-        	nameProp.setName(StandardProperty.NAME.getName());
-        	nameProp.setColumn(aggLevel.getNameColumn());
-        	//TODO
-            //aggLevel.getAggregationLevelProperties().add(nameProp);
+            LOGGER.warn("AggLevel nameColumn '{}' is not supported yet and will be ignored",
+                aggLevel.getNameColumn());
         }
 
         private static void addTo(
@@ -1129,13 +1099,6 @@ public class ExplicitRules {
          */
         public ExplicitRules.Group getAggGroup() {
             return this.aggGroup;
-        }
-
-        /**
-         * Get the name of the fact count column.
-         */
-        protected org.eclipse.daanse.cwm.model.cwm.resource.relational.Column getFactCountColumn() {
-            return factCountColumn;
         }
 
         /**

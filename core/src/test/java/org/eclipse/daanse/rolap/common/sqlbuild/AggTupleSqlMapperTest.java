@@ -206,16 +206,16 @@ class AggTupleSqlMapperTest {
                 + " group by \"exp_agg_test\".\"testyear\", \"exp_agg_test\".\"testqtr\","
                 + " \"exp_agg_test\".\"testmonthname\", \"exp_agg_test\".\"testmonthord\","
                 + " \"exp_agg_test\".\"gender\""
-                + " order by CASE WHEN \"exp_agg_test\".\"testyear\" IS NULL THEN 1 ELSE 0 END,"
+                + " order by CASE WHEN \"exp_agg_test\".\"testyear\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"exp_agg_test\".\"testyear\" ASC,"
-                + " CASE WHEN \"exp_agg_test\".\"testqtr\" IS NULL THEN 1 ELSE 0 END,"
+                + " CASE WHEN \"exp_agg_test\".\"testqtr\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"exp_agg_test\".\"testqtr\" ASC,"
                 // the ordinal ORDERs BEFORE the key (c3 before c2), key tiebreaker after.
-                + " CASE WHEN \"exp_agg_test\".\"testmonthord\" IS NULL THEN 1 ELSE 0 END,"
+                + " CASE WHEN \"exp_agg_test\".\"testmonthord\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"exp_agg_test\".\"testmonthord\" ASC,"
-                + " CASE WHEN \"exp_agg_test\".\"testmonthname\" IS NULL THEN 1 ELSE 0 END,"
+                + " CASE WHEN \"exp_agg_test\".\"testmonthname\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"exp_agg_test\".\"testmonthname\" ASC,"
-                + " CASE WHEN \"exp_agg_test\".\"gender\" IS NULL THEN 1 ELSE 0 END,"
+                + " CASE WHEN \"exp_agg_test\".\"gender\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"exp_agg_test\".\"gender\" ASC");
     }
 
@@ -281,13 +281,13 @@ class AggTupleSqlMapperTest {
                 + " \"agg_g_ms_pcat_sales_fact_1997\".\"month_of_year\","
                 + " \"time_by_day\".\"the_month\","
                 + " \"agg_g_ms_pcat_sales_fact_1997\".\"gender\""
-                + " order by CASE WHEN \"agg_g_ms_pcat_sales_fact_1997\".\"the_year\" IS NULL THEN 1 ELSE 0 END,"
+                + " order by CASE WHEN \"agg_g_ms_pcat_sales_fact_1997\".\"the_year\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"agg_g_ms_pcat_sales_fact_1997\".\"the_year\" ASC,"
-                + " CASE WHEN \"agg_g_ms_pcat_sales_fact_1997\".\"quarter\" IS NULL THEN 1 ELSE 0 END,"
+                + " CASE WHEN \"agg_g_ms_pcat_sales_fact_1997\".\"quarter\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"agg_g_ms_pcat_sales_fact_1997\".\"quarter\" ASC,"
-                + " CASE WHEN \"agg_g_ms_pcat_sales_fact_1997\".\"month_of_year\" IS NULL THEN 1 ELSE 0 END,"
+                + " CASE WHEN \"agg_g_ms_pcat_sales_fact_1997\".\"month_of_year\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"agg_g_ms_pcat_sales_fact_1997\".\"month_of_year\" ASC,"
-                + " CASE WHEN \"agg_g_ms_pcat_sales_fact_1997\".\"gender\" IS NULL THEN 1 ELSE 0 END,"
+                + " CASE WHEN \"agg_g_ms_pcat_sales_fact_1997\".\"gender\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"agg_g_ms_pcat_sales_fact_1997\".\"gender\" ASC");
     }
 
@@ -450,9 +450,9 @@ class AggTupleSqlMapperTest {
                 + " where \"agg_c_14_sales_fact_1997\".\"the_year\" = 1997"
                 + " group by \"store\".\"store_country\", \"store\".\"store_state\""
                 + " having c1 IS NOT NULL AND UPPER(c1) REGEXP '.*CA.*'"
-                + " order by CASE WHEN \"store\".\"store_country\" IS NULL THEN 1 ELSE 0 END,"
+                + " order by CASE WHEN \"store\".\"store_country\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"store\".\"store_country\" ASC,"
-                + " CASE WHEN \"store\".\"store_state\" IS NULL THEN 1 ELSE 0 END,"
+                + " CASE WHEN \"store\".\"store_state\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"store\".\"store_state\" ASC");
     }
 
@@ -502,9 +502,9 @@ class AggTupleSqlMapperTest {
                 + " where \"time_by_day\".\"month_of_year\" = \"agg_time_mix\".\"month_of_year\""
                 + " group by \"time_by_day\".\"the_year\", \"agg_time_mix\".\"month_of_year\","
                 + " \"time_by_day\".\"the_month\""
-                + " order by CASE WHEN \"time_by_day\".\"the_year\" IS NULL THEN 1 ELSE 0 END,"
+                + " order by CASE WHEN \"time_by_day\".\"the_year\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"time_by_day\".\"the_year\" ASC,"
-                + " CASE WHEN \"agg_time_mix\".\"month_of_year\" IS NULL THEN 1 ELSE 0 END,"
+                + " CASE WHEN \"agg_time_mix\".\"month_of_year\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"agg_time_mix\".\"month_of_year\" ASC");
     }
 
@@ -543,9 +543,9 @@ class AggTupleSqlMapperTest {
                 + " where \"agg_c_10_sales_fact_1997\".\"the_year\" = 1997"
                 + " group by \"agg_c_10_sales_fact_1997\".\"the_year\","
                 + " \"agg_c_10_sales_fact_1997\".\"quarter\""
-                + " order by CASE WHEN \"agg_c_10_sales_fact_1997\".\"the_year\" IS NULL THEN 1 ELSE 0 END,"
+                + " order by CASE WHEN \"agg_c_10_sales_fact_1997\".\"the_year\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"agg_c_10_sales_fact_1997\".\"the_year\" ASC,"
-                + " CASE WHEN \"agg_c_10_sales_fact_1997\".\"quarter\" IS NULL THEN 1 ELSE 0 END,"
+                + " CASE WHEN \"agg_c_10_sales_fact_1997\".\"quarter\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"agg_c_10_sales_fact_1997\".\"quarter\" ASC");
     }
 }

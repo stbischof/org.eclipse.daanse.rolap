@@ -122,7 +122,7 @@ class MemberSqlMapperContextTest {
                 + " on \"sales_fact_1997\".\"time_id\" = \"time_by_day\".\"time_id\""
                 + " where \"time_by_day\".\"the_year\" = 1997"
                 + " and (\"customer\".\"country\" = 'USA')"
-                + " order by CASE WHEN \"customer\".\"gender\" IS NULL THEN 1 ELSE 0 END,"
+                + " order by CASE WHEN \"customer\".\"gender\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"customer\".\"gender\" ASC");
     }
 

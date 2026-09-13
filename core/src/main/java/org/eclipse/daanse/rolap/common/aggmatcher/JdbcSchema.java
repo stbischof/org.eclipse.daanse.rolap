@@ -56,18 +56,18 @@ import org.slf4j.LoggerFactory;
 /**
  * Metadata gleaned from JDBC about the tables and columns in the star schema.
  * This class is used to scrape a database and store information about its
- * tables and columnIter.
+ * tables and columns.
  *
  * The structure of this information is as follows: A database has tables. A
- * table has columnIter. A column has one or more usages.  A usage might be a
+ * table has columns. A column has one or more usages.  A usage might be a
  * column being used as a foreign key or as part of a measure.
  *
  *  Tables are created when calling code requests the set of available
  * tables. This call getTables() causes all tables to be loaded.
- * But a table's columnIter are not loaded until, on a table-by-table basis,
- * a request is made to get the set of columnIter associated with the table.
+ * But a table's columns are not loaded until, on a table-by-table basis,
+ * a request is made to get the set of columns associated with the table.
  * Since, the AggTableManager first attempts table name matches (recognition)
- * most tables do not match, so why load their columnIter.
+ * most tables do not match, so why load their columns.
  * Of course, as a result, there are a host of methods that can throw an
  * {@link SQLException}, rats.
  *
@@ -87,19 +87,6 @@ public class JdbcSchema {
     //
     // Types of column usages.
     //
-    public static final int UNKNOWN_COLUMN_USAGE         = 0x0001;
-    public static final int FOREIGN_KEY_COLUMN_USAGE     = 0x0002;
-    public static final int MEASURE_COLUMN_USAGE         = 0x0004;
-    public static final int LEVEL_COLUMN_USAGE           = 0x0008;
-    public static final int FACT_COUNT_COLUMN_USAGE      = 0x0010;
-    public static final int IGNORE_COLUMN_USAGE          = 0x0020;
-
-    public static final String UNKNOWN_COLUMN_NAME         = "UNKNOWN";
-    public static final String FOREIGN_KEY_COLUMN_NAME     = "FOREIGN_KEY";
-    public static final String MEASURE_COLUMN_NAME         = "MEASURE";
-    public static final String LEVEL_COLUMN_NAME           = "LEVEL";
-    public static final String FACT_COUNT_COLUMN_NAME      = "FACT_COUNT";
-    public static final String IGNORE_COLUMN_NAME          = "IGNORE";
 
     /**
      * Enumeration of ways that an aggregate table can use a column.
@@ -113,37 +100,6 @@ public class JdbcSchema {
         FACT_COUNT,
         MEASURE_FACT_COUNT,
         IGNORE
-    }
-
-    /**
-     * Determine if the parameter represents a single column type, i.e., the
-     * column only has one usage.
-     *
-     * @param columnType Column types
-     * @return true if column has only one usage.
-     */
-    public static boolean isUniqueColumnType(Set<UsageType> columnType) {
-        return columnType.size() == 1;
-    }
-
-    /**
-     * Maps from column type enum to column type name or list of names if the
-     * parameter represents more than on usage.
-     */
-    public static String convertColumnTypeToName(Set<UsageType> columnType) {
-        if (columnType.size() == 1) {
-            return columnType.iterator().next().name();
-        }
-        // it's a multi-purpose column
-        StringBuilder buf = new StringBuilder();
-        int k = 0;
-        for (UsageType usage : columnType) {
-            if (k++ > 0) {
-                buf.append('|');
-            }
-            buf.append(usage.name());
-        }
-        return buf.toString();
     }
 
     /**
@@ -423,7 +379,7 @@ public class JdbcSchema {
             }
 
             /**
-             * Sets the columnIter java.sql.Type enun of the column.
+             * Sets the columns java.sql.Type enum of the column.
              *
              * @param type Type
              */
@@ -432,14 +388,14 @@ public class JdbcSchema {
             }
 
             /**
-             * Returns the columnIter java.sql.Type enun of the column.
+             * Returns the columns java.sql.Type enum of the column.
              */
             public int getType() {
                 return type;
             }
 
             /**
-             * Sets the columnIter java.sql.Type name.
+             * Sets the columns java.sql.Type name.
              *
              * @param typeName Type name
              */
@@ -448,7 +404,7 @@ public class JdbcSchema {
             }
 
             /**
-             * Returns the columnIter java.sql.Type name.
+             * Returns the columns java.sql.Type name.
              */
             public String getTypeName() {
                 return typeName;
@@ -462,7 +418,7 @@ public class JdbcSchema {
             }
 
             /**
-             * Return true if this column is numeric.
+             * Returns the column's datatype.
              */
             public Datatype getDatatype() {
                 return JdbcSchema.getDatatype(getType());
@@ -550,27 +506,6 @@ public class JdbcSchema {
             }
 
             /**
-             * How many usages does this column have. A column has
-             * between 0 and N usages. It has no usages if usages is some
-             * administrative column. It has one usage if, for example, its
-             * the fact_count column or a level column (for a collapsed
-             * dimension aggregate). It might have 2 usages if its a foreign key
-             * that is also used as a measure. If its a column used in N
-             * measures, then usages will have N usages.
-             */
-            public int numberOfUsages() {
-                return usages.size();
-            }
-
-            /**
-             * flushes all star usage references
-             */
-            public void flushUsages() {
-                usages.clear();
-                usageTypes.clear();
-            }
-
-            /**
              * Return true if the column has at least one usage.
              */
             public boolean hasUsage() {
@@ -586,7 +521,7 @@ public class JdbcSchema {
             }
 
             /**
-             * Returns an iterator over all usages.
+             * Returns all usages.
              */
             public List<Usage> getUsages() {
                 return usages;
@@ -725,8 +660,7 @@ public class JdbcSchema {
 
         private final org.eclipse.daanse.cwm.model.cwm.resource.relational.NamedColumnSet modelTable; 
         
-        // mondriandef stuff
-        public org.eclipse.daanse.rolap.mapping.model.database.source.TableSource table;
+                public org.eclipse.daanse.rolap.mapping.model.database.source.TableSource table;
 
         private Table(final String name, String tableType, List<? extends org.eclipse.daanse.cwm.model.cwm.resource.relational.Column> list, org.eclipse.daanse.cwm.model.cwm.resource.relational.NamedColumnSet modelTable) {
             this.name = name;
@@ -762,16 +696,6 @@ public class JdbcSchema {
 				getColumnMap().put(column.getName(), column);
 				totalColumnSize += (columnSize != null ? columnSize : 0);
 			}
-        }
-
-        /**
-         * flushes all star usage references
-         */
-        public void flushUsages() {
-            tableUsageType = TableUsageType.UNKNOWN;
-            for (Table.Column col : getColumns()) {
-                col.flushUsages();
-            }
         }
 
         /**
@@ -811,13 +735,13 @@ public class JdbcSchema {
             class CTIterator
                 implements Iterator<JdbcSchema.Table.Column.Usage>
             {
-                private final Iterator<Column> columnIter;
+                private final Iterator<Column> columns;
                 private final UsageType columnType;
                 private Iterator<JdbcSchema.Table.Column.Usage> usageIter;
                 private JdbcSchema.Table.Column.Usage nextObject;
 
                 CTIterator(Collection<Column> columns, UsageType columnType) {
-                    this.columnIter = columns.iterator();
+                    this.columns = columns.iterator();
                     this.columnType = columnType;
                 }
 
@@ -825,11 +749,11 @@ public class JdbcSchema {
 				public boolean hasNext() {
                     while (true) {
                         while ((usageIter == null) || ! usageIter.hasNext()) {
-                            if (! columnIter.hasNext()) {
+                            if (! columns.hasNext()) {
                                 nextObject = null;
                                 return false;
                             }
-                            Column c = columnIter.next();
+                            Column c = columns.next();
                             usageIter = c.getUsages().iterator();
                         }
                         JdbcSchema.Table.Column.Usage usage = usageIter.next();
@@ -857,13 +781,6 @@ public class JdbcSchema {
          */
         public Column getColumn(final String columnName) {
             return getColumnMap().get(columnName);
-        }
-
-        /**
-         * Return true if this table contains a column with the given name.
-         */
-        public boolean constainsColumn(final String columnName) {
-            return getColumnMap().containsKey(columnName);
         }
 
         /**
@@ -968,23 +885,14 @@ public class JdbcSchema {
     /**
      * Returns the database's tables. The collection is sorted by table name.
      */
-    public synchronized Collection<Table> getTables() {
+    public Collection<Table> getTables() {
         return getTablesMap().values();
-    }
-
-    /**
-     * flushes all star usage references
-     */
-    public synchronized void flushUsages() {
-        for (Table table : getTables()) {
-            table.flushUsages();
-        }
     }
 
     /**
      * Gets a table by name.
      */
-    public synchronized Table getTable(final String tableName) {
+    public Table getTable(final String tableName) {
         return getTablesMap().get(tableName);
     }
 
@@ -1017,16 +925,17 @@ public class JdbcSchema {
      */
 	protected void loadTables() {
 
-		for (org.eclipse.daanse.cwm.model.cwm.objectmodel.core.ModelElement _me : databaseSchema.getOwnedElement()) {
-			if (!(_me instanceof org.eclipse.daanse.cwm.model.cwm.resource.relational.NamedColumnSet rdbTable)) continue;
-			if (rdbTable instanceof org.eclipse.daanse.cwm.model.cwm.resource.relational.Table || rdbTable instanceof org.eclipse.daanse.cwm.model.cwm.resource.relational.View || rdbTable instanceof org.eclipse.daanse.cwm.model.cwm.resource.relational.Table) {
+		for (org.eclipse.daanse.cwm.model.cwm.objectmodel.core.ModelElement me : databaseSchema.getOwnedElement()) {
+			if (!(me instanceof org.eclipse.daanse.cwm.model.cwm.resource.relational.NamedColumnSet rdbTable)) continue;
+			if (rdbTable instanceof org.eclipse.daanse.cwm.model.cwm.resource.relational.Table
+					|| rdbTable instanceof org.eclipse.daanse.cwm.model.cwm.resource.relational.View) {
 
-			java.util.List<org.eclipse.daanse.cwm.model.cwm.resource.relational.Column> _tblCols =
+			java.util.List<org.eclipse.daanse.cwm.model.cwm.resource.relational.Column> tblCols =
 				rdbTable.getFeature().stream()
 					.filter(org.eclipse.daanse.cwm.model.cwm.resource.relational.Column.class::isInstance)
 					.map(org.eclipse.daanse.cwm.model.cwm.resource.relational.Column.class::cast)
 					.toList();
-			Table table = new Table(rdbTable.getName(), rdbTable.getClass().getSimpleName(), _tblCols, rdbTable);
+			Table table = new Table(rdbTable.getName(), rdbTable.getClass().getSimpleName(), tblCols, rdbTable);
 				getLogger().debug("Adding table {}", rdbTable.getName());
 				tables.put(table.getName(), table);
 			}

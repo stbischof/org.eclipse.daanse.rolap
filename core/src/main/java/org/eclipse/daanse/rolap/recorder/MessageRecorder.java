@@ -101,20 +101,6 @@ public interface MessageRecorder {
     void clear();
 
     /**
-     * Get the time when the MessageRecorder was created or the last time that the
-     * clear method was called.
-     *
-     * @return the start time
-     */
-    long getStartTimeMillis();
-
-    /**
-     * How long the MessageRecorder has been running since it was created or the
-     * last time clear was called.
-     */
-    long getRunTimeMillis();
-
-    /**
      * Returns true if there are one or more informational messages.
      *
      * @return true if there are one or more infos.

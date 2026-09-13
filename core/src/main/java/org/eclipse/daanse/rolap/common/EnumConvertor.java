@@ -14,12 +14,12 @@
 package org.eclipse.daanse.rolap.common;
 
 import java.util.AbstractMap;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
-import org.eclipse.daanse.sql.model.type.BestFitColumnType;
 import org.eclipse.daanse.sql.model.type.Datatype;
 import org.eclipse.daanse.olap.api.DataTypeJdbc;
 
@@ -49,11 +49,15 @@ public class EnumConvertor {
         return new AbstractMap.SimpleEntry<>(Datatype.fromValue(e.getKey().getValue()), e.getValue());
     }
 
-    public static BestFitColumnType toBestFitColumnType(String type) {
-        return type != null ? BestFitColumnType.valueOf(type) : null;
+    private static final Map<Datatype, DataTypeJdbc> DATATYPE_JDBC =
+        new EnumMap<>(Datatype.class);
+    static {
+        for (Datatype type : Datatype.values()) {
+            DATATYPE_JDBC.put(type, DataTypeJdbc.fromValue(type.getValue()));
+        }
     }
-    
+
     public static DataTypeJdbc toDataTypeJdbc(Datatype type) {
-        return type != null ? DataTypeJdbc.fromValue(type.getValue()) : null;
+        return type != null ? DATATYPE_JDBC.get(type) : null;
     }
 }

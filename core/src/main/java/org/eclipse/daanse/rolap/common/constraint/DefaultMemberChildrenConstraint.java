@@ -28,7 +28,6 @@
 package org.eclipse.daanse.rolap.common.constraint;
 
 import java.util.List;
-import java.util.Optional;
 
 import org.eclipse.daanse.rolap.api.element.RolapMember;
 import org.eclipse.daanse.rolap.common.aggmatcher.AggStar;

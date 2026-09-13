@@ -198,7 +198,7 @@ class MemberSqlMapperAggTest {
                 + " join \"" + AGG + "\" as \"" + AGG + "\""
                 + " on \"" + AGG + "\".\"store_id\" = \"store\".\"store_id\""
                 + " group by \"store\".\"store_country\""
-                + " order by CASE WHEN \"store\".\"store_country\" IS NULL THEN 1 ELSE 0 END,"
+                + " order by CASE WHEN \"store\".\"store_country\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"store\".\"store_country\" ASC");
     }
 
@@ -269,7 +269,7 @@ class MemberSqlMapperAggTest {
                 + " and (\"test_lp_xxx_fact\".\"category\" = 1)"
                 + " and \"cat\".\"cat\" = \"test_lp_xxx_fact\".\"category\""
                 + " group by \"product_cat\".\"name2\", \"product_cat\".\"cap\", \"product_cat\".\"ord\""
-                + " order by CASE WHEN \"product_cat\".\"ord\" IS NULL THEN 1 ELSE 0 END,"
+                + " order by CASE WHEN \"product_cat\".\"ord\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"product_cat\".\"ord\" ASC");
     }
 
@@ -316,7 +316,7 @@ class MemberSqlMapperAggTest {
                 + " join \"" + AGG + "\" as \"" + AGG + "\""
                 + " on \"" + AGG + "\".\"promotion_id\" = \"promotion\".\"promotion_id\""
                 + " group by ERROR_TEST_FUNCTION_NAME(\"promotion_name\")"
-                + " order by CASE WHEN ERROR_TEST_FUNCTION_NAME(\"promotion_name\") IS NULL THEN 1 ELSE 0 END,"
+                + " order by CASE WHEN ERROR_TEST_FUNCTION_NAME(\"promotion_name\") IS NULL THEN 0 ELSE 1 END,"
                 + " ERROR_TEST_FUNCTION_NAME(\"promotion_name\") ASC");
     }
 }

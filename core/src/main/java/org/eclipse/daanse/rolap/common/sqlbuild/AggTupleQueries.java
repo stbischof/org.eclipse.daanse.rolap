@@ -68,9 +68,9 @@ public final class AggTupleQueries {
     public static SelectStatement collapsedSingleColumnSql(
             List<RolapCubeLevel> collapsedLevels,
             AggStar aggStar,
-            java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> where,
+            java.util.Optional<Predicate> where,
             java.util.Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.NativeOrder> nativeOrder,
-            java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> nativeHaving) {
+            java.util.Optional<Predicate> nativeHaving) {
         return collapsedTupleLevelMembersSql(List.of(collapsedLevels), aggStar, where, nativeOrder,
                 nativeHaving);
     }
@@ -101,9 +101,9 @@ public final class AggTupleQueries {
     public static SelectStatement collapsedTupleLevelMembersSql(
             List<List<RolapCubeLevel>> targetCollapsedLevels,
             AggStar aggStar,
-            java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> where,
+            java.util.Optional<Predicate> where,
             java.util.Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.NativeOrder> nativeOrder,
-            java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> nativeHaving) {
+            java.util.Optional<Predicate> nativeHaving) {
         RolapCubeLevel firstLevel = targetCollapsedLevels.get(0).get(0);
         AggStar.Table.Column firstAgg =
                 aggStar.lookupColumn(firstLevel.getStarKeyColumn().getBitPosition());
@@ -145,7 +145,7 @@ public final class AggTupleQueries {
         // Project each target's collapsed levels root..target, in the loop order addLevelMemberSql
         // emits. Defer the level ORDER BY so a native measure order can be PREPENDED below.
         java.util.Set<String> orderedColumns = new java.util.LinkedHashSet<>();
-        java.util.List<java.util.Map.Entry<ProjectionRef, SortSpec>> levelOrders = new java.util.ArrayList<>();
+        List<java.util.Map.Entry<ProjectionRef, SortSpec>> levelOrders = new java.util.ArrayList<>();
         for (List<RolapCubeLevel> target : targetCollapsedLevels) {
             // needsGroupBy is only consulted by the multi-column (targetExp) branch; computing it
             // lazily keeps the single-column route free of new hierarchy reads. The
@@ -239,17 +239,17 @@ public final class AggTupleQueries {
     public static SelectStatement aggTupleLevelMembersSql(List<RolapLevel> targetLevels,
             AggStar aggStar,
             boolean viewAware,
-            java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> where,
-            java.util.List<org.eclipse.daanse.rolap.common.sql.AggPlan.AggColumnPredicate> orderedAggPredicates,
-            java.util.List<HavingJoin> havingJoins,
+            java.util.Optional<Predicate> where,
+            List<org.eclipse.daanse.rolap.common.sql.AggPlan.AggColumnPredicate> orderedAggPredicates,
+            List<HavingJoin> havingJoins,
             java.util.Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.NativeOrder> nativeOrder,
-            java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> nativeHaving,
+            java.util.Optional<Predicate> nativeHaving,
             boolean factJoinRequired,
             org.eclipse.daanse.rolap.element.RolapCube baseCube,
             boolean emitOrderBy) {
-        java.util.LinkedHashMap<String, org.eclipse.daanse.sql.statement.api.model.FromClause> items =
+        java.util.LinkedHashMap<String, FromClause> items =
                 new java.util.LinkedHashMap<>();
-        java.util.List<FoldEdge> edges = new java.util.ArrayList<>();
+        List<FoldEdge> edges = new java.util.ArrayList<>();
         for (RolapLevel target : targetLevels) {
             RolapHierarchy hierarchy = target.getHierarchy();
             List<RolapLevel> levels = (List<RolapLevel>) hierarchy.getLevels();
@@ -337,7 +337,7 @@ public final class AggTupleQueries {
         }
         // Context constraint (after ALL targets — addConstraintOps order): per column, the table's
         // agg chain on first appearance, then its WHERE conjunct.
-        java.util.List<org.eclipse.daanse.sql.statement.api.expression.Predicate> conjuncts =
+        List<Predicate> conjuncts =
                 new java.util.ArrayList<>();
         if (!orderedAggPredicates.isEmpty()) {
             for (org.eclipse.daanse.rolap.common.sql.AggPlan.AggColumnPredicate cp : orderedAggPredicates) {
@@ -357,11 +357,11 @@ public final class AggTupleQueries {
         }
         // Assembler fold: builds the left-deep FROM tree and APPENDS the unused (cycle) edges
         // to the conjunct list — after the context conjuncts, deduped by predicate value.
-        org.eclipse.daanse.sql.statement.api.model.FromClause from = foldAggFrom(items, edges, conjuncts);
-        java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> where2 =
+        FromClause from = foldAggFrom(items, edges, conjuncts);
+        java.util.Optional<Predicate> where2 =
                 conjuncts.isEmpty() ? java.util.Optional.empty()
                         : java.util.Optional.of(org.eclipse.daanse.sql.statement.api.Predicates.and(conjuncts));
-        return TupleSqlMapper.buildLevelSelect(targetLevels, from, viewAware, java.util.List.of(), where2, nativeOrder,
+        return TupleSqlMapper.buildLevelSelect(targetLevels, from, viewAware, List.of(), where2, nativeOrder,
                 nativeHaving, emitOrderBy, true, aggStar);
     }
 
@@ -372,7 +372,7 @@ public final class AggTupleQueries {
      * tape's edges.
      */
     private record FoldEdge(String leftAlias, String rightAlias,
-            org.eclipse.daanse.sql.statement.api.expression.Predicate on) {
+            Predicate on) {
     }
 
     /**
@@ -399,8 +399,8 @@ public final class AggTupleQueries {
      * value dedup absorbs the duplicates.
      */
     private static void registerAggChain(
-            java.util.Map<String, org.eclipse.daanse.sql.statement.api.model.FromClause> items,
-            java.util.List<FoldEdge> edges, AggStar.Table table) {
+            java.util.Map<String, FromClause> items,
+            List<FoldEdge> edges, AggStar.Table table) {
         List<AggJoinPlanner.AggJoinEdge> chain = AggJoinPlanner.aggTableChain(table);
         for (AggJoinPlanner.AggJoinEdge e : chain) {
             items.putIfAbsent(e.fromAlias(), e.from());
@@ -419,8 +419,8 @@ public final class AggTupleQueries {
      * when unresolved), registered leaf-per-leaf via {@link #walkRelation}.
      */
     private static void registerLevelRelation(
-            java.util.Map<String, org.eclipse.daanse.sql.statement.api.model.FromClause> items,
-            java.util.List<FoldEdge> edges, RolapHierarchy hierarchy, SqlExpression exp) {
+            java.util.Map<String, FromClause> items,
+            List<FoldEdge> edges, RolapHierarchy hierarchy, SqlExpression exp) {
         org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation =
                 hierarchy.getRelation();
         org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource sub = relation;
@@ -441,8 +441,8 @@ public final class AggTupleQueries {
      * unresolved subset is a caller bug, exactly as {@code addFrom(null)} would be.
      */
     private static void registerInverseRelation(
-            java.util.Map<String, org.eclipse.daanse.sql.statement.api.model.FromClause> items,
-            java.util.List<FoldEdge> edges, RolapHierarchy hierarchy, SqlExpression exp) {
+            java.util.Map<String, FromClause> items,
+            List<FoldEdge> edges, RolapHierarchy hierarchy, SqlExpression exp) {
         org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation =
                 hierarchy.getRelation();
         org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource sub = relation;
@@ -464,8 +464,8 @@ public final class AggTupleQueries {
      * added.
      */
     private static boolean walkRelation(
-            java.util.Map<String, org.eclipse.daanse.sql.statement.api.model.FromClause> items,
-            java.util.List<FoldEdge> edges,
+            java.util.Map<String, FromClause> items,
+            List<FoldEdge> edges,
             org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation) {
         if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.JoinSource join) {
             boolean addedLeft = walkRelation(items, edges, join.getLeft().getSource());
@@ -494,38 +494,38 @@ public final class AggTupleQueries {
      * value), and comma-joins any disconnected leftovers. A single item (or an edge-less
      * registration) short-circuits exactly like the assembler.
      */
-    private static org.eclipse.daanse.sql.statement.api.model.FromClause foldAggFrom(
-            java.util.LinkedHashMap<String, org.eclipse.daanse.sql.statement.api.model.FromClause> items,
-            java.util.List<FoldEdge> edges,
-            java.util.List<org.eclipse.daanse.sql.statement.api.expression.Predicate> outConjuncts) {
-        java.util.List<String> aliases = List.copyOf(items.keySet());
-        java.util.List<org.eclipse.daanse.sql.statement.api.model.FromClause> itemList =
+    private static FromClause foldAggFrom(
+            java.util.LinkedHashMap<String, FromClause> items,
+            List<FoldEdge> edges,
+            List<Predicate> outConjuncts) {
+        List<String> aliases = List.copyOf(items.keySet());
+        List<FromClause> itemList =
                 List.copyOf(items.values());
         if (itemList.size() == 1 || edges.isEmpty()) {
             return itemList.size() == 1 ? itemList.get(0)
                     : new org.eclipse.daanse.sql.statement.api.model.FromClause.FromProduct(itemList);
         }
-        java.util.Map<String, java.util.List<FoldEdge>> byAlias = new java.util.HashMap<>();
+        java.util.Map<String, List<FoldEdge>> byAlias = new java.util.HashMap<>();
         for (FoldEdge e : edges) {
             byAlias.computeIfAbsent(e.leftAlias(), k -> new java.util.ArrayList<>()).add(e);
             byAlias.computeIfAbsent(e.rightAlias(), k -> new java.util.ArrayList<>()).add(e);
         }
-        org.eclipse.daanse.sql.statement.api.model.FromClause acc = itemList.get(0);
+        FromClause acc = itemList.get(0);
         java.util.Set<String> placed = new java.util.HashSet<>();
         placed.add(aliases.get(0));
-        java.util.Set<org.eclipse.daanse.sql.statement.api.expression.Predicate> treeOns =
+        java.util.Set<Predicate> treeOns =
                 new java.util.HashSet<>();
-        java.util.List<Integer> pending = new java.util.ArrayList<>();
+        List<Integer> pending = new java.util.ArrayList<>();
         for (int i = 1; i < itemList.size(); i++) {
             pending.add(i);
         }
         boolean progress = true;
         while (progress && !pending.isEmpty()) {
             progress = false;
-            java.util.List<Integer> stillPending = new java.util.ArrayList<>();
+            List<Integer> stillPending = new java.util.ArrayList<>();
             for (Integer idx : pending) {
                 String a = aliases.get(idx);
-                org.eclipse.daanse.sql.statement.api.expression.Predicate on = null;
+                Predicate on = null;
                 for (FoldEdge e : byAlias.getOrDefault(a, List.of())) {
                     String other = e.leftAlias().equals(a) ? e.rightAlias() : e.leftAlias();
                     if (placed.contains(other)) {
@@ -554,7 +554,7 @@ public final class AggTupleQueries {
         if (pending.isEmpty()) {
             return acc;
         }
-        java.util.List<org.eclipse.daanse.sql.statement.api.model.FromClause> product =
+        List<FromClause> product =
                 new java.util.ArrayList<>();
         product.add(acc);
         for (Integer idx : pending) {
@@ -573,7 +573,7 @@ public final class AggTupleQueries {
     static void projectAggTargetLevels(SelectStatementBuilder q, RolapLevel targetLevel,
             AggStar aggStar,
             java.util.Set<String> orderedColumns,
-            java.util.List<java.util.Map.Entry<ProjectionRef, SortSpec>> levelOrders,
+            List<java.util.Map.Entry<ProjectionRef, SortSpec>> levelOrders,
             boolean projectParent) {
         RolapHierarchy hierarchy = targetLevel.getHierarchy();
         List<RolapLevel> levels = (List<RolapLevel>) hierarchy.getLevels();
@@ -608,7 +608,7 @@ public final class AggTupleQueries {
     private static void projectAggLevel(SelectStatementBuilder q, RolapLevel level, AggStar aggStar,
             boolean needsGroupBy,
             java.util.Set<String> orderedColumns,
-            java.util.List<java.util.Map.Entry<ProjectionRef, SortSpec>> levelOrders,
+            List<java.util.Map.Entry<ProjectionRef, SortSpec>> levelOrders,
             boolean projectParent) {
         RolapCubeLevel cubeLevel = (RolapCubeLevel) level;
         if (org.eclipse.daanse.rolap.common.member.SqlMemberSource.isLevelCollapsed(aggStar, cubeLevel)
@@ -647,7 +647,7 @@ public final class AggTupleQueries {
     private static void projectAggCollapsedColumn(SelectStatementBuilder q, RolapCubeLevel level,
             AggStar aggStar,
             java.util.Set<String> orderedColumns,
-            java.util.List<java.util.Map.Entry<ProjectionRef, SortSpec>> levelOrders) {
+            List<java.util.Map.Entry<ProjectionRef, SortSpec>> levelOrders) {
         RolapStar.Column starColumn = level.getStarKeyColumn();
         AggStar.Table.Column aggColumn = aggStar.lookupColumn(starColumn.getBitPosition());
         ProjectionRef ref = q.project(aggColumn.toSqlExpression(), starColumn.getInternalType(),
@@ -665,7 +665,7 @@ public final class AggTupleQueries {
     private static void projectAggSubstitutedLevel(SelectStatementBuilder q, RolapLevel level,
             AggStar aggStar, boolean needsGroupBy,
             java.util.Set<String> orderedColumns,
-            java.util.List<java.util.Map.Entry<ProjectionRef, SortSpec>> levelOrders,
+            List<java.util.Map.Entry<ProjectionRef, SortSpec>> levelOrders,
             boolean projectParent) {
         java.util.Map<SqlExpression, SqlExpression> targetExp =
                 AggJoinPlanner.levelTargetExpMap(level, aggStar);

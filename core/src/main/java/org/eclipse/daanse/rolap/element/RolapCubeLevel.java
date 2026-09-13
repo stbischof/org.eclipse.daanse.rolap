@@ -27,8 +27,6 @@
 
 package org.eclipse.daanse.rolap.element;
 
-import java.util.ArrayList;
-import java.util.List;
 
 import org.eclipse.daanse.olap.api.element.CubeLevel;
 import org.eclipse.daanse.olap.api.element.LevelType;
@@ -36,12 +34,8 @@ import org.eclipse.daanse.olap.api.formatter.MemberFormatter;
 import org.eclipse.daanse.olap.api.sql.SqlExpression;
 import org.eclipse.daanse.olap.common.Util;
 import org.eclipse.daanse.rolap.api.element.RolapMember;
-import org.eclipse.daanse.rolap.common.RolapCacheRegion;
 import org.eclipse.daanse.rolap.common.RolapRuntimeException;
 import org.eclipse.daanse.rolap.common.agg.CellRequest;
-import org.eclipse.daanse.rolap.common.agg.MemberColumnPredicate;
-import org.eclipse.daanse.rolap.common.agg.MemberTuplePredicate;
-import org.eclipse.daanse.rolap.common.agg.RangeColumnPredicate;
 import org.eclipse.daanse.rolap.common.agg.ValueColumnPredicate;
 import org.eclipse.daanse.rolap.common.star.RolapStar;
 import org.eclipse.daanse.rolap.common.star.StarColumnPredicate;
@@ -382,15 +376,7 @@ public class RolapCubeLevel extends RolapLevel implements CubeLevel {
 
         /**
          * Adds constraints to a cache region for a member of this level.
-         *
-         * @param predicate Predicate
-         * @param baseCube base cube if virtual level
-         * @param cacheRegion Cache region to be constrained
          */
-        void constrainRegion(
-            StarColumnPredicate predicate,
-            RolapCube baseCube,
-            RolapCacheRegion cacheRegion);
     }
 
     /**
@@ -488,72 +474,6 @@ public class RolapCubeLevel extends RolapLevel implements CubeLevel {
             }
         }
 
-        @Override
-		public void constrainRegion(
-            StarColumnPredicate predicate,
-            RolapCube baseCube,
-            RolapCacheRegion cacheRegion)
-        {
-            RolapStar.Column column = cubeLevel.getBaseStarKeyColumn(baseCube);
-
-            if (column == null) {
-                // This hierarchy is not one which qualifies the starMeasure
-                // (this happens in virtual cubes). The starMeasure only has
-                // a value for the 'all' member of the hierarchy (or for the
-                // default member if the hierarchy has no 'all' member)
-                return;
-            }
-
-            if (predicate instanceof MemberColumnPredicate memberColumnPredicate) {
-                RolapMember member = memberColumnPredicate.getMember();
-                assert member.getLevel() == cubeLevel;
-                assert !member.isCalculated();
-                assert memberColumnPredicate.getMember().getKey() != null;
-                assert memberColumnPredicate.getMember().getKey()
-                    != Util.sqlNullValue;
-                assert !member.isNull();
-
-                // use the member as constraint, this will give us some
-                //  optimization potential
-                cacheRegion.addPredicate(column, predicate);
-                return;
-            } else if (predicate instanceof RangeColumnPredicate rangeColumnPredicate) {
-                final ValueColumnPredicate lowerBound =
-                    rangeColumnPredicate.getLowerBound();
-                RolapMember lowerMember;
-                if (lowerBound == null) {
-                    lowerMember = null;
-                } else if (lowerBound instanceof MemberColumnPredicate memberColumnPredicate) {
-                    lowerMember = memberColumnPredicate.getMember();
-                } else {
-                    throw new UnsupportedOperationException();
-                }
-                final ValueColumnPredicate upperBound =
-                    rangeColumnPredicate.getUpperBound();
-                RolapMember upperMember;
-                if (upperBound == null) {
-                    upperMember = null;
-                } else if (upperBound instanceof MemberColumnPredicate mcp) {
-                    upperMember = mcp.getMember();
-                } else {
-                    throw new UnsupportedOperationException();
-                }
-                MemberTuplePredicate predicate2 =
-                    new MemberTuplePredicate(
-                        baseCube,
-                        lowerMember,
-                        !rangeColumnPredicate.getLowerInclusive(),
-                        upperMember,
-                        !rangeColumnPredicate.getUpperInclusive());
-                // use the member as constraint, this will give us some
-                //  optimization potential
-                cacheRegion.addPredicate(predicate2);
-                return;
-            }
-
-            // Unknown type of constraint.
-            throw new UnsupportedOperationException();
-        }
     }
 
     /**
@@ -614,14 +534,6 @@ public class RolapCubeLevel extends RolapLevel implements CubeLevel {
             }
         }
 
-        @Override
-		public void constrainRegion(
-            StarColumnPredicate predicate,
-            RolapCube baseCube,
-            RolapCacheRegion cacheRegion)
-        {
-            throw new UnsupportedOperationException();
-        }
     }
 
     /**
@@ -638,14 +550,6 @@ public class RolapCubeLevel extends RolapLevel implements CubeLevel {
             return false;
         }
 
-        @Override
-		public void constrainRegion(
-            StarColumnPredicate predicate,
-            RolapCube baseCube,
-            RolapCacheRegion cacheRegion)
-        {
-            // We don't need to apply any constraints.
-        }
     }
 
     /**
@@ -661,14 +565,6 @@ public class RolapCubeLevel extends RolapLevel implements CubeLevel {
             return true;
         }
 
-        @Override
-		public void constrainRegion(
-            StarColumnPredicate predicate,
-            RolapCube baseCube,
-            RolapCacheRegion cacheRegion)
-        {
-            // empty
-        }
     }
 
 }

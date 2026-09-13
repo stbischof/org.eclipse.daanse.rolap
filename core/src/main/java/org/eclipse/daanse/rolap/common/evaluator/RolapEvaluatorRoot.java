@@ -288,9 +288,11 @@ public RolapEvaluatorRoot( Statement statement ) {
     Object result = expResultCache.get( key );
     if ( result == null ) {
       result = tmpExpResultCache.get( key );
+    }
+    if ( result == null ) {
       expResultCacheMissCount++;
     } else {
-      expResultCacheHitCount++; // Only count valid results
+      expResultCacheHitCount++;
     }
     return result;
   }

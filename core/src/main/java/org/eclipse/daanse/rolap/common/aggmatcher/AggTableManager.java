@@ -57,7 +57,7 @@ import org.eclipse.daanse.rolap.mapping.model.database.source.SourceFactory;
  * A {@link org.eclipse.daanse.rolap.element.RolapCatalog} creates an {@link AggTableManager},
  *     and stores it in a member variable to ensure that it is not
  *     garbage-collected.
- * The org.eclipse.daanse.rolap.common.RolapCatalog calls #initialize(ConnectionProps),
+ * The org.eclipse.daanse.rolap.element.RolapCatalog calls #initialize(ConnectionProps, boolean),
  *     which scans the JDBC catalog and identifies aggregate tables.
  * For each aggregate table, it creates an {@link AggStar} and calls
  *     {@link RolapStar#addAggStar(AggStar)}.
@@ -110,29 +110,6 @@ public class AggTableManager {
     }
 
     private void printResults() {
-/*
- *   This was too much information at the INFO level, compared to the
- *   rest of Mondrian
- *
- *         if (getLogger().isInfoEnabled()) {
-            // print just Star table alias and AggStar table names
-            StringBuilder buf = new StringBuilder(1024);
-            buf.append(Util.nl);
-            for (Iterator it = getStars(); it.hasNext();) {
-                RolapStar star = (RolapStar) it.next();
-                buf.append(star.getFactTable().getAlias());
-                buf.append(Util.nl);
-                for (Iterator ait = star.getAggStars(); ait.hasNext();) {
-                    AggStar aggStar = (AggStar) ait.next();
-                    buf.append("    ");
-                    buf.append(aggStar.getFactTable().getName());
-                    buf.append(Util.nl);
-                }
-            }
-            getLogger().info(buf.toString());
-
-        } else
-*/
         if (getLogger().isDebugEnabled()) {
             // print everything, Star, subTables, AggStar and subTables
             // could be a lot
@@ -196,107 +173,102 @@ public class AggTableManager {
 				}
 			}
             JdbcSchema db = new JdbcSchema(databaseSchema);
-            // if we don't synchronize this on the db object,
-            // we may end up getting a Concurrency exception due to
-            // calls to other instances of AggTableManager.finalCleanUp()
-            synchronized (db) {
 
-                for (RolapStar star : getStars()) {
-                    // This removes any AggStars from any previous invocation of
-                    // this method (if any)
-                    star.prepareToLoadAggregates();
+            for (RolapStar star : getStars()) {
+                // This removes any AggStars from any previous invocation of
+                // this method (if any)
+                star.prepareToLoadAggregates();
 
-                    List<ExplicitRules.Group> aggGroups = getAggGroups(star);
-                    for (ExplicitRules.Group group : aggGroups) {
-                        group.validate(msgRecorder);
-                    }
+                List<ExplicitRules.Group> aggGroups = getAggGroups(star);
+                for (ExplicitRules.Group group : aggGroups) {
+                    group.validate(msgRecorder);
+                }
 
-                    String factTableName = getFactTableName(star);
+                String factTableName = getFactTableName(star);
 
-                    JdbcSchema.Table dbFactTable = db.getTable(factTableName);
-                    if (dbFactTable == null) {
-                        msgRecorder.reportWarning(
-                            "No Table found for fact name="
-                                + factTableName);
+                JdbcSchema.Table dbFactTable = db.getTable(factTableName);
+                if (dbFactTable == null) {
+                    msgRecorder.reportWarning(
+                        "No Table found for fact name="
+                            + factTableName);
+                    continue;
+                }
+
+                // For each column in the dbFactTable, figure out it they
+                // are measure or foreign key columns
+
+                bindToStar(dbFactTable, star, msgRecorder);
+
+                // Now look at all tables in the database and per table,
+                // first see if it is a match for an aggregate table for
+                // this fact table and second see if its columns match
+                // foreign key and level columns.
+
+                for (JdbcSchema.Table dbTable : db.getTables()) {
+                    String name = dbTable.getName();
+                    org.eclipse.daanse.cwm.model.cwm.resource.relational.NamedColumnSet t = dbTable.getModelTable();
+                    // Do the catalog schema aggregate excludes, exclude
+                    // this table name.
+                    if (ExplicitRules.excludeTable(name, aggGroups)) {
                         continue;
                     }
 
-                    // For each column in the dbFactTable, figure out it they
-                    // are measure or foreign key columns
+                    // First see if there is an ExplicitRules match. If so,
+                    // then if all of the columns match up, then make an
+                    // AggStar. On the other hand, if there is no
+                    // ExplicitRules match, see if there is a Default
+                    // match. If so and if all the columns match up, then
+                    // also make an AggStar.
+                    ExplicitRules.TableDef tableDef =
+                        ExplicitRules.getIncludeByTableDef(name, aggGroups);
 
-                    bindToStar(dbFactTable, star, msgRecorder);
-
-                    // Now look at all tables in the database and per table,
-                    // first see if it is a match for an aggregate table for
-                    // this fact table and second see if its columns match
-                    // foreign key and level columns.
-
-                    for (JdbcSchema.Table dbTable : db.getTables()) {
-                        String name = dbTable.getName();
-                        org.eclipse.daanse.cwm.model.cwm.resource.relational.NamedColumnSet t = dbTable.getModelTable();
-                        // Do the catalog schema aggregate excludes, exclude
-                        // this table name.
-                        if (ExplicitRules.excludeTable(name, aggGroups)) {
-                            continue;
-                        }
-
-                        // First see if there is an ExplicitRules match. If so,
-                        // then if all of the columns match up, then make an
-                        // AggStar. On the other hand, if there is no
-                        // ExplicitRules match, see if there is a Default
-                        // match. If so and if all the columns match up, then
-                        // also make an AggStar.
-                        ExplicitRules.TableDef tableDef =
-                            ExplicitRules.getIncludeByTableDef(name, aggGroups);
-
-                        boolean makeAggStar = false;
-                        int approxRowCount = Integer.MIN_VALUE;
-                        // Is it handled by the ExplicitRules
-                        if (tableDef != null) {
-                            makeAggStar = tableDef.columnsOK(
-                                star,
-                                dbFactTable,
-                                dbTable,
-                                msgRecorder);
-                            approxRowCount = tableDef.getApproxRowCount();
-                        }
-                        // Is it handled by the PatternbasedRules
-                        if (! makeAggStar
-                            && rules != null
-                            && context.getConfig().readAggregates()
-                            && rules.matchesTableName(factTableName, name)) {
-                            makeAggStar = rules.columnsOK(
-                                star,
-                                dbFactTable,
-                                dbTable,
-                                msgRecorder);
-                        }
-
-                        if (makeAggStar) {
-                            dbTable.setTableUsageType(
-                                JdbcSchema.TableUsageType.AGG);
-                            org.eclipse.daanse.rolap.mapping.model.database.source.TableSource q = SourceFactory.eINSTANCE.createTableSource();
-                            q.setTable(t);
-                            dbTable.table = q;
-                            AggStar aggStar = AggStar.makeAggStar(
-                                star,
-                                dbTable,
-                                approxRowCount);
-                            if (aggStar.getSize(context.getConfig().chooseAggregateByVolume()) > 0) {
-                                star.addAggStar(aggStar);
-                            } else {
-                                String msg = MessageFormat.format(aggTableZeroSize,
-                                    aggStar.getFactTable().getName(),
-                                    factTableName);
-                                getLogger().warn(msg);
-                            }
-                        }
-                        // Note: if the dbTable name matches but the columnsOK
-                        // does not, then this is an error and the aggregate
-                        // tables can not be loaded.
-                        // We do not "reset" the column usages in the dbTable
-                        // allowing it maybe to match another rule.
+                    boolean makeAggStar = false;
+                    int approxRowCount = Integer.MIN_VALUE;
+                    // Is it handled by the ExplicitRules
+                    if (tableDef != null) {
+                        makeAggStar = tableDef.columnsOK(
+                            star,
+                            dbFactTable,
+                            dbTable,
+                            msgRecorder);
+                        approxRowCount = tableDef.getApproxRowCount();
                     }
+                    // Is it handled by the PatternbasedRules
+                    if (! makeAggStar
+                        && rules != null
+                        && context.getConfig().readAggregates()
+                        && rules.matchesTableName(factTableName, name)) {
+                        makeAggStar = rules.columnsOK(
+                            star,
+                            dbFactTable,
+                            dbTable,
+                            msgRecorder);
+                    }
+
+                    if (makeAggStar) {
+                        dbTable.setTableUsageType(
+                            JdbcSchema.TableUsageType.AGG);
+                        org.eclipse.daanse.rolap.mapping.model.database.source.TableSource q = SourceFactory.eINSTANCE.createTableSource();
+                        q.setTable(t);
+                        dbTable.table = q;
+                        AggStar aggStar = AggStar.makeAggStar(
+                            star,
+                            dbTable,
+                            approxRowCount);
+                        if (aggStar.getSize(context.getConfig().chooseAggregateByVolume()) > 0) {
+                            star.addAggStar(aggStar);
+                        } else {
+                            String msg = MessageFormat.format(aggTableZeroSize,
+                                aggStar.getFactTable().getName(),
+                                factTableName);
+                            getLogger().warn(msg);
+                        }
+                    }
+                    // Note: if the dbTable name matches but the columnsOK
+                    // does not, then this is an error and the aggregate
+                    // tables can not be loaded.
+                    // We do not "reset" the column usages in the dbTable
+                    // allowing it maybe to match another rule.
                 }
             }
         } catch (RecorderException ex) {
@@ -353,7 +325,9 @@ public class AggTableManager {
             org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation =
                 star.getFactTable().getRelation();
             
-            List<? extends org.eclipse.daanse.rolap.mapping.model.database.source.TableQueryOptimizationHint> tableHints = null;
+            // never null: a non-table fact relation (view, inline, join)
+            // simply carries no hints - addAll(null) below was an NPE
+            List<? extends org.eclipse.daanse.rolap.mapping.model.database.source.TableQueryOptimizationHint> tableHints = List.of();
             if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.TableSource table) {
                 tableHints = PojoUtil.getOptimizationHints(table.getOptimizationHints());
             }

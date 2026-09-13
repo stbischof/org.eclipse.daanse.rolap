@@ -274,12 +274,12 @@ public final class ContributionAssembler {
         // into the FromJoin comment), so without this the base table renders comment-less. Applies to
         // every FROM shape (single item, join-tree root, product first item); render-only (no effect
         // on the executed SQL when comments are off).
-        org.eclipse.daanse.sql.statement.api.model.TableAlias baseAlias =
-                org.eclipse.daanse.sql.statement.api.From.baseAlias(st.fromItems.get(0));
+        TableAlias baseAlias =
+                From.baseAlias(st.fromItems.get(0));
         if (baseAlias != null) {
             Set<String> baseReasons = st.fromItemComments.get(baseAlias.name());
             if (baseReasons != null && !baseReasons.isEmpty()) {
-                st.fromItems.set(0, org.eclipse.daanse.sql.statement.api.From.commentBase(
+                st.fromItems.set(0, From.commentBase(
                         st.fromItems.get(0), String.join(" · ", baseReasons)));
             }
         }

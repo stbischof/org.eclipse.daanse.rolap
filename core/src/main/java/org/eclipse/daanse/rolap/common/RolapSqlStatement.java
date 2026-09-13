@@ -37,14 +37,6 @@ public class RolapSqlStatement implements org.eclipse.daanse.olap.api.SqlStateme
         return sql;
     }
 
-    public void setDialects(List<String> dialects) {
-        this.dialects = dialects;
-    }
-
-    public void setSql(String sql) {
-        this.sql = sql;
-    }
-
     public static final class Builder {
 
         private List<String> dialects;

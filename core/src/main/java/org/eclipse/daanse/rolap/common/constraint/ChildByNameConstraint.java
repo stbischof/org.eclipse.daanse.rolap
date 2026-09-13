@@ -26,7 +26,7 @@
 
 package org.eclipse.daanse.rolap.common.constraint;
 
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.eclipse.daanse.olap.api.query.NameSegment;
@@ -41,7 +41,7 @@ import org.eclipse.daanse.rolap.element.RolapLevel;
  * @author avix
  */
 public class ChildByNameConstraint extends DefaultMemberChildrenConstraint {
-    private final String[] childNames;
+    private final List<String> childNames;
     private final Object cacheKey;
 
     /**
@@ -50,18 +50,18 @@ public class ChildByNameConstraint extends DefaultMemberChildrenConstraint {
      * @param childName Name of child
      */
     public ChildByNameConstraint(NameSegment childName) {
-        this.childNames = new String[]{childName.getName()};
-        this.cacheKey = List.of(ChildByNameConstraint.class, childName);
+        this(List.of(childName));
     }
 
     public ChildByNameConstraint(List<NameSegment> childNames) {
-        this.childNames = new String[childNames.size()];
-        int i = 0;
+        List<String> names = new ArrayList<>(childNames.size());
         for (NameSegment name : childNames) {
-            this.childNames[i++] = name.getName();
+            names.add(name.getName());
         }
-        this.cacheKey = List.of(
-            ChildByNameConstraint.class, this.childNames);
+        this.childNames = List.copyOf(names);
+        // value-based key: single- and multi-name lookups of the same names
+        // share one cache entry and one deduplicated load
+        this.cacheKey = List.of(ChildByNameConstraint.class, this.childNames);
     }
 
     @Override
@@ -77,7 +77,7 @@ public class ChildByNameConstraint extends DefaultMemberChildrenConstraint {
 
     @Override
 	public String toString() {
-        return new StringBuilder("ChildByNameConstraint(").append(Arrays.toString(childNames)).append(")").toString();
+        return new StringBuilder("ChildByNameConstraint(").append(childNames).append(")").toString();
     }
 
     @Override
@@ -86,7 +86,7 @@ public class ChildByNameConstraint extends DefaultMemberChildrenConstraint {
     }
 
     public List<String> getChildNames() {
-        return List.of(childNames);
+        return childNames;
     }
 
     /**
@@ -121,7 +121,8 @@ public class ChildByNameConstraint extends DefaultMemberChildrenConstraint {
                 "child-by-name without a resolvable child level");
         }
         java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> namePred =
-            LevelConstraintGenerator.constrainLevelPredicate(childLevel, baseCube, aggStar, childNames, true);
+            LevelConstraintGenerator.constrainLevelPredicate(
+                childLevel, baseCube, aggStar, childNames.toArray(String[]::new), true);
         if (namePred.isEmpty()) {
             return org.eclipse.daanse.rolap.common.sql.ContributionResult.unsupported(
                 "child-by-name filter column not expressible as a node");

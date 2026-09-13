@@ -59,7 +59,6 @@ public class RolapBaseCubeMeasure
     implements PhysicalCubeMeasure, RolapStoredMeasure
 {
 
-    private final static String unknownAggregator = "Unknown aggregator ''{0}''";
 
     static enum DataType {
         Integer,

@@ -32,7 +32,6 @@ public class RolapKPI implements KPI {
 
 	private String displayFolder;
 
-	private String associatedMeasureGroupID;
 
 	private String value;
 
@@ -61,13 +60,6 @@ public class RolapKPI implements KPI {
 		this.displayFolder = displayFolder;
 	}
 
-	public String getAssociatedMeasureGroupID() {
-		return associatedMeasureGroupID;
-	}
-
-	public void setAssociatedMeasureGroupID(String associatedMeasureGroupID) {
-		this.associatedMeasureGroupID = associatedMeasureGroupID;
-	}
 	@Override
 
 	public String getValue() {

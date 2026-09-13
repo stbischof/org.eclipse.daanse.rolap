@@ -29,6 +29,7 @@ package org.eclipse.daanse.rolap.common.sql;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 import org.eclipse.daanse.rolap.api.element.RolapMember;
 import org.eclipse.daanse.rolap.common.constraint.MemberConstraintWriter;
@@ -150,8 +151,7 @@ public class MemberListCrossJoinArg implements CrossJoinArg {
             // The complete MDX query can be evaluated natively only
             // if there is non all member on at least one level;
             // otherwise the generated SQL is an empty string.
-            // See SqlTupleReader.addLevelMemberSql()
-            //
+                //
             if (m.isAll()) {
                 hasAllMember = true;
             }
@@ -274,17 +274,7 @@ public class MemberListCrossJoinArg implements CrossJoinArg {
 
     @Override
 	public int hashCode() {
-        int c = 12;
-        for (RolapMember member : members) {
-            c = 31 * c + member.hashCode();
-        }
-        if (restrictMemberTypes) {
-            c += 1;
-        }
-        if (exclude) {
-            c += 7;
-        }
-        return c;
+        return Objects.hash(members, level, restrictMemberTypes, exclude);
     }
 
     @Override
@@ -292,17 +282,9 @@ public class MemberListCrossJoinArg implements CrossJoinArg {
         if (!(obj instanceof MemberListCrossJoinArg that)) {
             return false;
         }
-        if (this.restrictMemberTypes != that.restrictMemberTypes) {
-            return false;
-        }
-        if (this.exclude != that.exclude) {
-            return false;
-        }
-        for (int i = 0; i < members.size(); i++) {
-            if (this.members.get(i) != that.members.get(i)) {
-                return false;
-            }
-        }
-        return true;
+        return this.restrictMemberTypes == that.restrictMemberTypes
+            && this.exclude == that.exclude
+            && Objects.equals(this.level, that.level)
+            && this.members.equals(that.members);
     }
 }

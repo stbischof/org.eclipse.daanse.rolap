@@ -32,13 +32,11 @@ import java.util.List;
 import java.util.Map;
 
 import org.eclipse.daanse.olap.api.calc.Calc;
-import org.eclipse.daanse.olap.api.catalog.CatalogReader;
 import org.eclipse.daanse.sql.model.type.Datatype;
 import org.eclipse.daanse.olap.api.connection.Connection;
 import org.eclipse.daanse.olap.api.element.Catalog;
 import org.eclipse.daanse.olap.api.element.Dimension;
 import org.eclipse.daanse.olap.api.element.DimensionType;
-import org.eclipse.daanse.olap.api.element.Hierarchy;
 import org.eclipse.daanse.olap.api.element.Level;
 import org.eclipse.daanse.olap.api.element.Member;
 import org.eclipse.daanse.olap.api.element.MetaData;
@@ -188,11 +186,6 @@ public class RolapMemberBase
     @Override
 	public RolapLevel getLevel() {
         return (RolapLevel) level;
-    }
-
-    @Override
-    public void setLevel(Level level) {
-        this.level = level;
     }
 
     @Override
@@ -535,11 +528,7 @@ public class RolapMemberBase
             > Integer.MIN_VALUE;
     }
 
-    /**
-     * @deprecated Use {@link #isAll}; will be removed in mondrian-4.0
-     */
-    @Deprecated
-	@Override
+    @Override
 	public boolean isAllMember() {
         return getLevel().getHierarchy().hasAll()
                 && getLevel().getDepth() == 0;
@@ -566,20 +555,8 @@ public class RolapMemberBase
         }
     }
 
-    public void setOrdinal(int ordinal, boolean forced) {
-      if (forced) {
-          this.ordinal = ordinal;
-      } else {
-        setOrdinal(ordinal);
-      }
-  }
-
     public void setOrderKey(Comparable orderKey) {
         this.orderKey = orderKey;
-    }
-
-    private void resetOrdinal() {
-        this.ordinal = -1;
     }
 
     @Override
@@ -711,256 +688,6 @@ public class RolapMemberBase
                 .getMemberChildren(this).isEmpty();
         }
         return isParentChildLeaf;
-    }
-
-    /**
-     * Returns a list of member lists where the first member
-     * list is the root members while the last member array is the
-     * leaf members.
-     *
-     * If you know that you will need to get all or most of the members of
-     * a hierarchy, then calling this which gets all of the hierarchy's
-     * members all at once is much faster than getting members one at
-     * a time.
-     *
-     * @param schemaReader Schema reader
-     * @param hierarchy  Hierarchy
-     * @return List of arrays of members
-     */
-    public static List<List<Member>> getAllMembers(
-        CatalogReader schemaReader,
-        Hierarchy hierarchy)
-    {
-        long start = System.currentTimeMillis();
-
-        try {
-            // Getting the members by Level is the fastest way that I could
-            // find for getting all of a hierarchy's members.
-            List<List<Member>> list = new ArrayList<>();
-            List<? extends Level> levels = hierarchy.getLevels();
-            for (Level level : levels) {
-                List<Member> members =
-                    schemaReader.getLevelMembers(level, true);
-                if (members != null) {
-                    list.add(members);
-                }
-            }
-            return list;
-        } finally {
-            if (LOGGER.isDebugEnabled()) {
-                long end = System.currentTimeMillis();
-                LOGGER.debug(
-                    "RolapMember.getAllMembers: time=" + (end - start));
-            }
-        }
-    }
-
-    public static int getHierarchyCardinality(
-        CatalogReader schemaReader,
-        Hierarchy hierarchy)
-    {
-        int cardinality = 0;
-        List<? extends Level> levels = hierarchy.getLevels();
-        for (Level level1 : levels) {
-            cardinality += schemaReader.getLevelCardinality(level1, true, true);
-        }
-        return cardinality;
-    }
-
-    /**
-     * Sets member ordinal values using a Bottom-up/Top-down algorithm.
-     *
-     * Gets an array of members for each level and traverses
-     * array for the lowest level, setting each member's
-     * parent's parent's etc. member's ordinal if not set working back
-     * down to the leaf member and then going to the next leaf member
-     * and traversing up again.
-     *
-     * The above algorithm only works for a hierarchy that has all of its
-     * leaf members in the same level (that is, a non-ragged hierarchy), which
-     * is the norm. After all member ordinal values have been set, traverses
-     * the array of members, making sure that all members' ordinals have been
-     * set. If one is found that is not set, then one must to a full Top-down
-     * setting of the ordinals.
-     *
-     * The Bottom-up/Top-down algorithm is MUCH faster than the Top-down
-     * algorithm.
-     *
-     * @param schemaReader Schema reader
-     * @param seedMember Member
-     */
-    public static void setOrdinals(
-        CatalogReader schemaReader,
-        Member seedMember)
-    {
-        seedMember = RolapUtil.strip((RolapMember) seedMember);
-
-         // The following are times for executing different set ordinals
-         // algorithms for both the FoodMart Sales cube/Store dimension
-         // and a Large Data set with a dimension with about 250,000 members.
-         //
-         // Times:
-         //    Original setOrdinals Top-down
-         //       Foodmart: 63ms
-         //       Large Data set: 651865ms
-         //    Calling getAllMembers before calling original setOrdinals
-         //    Top-down
-         //       Foodmart: 32ms
-         //       Large Data set: 73880ms
-         //    Bottom-up/Top-down
-         //       Foodmart: 17ms
-         //       Large Data set: 4241ms
-        long start = System.currentTimeMillis();
-
-        try {
-            Hierarchy hierarchy = seedMember.getHierarchy();
-            int ordinal = hierarchy.hasAll() ? 1 : 0;
-            List<List<Member>> levelMembers =
-                getAllMembers(schemaReader, hierarchy);
-            List<Member> leafMembers =
-                levelMembers.getLast();
-            levelMembers = levelMembers.subList(0, levelMembers.size() - 1);
-
-            // Set all ordinals
-            for (Member child : leafMembers) {
-                ordinal = bottomUpSetParentOrdinals(ordinal, child);
-                ordinal = setOrdinal(child, ordinal);
-            }
-
-            boolean needsFullTopDown = needsFullTopDown(levelMembers);
-
-            // If we must to a full Top-down, then first reset all ordinal
-            // values to -1, and then call the Top-down
-            if (needsFullTopDown) {
-                for (List<Member> members : levelMembers) {
-                    for (Member member : members) {
-                        if (member instanceof RolapMemberBase) {
-                            ((RolapMemberBase) member).resetOrdinal();
-                        }
-                    }
-                }
-
-                // call full Top-down
-                setOrdinalsTopDown(schemaReader, seedMember);
-            }
-        } finally {
-            if (LOGGER.isDebugEnabled()) {
-                long end = System.currentTimeMillis();
-                LOGGER.debug("RolapMember.setOrdinals: time=" + (end - start));
-            }
-        }
-    }
-
-    /**
-     * Returns whether the ordinal assignment algorithm needs to perform
-     * the more expensive top-down algorithm. If the hierarchy is 'uneven', not
-     * all leaf members are at the same level, then bottom-up setting of
-     * ordinals will have missed some.
-     *
-     * @param levelMembers Array containing the list of members in each level
-     * except the leaf level
-     * @return whether we need to apply the top-down ordinal assignment
-     */
-    private static boolean needsFullTopDown(List<List<Member>> levelMembers) {
-        for (List<Member> members : levelMembers) {
-            for (Member member : members) {
-                if (member.getOrdinal() == -1) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Walks up the hierarchy, setting the ordinals of ancestors until it
-     * reaches the root or hits an ancestor whose ordinal has already been
-     * assigned.
-     *
-     * Assigns the given ordinal to the ancestor nearest the root which has
-     * not been assigned an ordinal, and increments by one for each descendant.
-     *
-     * @param ordinal Ordinal to assign to deepest ancestor
-     * @param child Member whose ancestors ordinals to set
-     * @return Ordinal, incremented for each time it was used
-     */
-    private static int bottomUpSetParentOrdinals(int ordinal, Member child) {
-        Member parent = child.getParentMember();
-        if ((parent != null) && parent.getOrdinal() == -1) {
-            ordinal = bottomUpSetParentOrdinals(ordinal, parent);
-            ordinal = setOrdinal(parent, ordinal);
-        }
-        return ordinal;
-    }
-
-    private static int setOrdinal(Member member, int ordinal) {
-        if (member instanceof RolapMemberBase rolapMemberBase) {
-            rolapMemberBase.setOrdinal(ordinal++);
-        } else {
-            LOGGER.warn(
-                "RolapMember.setAllChildren: NOT RolapMember member.name={}, member.class={}, ordinal={}",
-                member.getName(), member.getClass().getName(), ordinal);
-            ordinal++;
-        }
-        return ordinal;
-    }
-
-    /**
-     * Sets ordinals of a complete member hierarchy as required by the
-     * MEMBER_ORDINAL XMLA element using a depth-first algorithm.
-     *
-     * For big hierarchies it takes a bunch of time. SQL Server is
-     * relatively fast in comparison so it might be storing such
-     * information in the DB.
-     *
-     * @param schemaReader Schema reader
-     * @param member Member
-     */
-    private static void setOrdinalsTopDown(
-        CatalogReader schemaReader,
-        Member member)
-    {
-        long start = System.currentTimeMillis();
-
-        try {
-            Member parent = schemaReader.getMemberParent(member);
-
-            if (parent == null) {
-                // top of the world
-                int ordinal = 0;
-
-                List<Member> siblings =
-                    schemaReader.getHierarchyRootMembers(member.getHierarchy());
-
-                for (Member sibling : siblings) {
-                    ordinal = setAllChildren(ordinal, schemaReader, sibling);
-                }
-
-            } else {
-                setOrdinalsTopDown(schemaReader, parent);
-            }
-        } finally {
-            if (LOGGER.isDebugEnabled()) {
-                long end = System.currentTimeMillis();
-                LOGGER.debug(
-                    "RolapMember.setOrdinalsTopDown: time=" + (end - start));
-            }
-        }
-    }
-
-    private static int setAllChildren(
-        int ordinal,
-        CatalogReader schemaReader,
-        Member member)
-    {
-        ordinal = setOrdinal(member, ordinal);
-
-        List<Member> children = schemaReader.getMemberChildren(member);
-        for (Member child : children) {
-            ordinal = setAllChildren(ordinal, schemaReader, child);
-        }
-
-        return ordinal;
     }
 
     /**

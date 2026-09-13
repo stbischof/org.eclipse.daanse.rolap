@@ -24,6 +24,10 @@ import org.eclipse.daanse.rolap.element.RolapCubeLevel;
 import org.eclipse.daanse.rolap.element.RolapHierarchy;
 import org.eclipse.daanse.rolap.element.RolapLevel;
 import org.eclipse.daanse.rolap.element.RolapProperty;
+import org.eclipse.daanse.rolap.mapping.model.database.source.InlineTableSource;
+import org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource;
+import org.eclipse.daanse.rolap.mapping.model.database.source.SqlSelectSource;
+import org.eclipse.daanse.rolap.mapping.model.database.source.TableSource;
 import org.eclipse.daanse.sql.statement.api.SelectStatementBuilder;
 import org.eclipse.daanse.sql.statement.api.model.NullOrder;
 import org.eclipse.daanse.sql.statement.api.model.ProjectionRef;
@@ -59,25 +63,11 @@ public final class TupleSqlMapper {
                 && plainColumns(targetLevel);
     }
 
-    /**
-     * True if {@link #levelMembersSql(RolapLevel, boolean)} can
-     * build {@code targetLevel}: the relation is any composition of table / join / view / inline that
-     * the dialect-aware FROM can render (incl. a view nested inside a join), with plain columns. The
-     * dialect overload builds the snowflake <em>subset</em> (not the whole relation), so this is safe
-     * to use directly — it joins only the tables the selected columns need, without over-joining.
-     */
-    public static boolean supportsViaDialectFrom(RolapLevel targetLevel) {
-        RolapHierarchy hierarchy = targetLevel.getHierarchy();
-        return hierarchy.getRelation() != null
-                && renderableWithDialect(hierarchy.getRelation())
-                && plainColumns(targetLevel);
-    }
-
     private static boolean renderableWithDialect(
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation) {
-        if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.TableSource
-                || relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.SqlSelectSource
-                || relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.InlineTableSource) {
+            RelationalSource relation) {
+        if (relation instanceof TableSource
+                || relation instanceof SqlSelectSource
+                || relation instanceof InlineTableSource) {
             return true;
         }
         if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.JoinSource join) {
@@ -148,7 +138,7 @@ public final class TupleSqlMapper {
     /** The level/tuple-members SELECT for {@code targetLevel} (see {@link #supports}). */
     public static SelectStatement levelMembersSql(RolapLevel targetLevel) {
         return buildLevelSelect(targetLevel, fromForLevels(targetLevel, false), false,
-                java.util.List.of(), java.util.Optional.empty());
+                List.of(), java.util.Optional.empty());
     }
 
     /**
@@ -160,7 +150,7 @@ public final class TupleSqlMapper {
     public static SelectStatement levelMembersSql(RolapLevel targetLevel,
             boolean viewAware) {
         return buildLevelSelect(targetLevel, fromForLevels(targetLevel, viewAware), viewAware,
-                java.util.List.of(), java.util.Optional.empty());
+                List.of(), java.util.Optional.empty());
     }
 
     /**
@@ -174,8 +164,8 @@ public final class TupleSqlMapper {
     public static SelectStatement levelMembersSql(RolapLevel targetLevel,
             boolean viewAware,
             java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> where,
-            java.util.List<RolapStar.Table> joinTables) {
-        return levelMembersSql(targetLevel, viewAware, where, joinTables, java.util.List.of(),
+            List<RolapStar.Table> joinTables) {
+        return levelMembersSql(targetLevel, viewAware, where, joinTables, List.of(),
                 java.util.Optional.empty(), java.util.Optional.empty(), false);
     }
 
@@ -190,8 +180,8 @@ public final class TupleSqlMapper {
     public static SelectStatement levelMembersSql(RolapLevel targetLevel,
             boolean viewAware,
             java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> where,
-            java.util.List<RolapStar.Table> joinTables,
-            java.util.List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
+            List<RolapStar.Table> joinTables,
+            List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
                     orderedPredicates,
             java.util.Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.NativeOrder> nativeOrder,
             java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> nativeHaving,
@@ -208,8 +198,8 @@ public final class TupleSqlMapper {
     public static SelectStatement levelMembersSql(RolapLevel targetLevel,
             boolean viewAware,
             java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> where,
-            java.util.List<RolapStar.Table> joinTables,
-            java.util.List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
+            List<RolapStar.Table> joinTables,
+            List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
                     orderedPredicates,
             java.util.Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.NativeOrder> nativeOrder,
             java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> nativeHaving,
@@ -233,7 +223,7 @@ public final class TupleSqlMapper {
     }
 
     /** Contribution form of {@link #tupleLevelMembersSql(List, boolean, java.util.Optional,
-     *  java.util.List, java.util.List, java.util.Optional, java.util.Optional, boolean,
+     *  List, List, java.util.Optional, java.util.Optional, boolean,
      *  org.eclipse.daanse.rolap.element.RolapCube, boolean)}. */
     public static SelectStatement tupleLevelMembersSql(List<RolapLevel> targetLevels, boolean viewAware,
             org.eclipse.daanse.rolap.common.sql.ConstraintContribution c,
@@ -255,8 +245,8 @@ public final class TupleSqlMapper {
 
     /**
      * The multi-target generalization of {@link #levelMembersSql(RolapLevel,
-     * boolean, java.util.Optional, java.util.List,
-     * java.util.List, java.util.Optional, java.util.Optional, boolean,
+     * boolean, java.util.Optional, List,
+     * List, java.util.Optional, java.util.Optional, boolean,
      * org.eclipse.daanse.rolap.element.RolapCube)} — emits each target's per-level joins plus the
      * constraint ops:
      * <ul>
@@ -282,8 +272,8 @@ public final class TupleSqlMapper {
     public static SelectStatement tupleLevelMembersSql(List<RolapLevel> targetLevels,
             boolean viewAware,
             java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> where,
-            java.util.List<RolapStar.Table> joinTables,
-            java.util.List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
+            List<RolapStar.Table> joinTables,
+            List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
                     orderedPredicates,
             java.util.Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.NativeOrder> nativeOrder,
             java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> nativeHaving,
@@ -311,8 +301,8 @@ public final class TupleSqlMapper {
     public static SelectStatement tupleLevelMembersSqlRecorderJoinOrder(List<RolapLevel> targetLevels,
             boolean viewAware,
             java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> where,
-            java.util.List<RolapStar.Table> joinTables,
-            java.util.List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
+            List<RolapStar.Table> joinTables,
+            List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
                     orderedPredicates,
             java.util.Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.NativeOrder> nativeOrder,
             java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> nativeHaving,
@@ -337,8 +327,8 @@ public final class TupleSqlMapper {
     private static SelectStatement tupleLevelMembersSql(List<RolapLevel> targetLevels,
             boolean viewAware,
             java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> where,
-            java.util.List<RolapStar.Table> joinTables,
-            java.util.List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
+            List<RolapStar.Table> joinTables,
+            List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
                     orderedPredicates,
             java.util.Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.NativeOrder> nativeOrder,
             java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> nativeHaving,
@@ -347,8 +337,8 @@ public final class TupleSqlMapper {
             boolean emitOrderBy,
             JoinOrder joinOrder) {
         RolapLevel targetLevel = targetLevels.get(0);
-        org.eclipse.daanse.rolap.element.RolapCubeLevel cubeLevel0 =
-                (targetLevel instanceof org.eclipse.daanse.rolap.element.RolapCubeLevel cl) ? cl : null;
+        RolapCubeLevel cubeLevel0 =
+                (targetLevel instanceof RolapCubeLevel cl) ? cl : null;
         // The fact comes from the first join table's star; or — when there are no join tables but the target
         // level still needs its OWN non-empty existence join (factJoinRequired: a NonEmptyCrossJoin with an
         // all-member co-arg — the addLevelConstraint→joinLevelTableToFactTable case) — from the target
@@ -369,11 +359,11 @@ public final class TupleSqlMapper {
                         "multi-target tuple read requires a resolvable fact join: " + targetLevels);
             }
             return buildLevelSelect(targetLevels, fromForLevels(targetLevel, viewAware), viewAware,
-                    java.util.List.of(), where, nativeOrder, nativeHaving, emitOrderBy, true);
+                    List.of(), where, nativeOrder, nativeHaving, emitOrderBy, true);
         }
         RolapHierarchy hierarchy = targetLevel.getHierarchy();
         java.util.Set<String> dimAliases = RelationFromMapper.tableAliases(hierarchy.getRelation());
-        java.util.List<org.eclipse.daanse.sql.statement.api.model.FromClause> items =
+        List<org.eclipse.daanse.sql.statement.api.model.FromClause> items =
                 new java.util.ArrayList<>();
         items.add(fromForLevels(targetLevel, viewAware));
         // Add the fact table UNLESS it is already the dimension relation (a degenerate dimension whose own
@@ -414,14 +404,14 @@ public final class TupleSqlMapper {
         // Non-first targets reach the FROM through the fact: one star-key table per projected level
         // (root..depth, non-all), skipping tables already inside the first target's relation or the
         // fact itself. These chains are the per-level fact joins (joinLevelTableToFactTable).
-        java.util.List<RolapStar.Table> targetChainTables = new java.util.ArrayList<>();
+        List<RolapStar.Table> targetChainTables = new java.util.ArrayList<>();
         for (int t = 1; t < targetLevels.size(); t++) {
             RolapLevel target = targetLevels.get(t);
             List<RolapLevel> tLevels = (List<RolapLevel>) target.getHierarchy().getLevels();
             for (int i = 0; i <= target.getDepth(); i++) {
                 RolapLevel lvl = tLevels.get(i);
                 if (lvl.isAll()
-                        || !(lvl instanceof org.eclipse.daanse.rolap.element.RolapCubeLevel tcl)) {
+                        || !(lvl instanceof RolapCubeLevel tcl)) {
                     continue;
                 }
                 RolapStar.Column key = tcl.getBaseStarKeyColumn(baseCube);
@@ -432,8 +422,8 @@ public final class TupleSqlMapper {
             }
         }
         if (factAdjacent != null) {
-            java.util.List<JoinPlanner.JoinStep> joinSteps = new java.util.ArrayList<>();
-            java.util.List<org.eclipse.daanse.sql.statement.api.expression.Predicate> wheres =
+            List<JoinPlanner.JoinStep> joinSteps = new java.util.ArrayList<>();
+            List<org.eclipse.daanse.sql.statement.api.expression.Predicate> wheres =
                     new java.util.ArrayList<>();
             // The fact is joined INTO the dimension root ONLY when genuinely needed: a non-empty
             // existence restriction (factJoinRequired), a FURTHER target on another dimension (it can
@@ -580,11 +570,11 @@ public final class TupleSqlMapper {
      * {@code addLevelMemberSql} / constraint call. Same steps and ON conditions as the fold —
      * only the sequence differs; {@code prePlaced} tables anchor without being re-joined.
      */
-    private static java.util.List<JoinPlanner.JoinStep> chainContiguousJoinSteps(
+    private static List<JoinPlanner.JoinStep> chainContiguousJoinSteps(
             java.util.LinkedHashSet<RolapStar.Table> pending, RolapStar.Table fact,
             java.util.Set<RolapStar.Table> prePlaced) {
         java.util.Set<RolapStar.Table> emitted = new java.util.HashSet<>(prePlaced);
-        java.util.List<JoinPlanner.JoinStep> steps = new java.util.ArrayList<>();
+        List<JoinPlanner.JoinStep> steps = new java.util.ArrayList<>();
         for (RolapStar.Table t : pending) {
             steps.addAll(JoinPlanner.joinStepsFor(t, fact, emitted));
         }
@@ -617,8 +607,8 @@ public final class TupleSqlMapper {
     public static SelectStatement sameTableTupleLevelMembersSql(List<RolapLevel> targetLevels,
             boolean viewAware,
             java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> where,
-            java.util.List<RolapStar.Table> joinTables,
-            java.util.List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
+            List<RolapStar.Table> joinTables,
+            List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
                     orderedPredicates,
             java.util.Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.NativeOrder> nativeOrder,
             java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> nativeHaving,
@@ -629,7 +619,7 @@ public final class TupleSqlMapper {
             throw new IllegalStateException("same-table decline reason=" + declineReason);
         }
         RolapLevel first = targetLevels.get(0);
-        java.util.List<org.eclipse.daanse.sql.statement.api.expression.Predicate> wheres =
+        List<org.eclipse.daanse.sql.statement.api.expression.Predicate> wheres =
                 new java.util.ArrayList<>();
         for (org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate cp
                 : orderedPredicates) {
@@ -641,7 +631,7 @@ public final class TupleSqlMapper {
                 orderedPredicates.isEmpty() ? where
                         : java.util.Optional.of(org.eclipse.daanse.sql.statement.api.Predicates.and(wheres));
         return buildLevelSelect(targetLevels, fromForLevels(first, viewAware), viewAware,
-                java.util.List.of(), where2, nativeOrder, nativeHaving, emitOrderBy, true);
+                List.of(), where2, nativeOrder, nativeHaving, emitOrderBy, true);
     }
 
     /**
@@ -654,8 +644,8 @@ public final class TupleSqlMapper {
      */
     public static boolean supportsSameTableTupleRead(List<RolapLevel> targetLevels,
             org.eclipse.daanse.rolap.element.RolapCube baseCube,
-            java.util.List<RolapStar.Table> joinTables,
-            java.util.List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
+            List<RolapStar.Table> joinTables,
+            List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
                     orderedPredicates) {
         String declineReason = sameTableDeclineReason(targetLevels, baseCube, joinTables, orderedPredicates);
         if (declineReason != null) {
@@ -673,8 +663,8 @@ public final class TupleSqlMapper {
      */
     private static String sameTableDeclineReason(List<RolapLevel> targetLevels,
             org.eclipse.daanse.rolap.element.RolapCube baseCube,
-            java.util.List<RolapStar.Table> joinTables,
-            java.util.List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
+            List<RolapStar.Table> joinTables,
+            List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
                     orderedPredicates) {
         if (targetLevels.size() < 2) {
             return "single-target (served elsewhere): " + targetLevels;
@@ -707,7 +697,7 @@ public final class TupleSqlMapper {
         // This builder serves ONLY the topology supportsTupleRead declines with
         // no-fact-adjacent-table: a first target whose star chain has a fact-adjacent table belongs
         // to the authoritative fact-joined read, not here.
-        if (first instanceof org.eclipse.daanse.rolap.element.RolapCubeLevel firstCube) {
+        if (first instanceof RolapCubeLevel firstCube) {
             RolapStar.Column firstKey = firstCube.getBaseStarKeyColumn(baseCube);
             if (firstKey != null && factAdjacentTable(firstKey.getTable(),
                     firstKey.getTable().getStar().getFactTable()) != null) {
@@ -759,23 +749,23 @@ public final class TupleSqlMapper {
     public static SelectStatement productTupleLevelMembersSql(List<RolapLevel> targetLevels,
             boolean viewAware,
             java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> where,
-            java.util.List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
+            List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
                     orderedPredicates,
             java.util.Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.NativeOrder> nativeOrder,
             java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> nativeHaving,
             org.eclipse.daanse.rolap.element.RolapCube baseCube,
             boolean emitOrderBy) {
-        String declineReason = productTupleDeclineReason(targetLevels, java.util.List.of(), orderedPredicates);
+        String declineReason = productTupleDeclineReason(targetLevels, List.of(), orderedPredicates);
         if (declineReason != null) {
             throw new IllegalStateException("product-tuple decline reason=" + declineReason);
         }
         RolapLevel first = targetLevels.get(0);
-        java.util.List<org.eclipse.daanse.sql.statement.api.model.FromClause> items =
+        List<org.eclipse.daanse.sql.statement.api.model.FromClause> items =
                 new java.util.ArrayList<>();
         java.util.Set<String> placedAliases = new java.util.LinkedHashSet<>();
         items.add(fromForLevels(first, viewAware));
         placedAliases.addAll(targetFromTables(first));
-        java.util.List<org.eclipse.daanse.sql.statement.api.expression.Predicate> joinPreds =
+        List<org.eclipse.daanse.sql.statement.api.expression.Predicate> joinPreds =
                 new java.util.ArrayList<>();
         for (int t = 1; t < targetLevels.size(); t++) {
             RolapLevel target = targetLevels.get(t);
@@ -784,13 +774,13 @@ public final class TupleSqlMapper {
         }
         if (items.size() == 1 && targetLevels.size() > 1 && joinPreds.isEmpty()) {
             // Every further target collapsed into the first item — the same-table degenerate shape.
-            return sameTableTupleLevelMembersSql(targetLevels, viewAware, where, java.util.List.of(),
+            return sameTableTupleLevelMembersSql(targetLevels, viewAware, where, List.of(),
                     orderedPredicates, nativeOrder, nativeHaving, baseCube, emitOrderBy);
         }
         // WHERE: context conjuncts (per-column order, or the grouped where split by
         // buildLevelSelect), then the further targets' internal join equalities — the assembler
         // appends unused edges AFTER the replayed WHERE ops.
-        java.util.List<org.eclipse.daanse.sql.statement.api.expression.Predicate> conjuncts =
+        List<org.eclipse.daanse.sql.statement.api.expression.Predicate> conjuncts =
                 new java.util.ArrayList<>();
         if (!orderedPredicates.isEmpty()) {
             for (org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate cp
@@ -813,7 +803,7 @@ public final class TupleSqlMapper {
         org.eclipse.daanse.sql.statement.api.model.FromClause from = items.size() == 1
                 ? items.get(0)
                 : new org.eclipse.daanse.sql.statement.api.model.FromClause.FromProduct(items);
-        return buildLevelSelect(targetLevels, from, viewAware, java.util.List.of(), where2,
+        return buildLevelSelect(targetLevels, from, viewAware, List.of(), where2,
                 nativeOrder, nativeHaving, emitOrderBy, true);
     }
 
@@ -826,8 +816,8 @@ public final class TupleSqlMapper {
      * a grep-stable {@code product-tuple decline reason=} line.
      */
     public static boolean supportsProductTupleRead(List<RolapLevel> targetLevels,
-            java.util.List<RolapStar.Table> joinTables,
-            java.util.List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
+            List<RolapStar.Table> joinTables,
+            List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
                     orderedPredicates) {
         String declineReason = productTupleDeclineReason(targetLevels, joinTables, orderedPredicates);
         if (declineReason != null) {
@@ -842,8 +832,8 @@ public final class TupleSqlMapper {
      *  {@link #productTupleLevelMembersSql} (defensive re-check): {@code null} when the read fits
      *  the comma-product shape, else the decline reason. */
     private static String productTupleDeclineReason(List<RolapLevel> targetLevels,
-            java.util.List<RolapStar.Table> joinTables,
-            java.util.List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
+            List<RolapStar.Table> joinTables,
+            List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
                     orderedPredicates) {
         if (targetLevels.size() < 2) {
             return "single-target (served elsewhere): " + targetLevels;
@@ -915,10 +905,10 @@ public final class TupleSqlMapper {
      * the assembler pushes edges of disconnected components into WHERE.
      */
     private static void collectProductItems(
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation,
+            RelationalSource relation,
             java.util.Set<String> included, java.util.Set<String> placedAliases,
-            java.util.List<org.eclipse.daanse.sql.statement.api.model.FromClause> items,
-            java.util.List<org.eclipse.daanse.sql.statement.api.expression.Predicate> joinPreds) {
+            List<org.eclipse.daanse.sql.statement.api.model.FromClause> items,
+            List<org.eclipse.daanse.sql.statement.api.expression.Predicate> joinPreds) {
         if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.JoinSource join) {
             boolean leftIncluded = hasIncludedTable(join.getLeft().getSource(), included);
             boolean rightIncluded = hasIncludedTable(join.getRight().getSource(), included);
@@ -943,7 +933,7 @@ public final class TupleSqlMapper {
 
     /** True when the relation subtree contains an included table alias. */
     private static boolean hasIncludedTable(
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation,
+            RelationalSource relation,
             java.util.Set<String> included) {
         if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.JoinSource join) {
             return hasIncludedTable(join.getLeft().getSource(), included)
@@ -1029,7 +1019,7 @@ public final class TupleSqlMapper {
                 return false;
             }
         }
-        if (!(targetLevels.get(0) instanceof org.eclipse.daanse.rolap.element.RolapCubeLevel firstCube)) {
+        if (!(targetLevels.get(0) instanceof RolapCubeLevel firstCube)) {
             if (!allowParentChild && !quiet) {
                 org.eclipse.daanse.rolap.common.RolapUtil.SQL_GEN_LOGGER.debug(
                         "supportsTupleRead decline reason=first-target-not-cube-level");
@@ -1063,7 +1053,7 @@ public final class TupleSqlMapper {
                 if (lvl.isAll()) {
                     continue;
                 }
-                if (!(lvl instanceof org.eclipse.daanse.rolap.element.RolapCubeLevel cl)) {
+                if (!(lvl instanceof RolapCubeLevel cl)) {
                     if (!allowParentChild && !quiet) {
                         org.eclipse.daanse.rolap.common.RolapUtil.SQL_GEN_LOGGER.debug(
                                 "supportsTupleRead decline reason=further-target-not-cube-level");
@@ -1156,8 +1146,8 @@ public final class TupleSqlMapper {
      */
     public static void logT4SubCensus(List<RolapLevel> targetLevels,
             org.eclipse.daanse.rolap.element.RolapCube baseCube, boolean unionArm,
-            java.util.List<RolapStar.Table> joinTables,
-            java.util.List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
+            List<RolapStar.Table> joinTables,
+            List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
                     orderedPredicates) {
         if (!org.eclipse.daanse.rolap.common.RolapUtil.SQL_GEN_LOGGER.isDebugEnabled()) {
             return;
@@ -1177,8 +1167,8 @@ public final class TupleSqlMapper {
      */
     static String t4SubToken(List<RolapLevel> targetLevels,
             org.eclipse.daanse.rolap.element.RolapCube baseCube, boolean unionArm,
-            java.util.List<RolapStar.Table> joinTables,
-            java.util.List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
+            List<RolapStar.Table> joinTables,
+            List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate>
                     orderedPredicates) {
         if (targetLevels.isEmpty()) {
             return "t4-other:empty-target-list";
@@ -1196,7 +1186,7 @@ public final class TupleSqlMapper {
                 return "t4-other:level-unsupported";
             }
         }
-        if (!(targetLevels.get(0) instanceof org.eclipse.daanse.rolap.element.RolapCubeLevel firstCube)) {
+        if (!(targetLevels.get(0) instanceof RolapCubeLevel firstCube)) {
             return "t4-no-star-key-survivor:first-not-cube-level";
         }
         RolapStar.Column firstKey = firstCube.getBaseStarKeyColumn(baseCube);
@@ -1223,7 +1213,7 @@ public final class TupleSqlMapper {
                 if (lvl.isAll()) {
                     continue;
                 }
-                if (!(lvl instanceof org.eclipse.daanse.rolap.element.RolapCubeLevel cl)) {
+                if (!(lvl instanceof RolapCubeLevel cl)) {
                     return "t4-no-star-key-survivor:further-not-cube-level";
                 }
                 RolapStar.Column key = cl.getBaseStarKeyColumn(baseCube);
@@ -1476,7 +1466,7 @@ public final class TupleSqlMapper {
     static SelectStatement buildLevelSelect(RolapLevel targetLevel,
             org.eclipse.daanse.sql.statement.api.model.FromClause from,
             boolean viewAware,
-            java.util.List<JoinPlanner.JoinStep> joinSteps,
+            List<JoinPlanner.JoinStep> joinSteps,
             java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> where) {
         return buildLevelSelect(targetLevel, from, viewAware, joinSteps, where, java.util.Optional.empty(),
                 java.util.Optional.empty());
@@ -1485,7 +1475,7 @@ public final class TupleSqlMapper {
     static SelectStatement buildLevelSelect(RolapLevel targetLevel,
             org.eclipse.daanse.sql.statement.api.model.FromClause from,
             boolean viewAware,
-            java.util.List<JoinPlanner.JoinStep> joinSteps,
+            List<JoinPlanner.JoinStep> joinSteps,
             java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> where,
             java.util.Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.NativeOrder> nativeOrder,
             java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> nativeHaving) {
@@ -1496,7 +1486,7 @@ public final class TupleSqlMapper {
     /**
      * The multi-target core of {@link #buildLevelSelect(RolapLevel,
      * org.eclipse.daanse.sql.statement.api.model.FromClause,
-     * boolean, java.util.List, java.util.Optional,
+     * boolean, List, java.util.Optional,
      * java.util.Optional, java.util.Optional)}: each target's non-all levels (root down to the
      * target depth) are projected/grouped/ordered in target order — the emission order of the
      * recorder's per-target {@code addLevelMemberSql} calls. GROUP BY need is decided PER TARGET
@@ -1514,7 +1504,7 @@ public final class TupleSqlMapper {
     static SelectStatement buildLevelSelect(List<RolapLevel> targetLevels,
             org.eclipse.daanse.sql.statement.api.model.FromClause from,
             boolean viewAware,
-            java.util.List<JoinPlanner.JoinStep> joinSteps,
+            List<JoinPlanner.JoinStep> joinSteps,
             java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> where,
             java.util.Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.NativeOrder> nativeOrder,
             java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> nativeHaving,
@@ -1533,7 +1523,7 @@ public final class TupleSqlMapper {
     static SelectStatement buildLevelSelect(List<RolapLevel> targetLevels,
             org.eclipse.daanse.sql.statement.api.model.FromClause from,
             boolean viewAware,
-            java.util.List<JoinPlanner.JoinStep> joinSteps,
+            List<JoinPlanner.JoinStep> joinSteps,
             java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> where,
             java.util.Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.NativeOrder> nativeOrder,
             java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> nativeHaving,
@@ -1547,7 +1537,7 @@ public final class TupleSqlMapper {
         // steps below): each filter is appended as its table enters the FROM — BEFORE the
         // constraint conjuncts — while the renderer emits slot filters AFTER them. Lifting clears
         // the slot, so nothing is emitted twice; a filter-free read renders the same as the slot form.
-        java.util.List<org.eclipse.daanse.sql.statement.api.expression.Predicate> tableFilters =
+        List<org.eclipse.daanse.sql.statement.api.expression.Predicate> tableFilters =
                 new java.util.ArrayList<>();
         // Base-FROM provenance: name the dimension + the deepest projected level whose relation table
         // anchors the FROM (rendered only when comments are on; never part of the executed SQL).
@@ -1595,7 +1585,7 @@ public final class TupleSqlMapper {
         java.util.Set<String> orderedColumns = new java.util.LinkedHashSet<>();
         // Defer the level ORDER BY entries so a native TopCount/Order measure order can be PREPENDED below
         // (the measure ORDER BY must precede the level ordering).
-        java.util.List<java.util.Map.Entry<ProjectionRef, SortSpec>> levelOrders = new java.util.ArrayList<>();
+        List<java.util.Map.Entry<ProjectionRef, SortSpec>> levelOrders = new java.util.ArrayList<>();
         for (RolapLevel targetLevel : targetLevels) {
             if (aggStar != null) {
                 AggTupleQueries.projectAggTargetLevels(q, targetLevel, aggStar, orderedColumns, levelOrders,
@@ -1645,7 +1635,7 @@ public final class TupleSqlMapper {
     static void projectTargetLevels(SelectStatementBuilder q, RolapLevel targetLevel,
             boolean viewAware,
             java.util.Set<String> orderedColumns,
-            java.util.List<java.util.Map.Entry<ProjectionRef, SortSpec>> levelOrders,
+            List<java.util.Map.Entry<ProjectionRef, SortSpec>> levelOrders,
             boolean projectParent) {
         RolapHierarchy hierarchy = targetLevel.getHierarchy();
         List<RolapLevel> levels = (List<RolapLevel>) hierarchy.getLevels();
@@ -1808,7 +1798,7 @@ public final class TupleSqlMapper {
     /** Orders by {@code colExp}'s projection ref unless an equal column was already ordered (dedup
      *  is by rendered SQL). Ordering on the ref lets the renderer spell it as the SELECT alias
      *  when the dialect requiresOrderByAlias, and as the expression otherwise. */
-    static void orderOnce(java.util.List<java.util.Map.Entry<ProjectionRef, SortSpec>> orders,
+    static void orderOnce(List<java.util.Map.Entry<ProjectionRef, SortSpec>> orders,
             java.util.Set<String> seen, ProjectionRef ref, SqlExpression colExp, SortSpec spec) {
         if (seen.add(orderSig(colExp))) {
             orders.add(java.util.Map.entry(ref, spec));
@@ -1833,14 +1823,19 @@ public final class TupleSqlMapper {
                 && java.util.Objects.equals(ca.getTable(), cb.getTable());
     }
 
+    /**
+     * Level key/ordinal collation: nulls FIRST — the calc engine places a
+     * null-key member as the oldest sibling, and the SQL order must match it,
+     * or maxRows cuts (Top/BottomCount) and tuple ordering diverge between
+     * the native and the calc result.
+     */
     static SortSpec sortSpec(SortingDirection direction) {
         SortDirection dir = direction == SortingDirection.DESC ? SortDirection.DESC : SortDirection.ASC;
-        return new SortSpec(dir, true, NullOrder.LAST, false);
+        return new SortSpec(dir, true, NullOrder.FIRST, false);
     }
 
-    /** As {@link #sortSpec} but nulls first — the parent-key ORDER BY collation. */
+    /** As {@link #sortSpec} — kept as the named parent-key ORDER BY collation. */
     static SortSpec sortSpecNullsFirst(SortingDirection direction) {
-        SortDirection dir = direction == SortingDirection.DESC ? SortDirection.DESC : SortDirection.ASC;
-        return new SortSpec(dir, true, NullOrder.FIRST, false);
+        return sortSpec(direction);
     }
 }
