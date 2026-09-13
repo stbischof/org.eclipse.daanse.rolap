@@ -29,11 +29,11 @@
 package org.eclipse.daanse.rolap.common.nativize;
 
 import java.util.EventObject;
+import java.util.function.BooleanSupplier;
 
 import org.eclipse.daanse.olap.api.evaluator.NativeEvaluator;
 import org.eclipse.daanse.olap.api.function.FunctionDefinition;
 import org.eclipse.daanse.olap.api.query.component.Expression;
-import org.eclipse.daanse.rolap.common.TupleReader;
 import org.eclipse.daanse.rolap.common.evaluator.RolapEvaluator;
 
 /**
@@ -50,29 +50,19 @@ import org.eclipse.daanse.rolap.common.evaluator.RolapEvaluator;
  */
 public abstract class RolapNative {
 
-    private boolean enabled;
+    private BooleanSupplier enabled = () -> false;
 
+    /** Marker event: a native evaluator was found for a function call. */
     public static class NativeEvent extends EventObject {
-        private final NativeEvaluator neval;
-        public NativeEvent(Object source, NativeEvaluator neval) {
+        public NativeEvent(Object source) {
             super(source);
-            this.neval = neval;
-        }
-        NativeEvaluator getNativeEvaluator() {
-            return neval;
         }
     }
 
+    /** Marker event: a native set evaluation hit the cache or ran SQL. */
     public static class TupleEvent extends EventObject {
-        private final TupleReader tupleReader;
-
-        public TupleEvent(Object source, TupleReader tupleReader) {
+        public TupleEvent(Object source) {
             super(source);
-            this.tupleReader = tupleReader;
-        }
-
-        TupleReader getTupleReader() {
-            return tupleReader;
         }
     }
 
@@ -97,25 +87,22 @@ public abstract class RolapNative {
      * if enabled == false, then createEvaluator will always return null
      */
     boolean isEnabled() {
-        return enabled;
+        return enabled.getAsBoolean();
     }
 
     public void setEnabled(boolean enabled) {
-        this.enabled = enabled;
+        this.enabled = () -> enabled;
     }
 
-    Listener getListener() {
-        return listener;
+    /**
+     * Live switch: the supplier is consulted on every createEvaluator call,
+     * so a config change takes effect without rebuilding the catalog.
+     */
+    public void setEnabled(BooleanSupplier enabled) {
+        this.enabled = enabled;
     }
 
     void setListener(Listener listener) {
         this.listener = listener;
     }
-
-    /**
-     * Sets whether to use hard caching for testing.
-     * When using soft references, we can not test caching
-     * because things may be garbage collected during the tests.
-     */
-    abstract void useHardCache(boolean hard);
 }

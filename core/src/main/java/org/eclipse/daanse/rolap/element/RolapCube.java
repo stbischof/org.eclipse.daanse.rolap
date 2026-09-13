@@ -50,8 +50,11 @@ import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.stream.Collectors;
 
+import org.eclipse.daanse.rolap.mapping.model.database.source.InlineTableSource;
+import org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource;
+import org.eclipse.daanse.rolap.mapping.model.database.source.SqlSelectSource;
+import org.eclipse.daanse.rolap.mapping.model.database.source.TableSource;
 import org.eclipse.daanse.sql.dialect.api.Dialect;
 import org.eclipse.daanse.sql.model.type.Datatype;
 import org.eclipse.daanse.mdx.model.api.expression.operation.FunctionOperationAtom;
@@ -130,7 +133,6 @@ import org.eclipse.daanse.rolap.common.util.DimensionUtil;
 import org.eclipse.daanse.rolap.common.util.PojoUtil;
 import org.eclipse.daanse.rolap.common.writeback.RolapWritebackTable;
 import org.eclipse.daanse.rolap.common.writeback.WritebackUtil;
-import org.eclipse.daanse.rolap.mapping.model.RolapMappingFactory;
 import org.eclipse.daanse.rolap.mapping.model.database.source.SqlStatement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -182,13 +184,13 @@ public abstract class RolapCube extends CubeBase {
     private final MetaData metaData;
     private final RolapHierarchy measuresHierarchy;
 
-    private org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource restoreFact = null;
+    private RelationalSource restoreFact = null;
 
     /** For SQL generator. Fact table. */
-    private org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource fact;
+    private RelationalSource fact;
 
     /** Schema reader which can see this cube and nothing else. */
-    private CatalogReader schemaReader;
+    private volatile CatalogReader schemaReader;
 
     /**
      * List of calculated members.
@@ -196,9 +198,6 @@ public abstract class RolapCube extends CubeBase {
     private final List<Formula> calculatedMemberList = new ArrayList<>();
 
     private List<KPI> kpis=new ArrayList<>();
-    /**
-     * Role-based cache of calculated members
-     */
 
     /**
      * List of named sets.
@@ -208,16 +207,37 @@ public abstract class RolapCube extends CubeBase {
     /** Contains {@link HierarchyUsage}s for this cube */
     private final List<HierarchyUsage> hierarchyUsages;
 
-    private RolapStar star;
+    private volatile RolapStar star;
     private ExplicitRules.Group aggGroup;
 
+    // memo over the construction-frozen hierarchyUsages; queries read it
+    // concurrently
     private final Map<Hierarchy, HierarchyUsage> firstUsageMap =
-        new HashMap<>();
+        new java.util.concurrent.ConcurrentHashMap<>();
 
     public RolapBaseCubeMeasure factCountMeasure;
 
     final List<RolapHierarchy> hierarchyList =
         new ArrayList<>();
+
+    /**
+     * Whether this cube maps a usage of the same logical hierarchy. Every
+     * usage builds its own RolapHierarchy instance, so logical identity is
+     * the mapping object, not the instance.
+     */
+    public boolean usesSharedHierarchy(RolapHierarchy shared) {
+        var mapping = shared.getHierarchyMapping();
+        if (mapping == null) {
+            return false;
+        }
+        for (RolapHierarchy hierarchy : hierarchyList) {
+            if (hierarchy instanceof RolapCubeHierarchy cubeHierarchy
+                    && cubeHierarchy.getRolapHierarchy().getHierarchyMapping() == mapping) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     private Map<RolapLevel, RolapCubeLevel> virtualToBaseMap =
         new HashMap<>();
@@ -246,26 +266,6 @@ public abstract class RolapCube extends CubeBase {
 
     private Context context;
 
-
-    /**
-     * Whether this cube maps a usage of the same logical hierarchy. Every
-     * usage builds its own RolapHierarchy instance, so logical identity is
-     * the mapping object, not the instance.
-     */
-    public boolean usesSharedHierarchy(RolapHierarchy shared) {
-        var mapping = shared.getHierarchyMapping();
-        if (mapping == null) {
-            return false;
-        }
-        for (RolapHierarchy hierarchy : hierarchyList) {
-            if (hierarchy instanceof RolapCubeHierarchy cubeHierarchy
-                    && cubeHierarchy.getRolapHierarchy().getHierarchyMapping() == mapping) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     /** Resolved once from the daanse:cache.* tags; immutable after load. */
     private CachePolicy cachePolicy;
 
@@ -284,7 +284,7 @@ public abstract class RolapCube extends CubeBase {
             RolapCatalog catalog,
             org.eclipse.daanse.rolap.mapping.model.catalog.Catalog catalogMapping,
             org.eclipse.daanse.rolap.mapping.model.olap.cube.PhysicalCube cubeMapping,
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource fact,
+            RelationalSource fact,
             Context context)
         {
         this(
@@ -307,7 +307,7 @@ public abstract class RolapCube extends CubeBase {
             RolapCatalog catalog,
             org.eclipse.daanse.rolap.mapping.model.catalog.Catalog catalogMapping,
             org.eclipse.daanse.rolap.mapping.model.olap.cube.VirtualCube cubeMapping,
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource fact,
+            RelationalSource fact,
             Context context)
         {
         this(
@@ -343,7 +343,7 @@ public abstract class RolapCube extends CubeBase {
         boolean visible,
         String caption,
         String description,
-        org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource fact,
+        RelationalSource fact,
         List<? extends org.eclipse.daanse.rolap.mapping.model.olap.dimension.DimensionConnector> dimensions,
         MetaData metaData,
         Context context)
@@ -366,9 +366,6 @@ public abstract class RolapCube extends CubeBase {
 
         if (getFact() != null && this instanceof RolapPhysicalCube) {
             this.star = catalog.getRolapStarRegistry().getOrCreateStar(getFact());
-            // only set if different from default (so that if two cubes share
-            // the same fact table, either can turn off caching and both are
-            // effected).
         }
 
         RolapDimension measuresDimension =
@@ -410,10 +407,6 @@ public abstract class RolapCube extends CubeBase {
                 createUsages(dimension, mappingCubeDimension);
             }
 
-            // the register Dimension call was moved here
-            // to keep the RolapStar in sync with the realiasing
-            // within the RolapCubeHierarchy objects.
-            //registerDimension(dimension);
         }
     }
 
@@ -425,21 +418,17 @@ public abstract class RolapCube extends CubeBase {
         return this.namedSetList;
     }
 
-    public void setStar(RolapStar star) {
-        this.star = star;
-    }
-
     protected void setClosureColumnBitKey(BitKey closureColumnBitKey) {
         this.closureColumnBitKey = closureColumnBitKey;
     }
     /**
      * Returns this cube's fact table, null if the cube is virtual.
      */
-    public org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource getFact() {
+    public RelationalSource getFact() {
         return fact;
     }
 
-    public void setFact(org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource fact) {
+    public void setFact(RelationalSource fact) {
         this.fact = fact;
     }
 
@@ -681,7 +670,6 @@ public abstract class RolapCube extends CubeBase {
         final Query queryExp)
     {
     	org.eclipse.daanse.rolap.mapping.model.olap.dimension.NamedSet mappingNamedSet = mappingNamedSets.get(i);
-//        discard(xmlNamedSet);
         Formula formula = queryExp.getFormulas()[offset + i];
         final SetBase namedSet = (SetBase) formula.getNamedSet();
         if (mappingNamedSet.getName() != null
@@ -788,7 +776,6 @@ public abstract class RolapCube extends CubeBase {
 
         // Lookup dimension
         Hierarchy hierarchy = null;
-//        String dimName = null;
         if (mappingCalcMember.getHierarchy() == null) {
             hierarchy = measuresHierarchy;
         } else {
@@ -799,16 +786,6 @@ public abstract class RolapCube extends CubeBase {
                     .findAny().orElse(null);
 
         }
-//        if (mappingCalcMember.getHierarchy() != null && mappingCalcMember.getHierarchy().getName() !=null) {
-//
-//            dimName = mappingCalcMember.getHierarchy().getName();
-//            hierarchy = (Hierarchy)
-//                getCatalogReader().withLocus().lookupCompound(
-//                    this,
-//                    Util.parseIdentifier(dimName),
-//                    false,
-//                    DataType.HIERARCHY);
-//        }
         if (hierarchy == null) {
             throw new OlapRuntimeException(MessageFormat.format(calcMemberHasBadDimension,
                     mappingCalcMember.getHierarchy().getName(),   mappingCalcMember.getName(), getName()));
@@ -899,22 +876,9 @@ public abstract class RolapCube extends CubeBase {
                     Util.quoteForMdx(mappingCalcMember.getCellFormatter().getRef()));
             }
 
-            //no scripting
-//            if (mappingCalcMember.getCellFormatter().script() != null) {
-//                if (mappingCalcMember.getCellFormatter().script().language() != null) {
-//                    propNames.add(Property.CELL_FORMATTER_SCRIPT_LANGUAGE.name);
-//                    propExprs.add(
-//                        Util.quoteForMdx(
-//                            mappingCalcMember.getCellFormatter().script().language()));
-//                }
-//                propNames.add(Property.CELL_FORMATTER_SCRIPT.name);
-//                propExprs.add(
-//                    Util.quoteForMdx(mappingCalcMember.getCellFormatter().script().cdata()));
-//            }
         }
 
         assert propNames.size() == propExprs.size();
-//        processFormatStringAttribute(mappingCalcMember, buf);
 
         for (int i = 0; i < propNames.size(); i++) {
             String name = propNames.get(i);
@@ -1035,12 +999,18 @@ public abstract class RolapCube extends CubeBase {
      *  return != null
      * @see #getCatalogReader(Role)
      */
-    public synchronized CatalogReader getCatalogReader() {
-        if (schemaReader == null) {
-            schemaReader =
-                new RolapCubeCatalogReader(context, RoleImpl.createRootRole(catalog), this);
+    public CatalogReader getCatalogReader() {
+        CatalogReader reader = schemaReader;
+        if (reader == null) {
+            synchronized (this) {
+                reader = schemaReader;
+                if (reader == null) {
+                    reader = new RolapCubeCatalogReader(context, RoleImpl.createRootRole(catalog), this);
+                    schemaReader = reader;
+                }
+            }
         }
-        return schemaReader;
+        return reader;
     }
 
     @Override
@@ -1101,6 +1071,7 @@ public abstract class RolapCube extends CubeBase {
         }
     }
 
+
     /**
      * Invalidates the thread-local working stores of this cube's stars, but
      * only when caching is globally disabled.
@@ -1111,7 +1082,7 @@ public abstract class RolapCube extends CubeBase {
         }
     }
 
-    /** Empties the calling thread's working stores of this cube's stars -
+    /** Empties the calling thread's working stores of this cube's stars —
      * per-query hygiene, never a cross-thread invalidation (that is the
      * flush path's generation counter). */
     public void clearCachedAggregations(boolean forced) {
@@ -1135,22 +1106,28 @@ public abstract class RolapCube extends CubeBase {
      *
      * <p>Virtual cubes (no fact) return {@code null}. For any cube with a fact,
      * the cached {@code star} is returned when its fact table relation still
-     * matches {@link #getFact()}; otherwise a fresh {@link RolapStar} is
-     * created from the current fact. This makes the method resilient to
-     * post-construction {@code fact} mutations (see {@link #modifyFact}
-     * / {@link #restoreFact}) and to cross-test state pollution where a
-     * cube's {@code fact} has been re-bound between calls.
+     * matches {@link #getFact()}. On a mismatch the registry resolves the fact
+     * to its REGISTERED star (primed, statistics-bearing, resolvable from
+     * segment headers); only a fact whose alias collides with a registered
+     * star — a writeback session view from {@code modifyFact} shares the
+     * original alias, which is the star key — stays on a transient star, so
+     * the session never clobbers the shared one.
      */
     public RolapStar getStar() {
-        org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource fact = getFact();
+        RelationalSource fact = getFact();
         if (fact == null) {
             return star;
         }
-        if (star != null && star.getFactTable().getRelation().equals(fact)) {
-            return star;
+        RolapStar snapshot = star;
+        if (snapshot != null && snapshot.getFactTable().getRelation().equals(fact)) {
+            return snapshot;
         }
-        star = catalog.getRolapStarRegistry().makeRolapStar(fact);
-        return star;
+        RolapStar resolved = catalog.getRolapStarRegistry().getOrCreateStar(fact);
+        if (!resolved.getFactTable().getRelation().equals(fact)) {
+            resolved = catalog.getRolapStarRegistry().makeRolapStar(fact);
+        }
+        star = resolved;
+        return resolved;
     }
 
     private void createUsages(
@@ -1206,7 +1183,7 @@ public abstract class RolapCube extends CubeBase {
         }
     }
 
-    synchronized void createUsage(
+    void createUsage(
         RolapCubeHierarchy hierarchy,
         org.eclipse.daanse.rolap.mapping.model.olap.dimension.DimensionConnector cubeDim)
     {
@@ -1228,7 +1205,7 @@ public abstract class RolapCube extends CubeBase {
         this.hierarchyUsages.add(usage);
     }
 
-    private synchronized HierarchyUsage getUsageByName(String name) {
+    private HierarchyUsage getUsageByName(String name) {
         for (HierarchyUsage hierUsage : hierarchyUsages) {
             if (name.equals(hierUsage.getFullName())) {
                 return hierUsage;
@@ -1246,7 +1223,7 @@ public abstract class RolapCube extends CubeBase {
      * @param hierarchy Hierarchy
      * @return an HierarchyUsages array with 0 or more members.
      */
-    public synchronized HierarchyUsage[] getUsages(Hierarchy hierarchy) {
+    public HierarchyUsage[] getUsages(Hierarchy hierarchy) {
         String name = hierarchy.getName();
         if (!name.equals(hierarchy.getDimension().getName()))
         {
@@ -1298,7 +1275,7 @@ public abstract class RolapCube extends CubeBase {
         }
     }
 
-    public synchronized HierarchyUsage getFirstUsage(Hierarchy hier) {
+    public HierarchyUsage getFirstUsage(Hierarchy hier) {
         HierarchyUsage hierarchyUsage = firstUsageMap.get(hier);
         if (hierarchyUsage == null) {
             HierarchyUsage[] hierarchyUsagesInner = getUsages(hier);
@@ -1320,7 +1297,7 @@ public abstract class RolapCube extends CubeBase {
      * @param source Name of shared dimension
      * @return array of HierarchyUsage (HierarchyUsage[]) - never null.
      */
-    private synchronized HierarchyUsage[] getUsagesBySource(String source) {
+    private HierarchyUsage[] getUsagesBySource(String source) {
         if (getLogger().isDebugEnabled()) {
             getLogger().debug("RolapCube.getUsagesBySource: source={}", source);
         }
@@ -1383,7 +1360,7 @@ public abstract class RolapCube extends CubeBase {
         for (Hierarchy hierarchy1 : hierarchies) {
             RolapHierarchy hierarchy = (RolapHierarchy) hierarchy1;
 
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation = hierarchy.getRelation();
+            RelationalSource relation = hierarchy.getRelation();
             if (relation == null) {
                 continue; // e.g. [Measures] hierarchy
             }
@@ -1429,7 +1406,7 @@ public abstract class RolapCube extends CubeBase {
                 if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.JoinSource) {
                     // RME
                     // take out after things seem to be working
-                	org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relationTmp1 = relation;
+                	RelationalSource relationTmp1 = relation;
 
                     relation = reorder(relation, levels);
 
@@ -1442,7 +1419,7 @@ public abstract class RolapCube extends CubeBase {
                     }
                 }
 
-                org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relationTmp2 = relation;
+                RelationalSource relationTmp2 = relation;
 
                 if (levelName != null) {
                     // When relation is a table, this does nothing. Otherwise
@@ -1521,7 +1498,7 @@ public abstract class RolapCube extends CubeBase {
                             && hierarchy.getHierarchyMapping().getPrimaryKey() != null
                             && hierarchy.getHierarchyMapping().getPrimaryKey().getOwner() instanceof org.eclipse.daanse.cwm.model.cwm.resource.relational.Table _pkTbl
                             && relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.JoinSource join
-                            && right(join) instanceof org.eclipse.daanse.rolap.mapping.model.database.source.TableSource tqm
+                            && right(join) instanceof TableSource tqm
                             && getAlias(tqm) != null
                             && getAlias(tqm).equals(_pkTbl.getName()))
                     {
@@ -1648,18 +1625,18 @@ public abstract class RolapCube extends CubeBase {
      *
      * @param relation A table or a join
      */
-    private static String format(org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation) {
+    private static String format(RelationalSource relation) {
         StringBuilder buf = new StringBuilder();
         format(relation, buf, "");
         return buf.toString();
     }
 
     private static void format(
-        org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation,
+        RelationalSource relation,
         StringBuilder buf,
         String indent)
     {
-        if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.TableSource table) {
+        if (relation instanceof TableSource table) {
             buf.append(indent);
             buf.append(table.getTable().getName());
             if (table.getAlias() != null) {
@@ -1813,8 +1790,8 @@ public abstract class RolapCube extends CubeBase {
      * @param relation A table or a join
      * @param levels Levels in hierarchy
      */
-    private static org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource reorder(
-        org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation,
+    private static RelationalSource reorder(
+        RelationalSource relation,
         List<RolapCubeLevel> levels)
     {
         // Need at least two levels, with only one level theres nothing to do.
@@ -1844,7 +1821,7 @@ public abstract class RolapCube extends CubeBase {
         if (! validateNodes(relation, nodeMap)) {
             return relation;
         }
-        org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relationImpl = copy(relation);
+        RelationalSource relationImpl = copy(relation);
 
         // Put lower levels to the left of upper levels
         leftToRight(relationImpl, nodeMap);
@@ -1864,10 +1841,10 @@ public abstract class RolapCube extends CubeBase {
      * @param map Names of tables and {@link RelNode} pairs
      */
     private static boolean validateNodes(
-        org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation,
+        RelationalSource relation,
         Map<String, RelNode> map)
     {
-        if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource table) {
+        if (relation instanceof RelationalSource table) {
             RelNode relNode = RelNode.lookup(table, map);
             return (relNode != null);
 
@@ -1889,10 +1866,10 @@ public abstract class RolapCube extends CubeBase {
      * @param map Names of tables and {@link RelNode} pairs
      */
     private static int leftToRight(
-        org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation,
+        RelationalSource relation,
         Map<String, RelNode> map)
     {
-        if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource table) {
+        if (relation instanceof RelationalSource table) {
             RelNode relNode = RelNode.lookup(table, map);
             // Associate the table with its RelNode!!!! This is where this
             // happens.
@@ -1901,16 +1878,16 @@ public abstract class RolapCube extends CubeBase {
             return relNode.getDepth();
 
         } else if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.JoinSource join) {
-            int leftDepth = leftToRight((org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource)left(join), map);
-            int rightDepth = leftToRight((org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource)right(join), map);
+            int leftDepth = leftToRight((RelationalSource)left(join), map);
+            int rightDepth = leftToRight((RelationalSource)right(join), map);
 
             // we want the right side to be less than the left
             if (rightDepth > leftDepth) {
                 // switch
                 String leftAlias = getLeftAlias(join);
                 org.eclipse.daanse.cwm.model.cwm.resource.relational.Column leftKey = join.getLeft().getKey();
-                org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource left = copy(left(join));
-                org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource right = copy(right(join));
+                RelationalSource left = copy(left(join));
+                RelationalSource right = copy(right(join));
                 join.getLeft().setAlias(getRightAlias(join));
                 join.getLeft().setKey(join.getRight().getKey());
                 changeLeftRight(join, right, left);
@@ -1935,8 +1912,8 @@ public abstract class RolapCube extends CubeBase {
      *
      * @param relation A table or a join
      */
-    private static void topToBottom(org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation) {
-        if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.TableSource) {
+    private static void topToBottom(RelationalSource relation) {
+        if (relation instanceof TableSource) {
             // nothing
 
         } else if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.JoinSource join) {
@@ -1978,11 +1955,11 @@ public abstract class RolapCube extends CubeBase {
      * @param relation A table or a join
      * @param tableName Table name in relation
      */
-    private static org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource snip(
-        org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation,
+    private static RelationalSource snip(
+        RelationalSource relation,
         String tableName)
     {
-        if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.TableSource table) {
+        if (relation instanceof TableSource table) {
             // Return null if the table's name or alias matches tableName
             if ((table.getAlias() != null) && table.getAlias().equals(tableName)) {
                 return null;
@@ -1992,7 +1969,7 @@ public abstract class RolapCube extends CubeBase {
 
         } else if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.JoinSource join) {
             // snip left
-        	org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource left = snip(left(join), tableName);
+        	RelationalSource left = snip(left(join), tableName);
             if (left == null) {
                 // left got snipped so return the right
                 // (the join is no longer a join).
@@ -2003,7 +1980,7 @@ public abstract class RolapCube extends CubeBase {
                 changeLeftRight((org.eclipse.daanse.rolap.mapping.model.database.source.JoinSource)copy(join), copy(left), copy(right(join)));
 
                 // snip right
-                org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource right = snip(right(join), tableName);
+                RelationalSource right = snip(right(join), tableName);
                 if (right == null) {
                     // right got snipped so return the left.
                     return left(join);
@@ -2303,54 +2280,31 @@ public abstract class RolapCube extends CubeBase {
             new IdImpl(segmentList),
             createDummyExp(calc),
             new MemberProperty[0]);
-        final Statement statement =
-            catalog.getInternalConnection().getInternalStatement();
-        try {
-            final QueryImpl query =
-                new QueryImpl(
-                    statement,
-                    this,
-                    new Formula[] {formula},
-                    new QueryAxisImpl[0],
-                    null,
-                    new CellProperty[0],
-                    new Parameter[0],
-                    false);
-            query.createValidator().validate(formula);
-            calculatedMemberList.add(formula);
-            return (RolapMember) formula.getMdxMember();
-        } finally {
-            statement.close();
-        }
+        validateStandalone(formula);
+        calculatedMemberList.add(formula);
+        return (RolapMember) formula.getMdxMember();
     }
 
     @Override
     public void createNamedSet(
             Formula formula)
     {
-        final Statement statement =
-                catalog.getInternalConnection().getInternalStatement();
-        try {
-            final QueryImpl query =
-                    new QueryImpl(
-                            statement,
-                            this,
-                            new Formula[] {formula},
-                            new QueryAxisImpl[0],
-                            null,
-                            new CellProperty[0],
-                            new Parameter[0],
-                            false);
-            query.createValidator().validate(formula);
-            namedSetList.add(formula);
-        } finally {
-            statement.close();
-        }
+        validateStandalone(formula);
+        namedSetList.add(formula);
     }
 
     public RolapMember createCalculatedMember(
             Formula formula)
     {
+        validateStandalone(formula);
+        calculatedMemberList.add(formula);
+        return (RolapMember) formula.getMdxMember();
+    }
+
+    /** Validates a formula against this cube on a throwaway internal
+     * statement, as the shared step of the create-calculated-member and
+     * create-named-set entry points. */
+    private void validateStandalone(Formula formula) {
         final Statement statement =
                 catalog.getInternalConnection().getInternalStatement();
         try {
@@ -2365,8 +2319,6 @@ public abstract class RolapCube extends CubeBase {
                             new Parameter[0],
                             false);
             query.createValidator().validate(formula);
-            calculatedMemberList.add(formula);
-            return (RolapMember) formula.getMdxMember();
         } finally {
             statement.close();
         }
@@ -2536,8 +2488,8 @@ public abstract class RolapCube extends CubeBase {
      * ({@link #modifyFact}) appends the writeback WHERE onto the view's SQL string, which only
      * exists once the inline data has been rendered to SQL.
      */
-    public static org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource convertInlineTableToRelation(
-    		org.eclipse.daanse.rolap.mapping.model.database.source.InlineTableSource inlineTable,
+    public static RelationalSource convertInlineTableToRelation(
+    		InlineTableSource inlineTable,
         final Dialect dialect)
     {
         List<Column> cols = ColumnSets.columns(inlineTable.getTable());
@@ -2561,7 +2513,7 @@ public abstract class RolapCube extends CubeBase {
             }
             valueList.add(values);
         }
-        org.eclipse.daanse.rolap.mapping.model.database.source.SqlSelectSource view = SourceFactory.eINSTANCE.createSqlSelectSource();
+        SqlSelectSource view = SourceFactory.eINSTANCE.createSqlSelectSource();
         view.setAlias(getAlias(inlineTable));
 
         org.eclipse.daanse.rolap.mapping.model.database.source.SqlStatement sqlStatement = SourceFactory.eINSTANCE.createSqlStatement();
@@ -2577,11 +2529,11 @@ public abstract class RolapCube extends CubeBase {
     }
 
     /**
-     * Ordered overload of {@link #convertInlineTableToRelation(org.eclipse.daanse.rolap.mapping.model.database.source.InlineTableSource, Dialect)}:
+     * Ordered overload of {@link #convertInlineTableToRelation(InlineTableSource, Dialect)}:
      * the writeback fact path hands in the target column order.
      */
-    public static org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource convertInlineTableToRelation(
-    		org.eclipse.daanse.rolap.mapping.model.database.source.InlineTableSource inlineTable,
+    public static RelationalSource convertInlineTableToRelation(
+    		InlineTableSource inlineTable,
             final Dialect dialect, List<String> orderColumns)
         {
             List<String> columnNames = new ArrayList<>();
@@ -2597,7 +2549,7 @@ public abstract class RolapCube extends CubeBase {
             }
             List<String[]> valueList = new ArrayList<>();
             List<? extends org.eclipse.daanse.cwm.model.cwm.resource.relational.Row> rows =
-                inlineTable.getTable().getExtent() == null ? java.util.List.of()
+                inlineTable.getTable().getExtent() == null ? List.of()
                     : inlineTable.getTable().getExtent().getOwnedElement().stream()
                         .filter(org.eclipse.daanse.cwm.model.cwm.resource.relational.Row.class::isInstance)
                         .map(org.eclipse.daanse.cwm.model.cwm.resource.relational.Row.class::cast).toList();
@@ -2621,7 +2573,7 @@ public abstract class RolapCube extends CubeBase {
             org.eclipse.daanse.rolap.mapping.model.database.relational.DialectSqlView sqlView = org.eclipse.daanse.rolap.mapping.model.database.relational.RelationalFactory.eINSTANCE.createDialectSqlView();
             sqlView.getDialectStatements().add(sqlStatement);
 
-            org.eclipse.daanse.rolap.mapping.model.database.source.SqlSelectSource view = SourceFactory.eINSTANCE.createSqlSelectSource();
+            SqlSelectSource view = SourceFactory.eINSTANCE.createSqlSelectSource();
             view.setAlias(getAlias(inlineTable));
             view.setSql(sqlView);
 
@@ -2641,8 +2593,65 @@ public abstract class RolapCube extends CubeBase {
             // found it. Nothing to isolate, and no reason to make readers queue.
             return work.get();
         }
-        return pendingFact.run(() -> modifyFact(sessionValues), work, this::restoreFact);
+        // only literal session rows are session-PRIVATE; the committed
+        // writeback table rows the fact also unions in are shared state
+        final boolean sessionPrivate = !sessionValues.isEmpty();
+        if (!sessionPrivate) {
+            return pendingFact.run(() -> modifyFact(sessionValues), work, this::restoreFact);
+        }
+        // the REAL non-nesting invariant, checked BEFORE the (reentrant)
+        // lock is taken: sessionRowsActive is a plain boolean, not a depth
+        // counter, and it may legitimately still be true after a failed
+        // restore (the deliberate sticky veto) - asserting on the flag
+        // turned that documented fail-safe into an AssertionError on the
+        // next writeback statement under -ea
+        assert !pendingFact.isHeldByCurrentThread() : "withPendingRows must not nest";
+        try {
+            return pendingFact.run(() -> {
+                sessionRowsActive = true;
+                modifyFact(sessionValues);
+            }, work, () -> {
+                try {
+                    restoreFact();
+                } catch (RuntimeException | Error e) {
+                    // deliberately fail-safe-but-sticky: the fact may still
+                    // carry session literals, so the veto MUST stay up -
+                    // but that disables native caching for this cube for
+                    // the rest of the JVM, which deserves a loud note
+                    LOGGER.warn("restoreFact failed; native tuple caching stays"
+                        + " vetoed for cube {}", getName(), e);
+                    throw e;
+                }
+                // lowered INSIDE the restore callback, i.e. still under
+                // the pendingFact lock: lowering in the outer finally ran
+                // AFTER the lock was released, so this bracket's exit
+                // could strip the veto a successor bracket had just
+                // raised. (The flag is a plain boolean, NOT a depth
+                // counter - withPendingRows must never nest; the lock is
+                // reentrant, the flag design is not.)
+                sessionRowsActive = false;
+            });
+        } finally {
+            // native tuple lists computed while the fact carried this
+            // session's uncommitted literals are poison for other
+            // sessions. Publishers inside the bracket were vetoed via
+            // sessionRowsActive; a reader that STARTED before the bracket
+            // and publishes after this clear removes its own entry via
+            // the flush-epoch handshake. Between restore and this clear a
+            // put can land - the clear removes it. Catalog-wide on
+            // purpose (the registry has no per-cube slice); one full
+            // tuple-cache clear per literal-carrying UPDATE clause is the
+            // accepted cost - writeback traffic keeps native caches cold.
+            getCatalog().getNativeRegistry().flushNativeSetCaches();
+        }
     }
+
+    /** Whether the fact currently unions in a session's uncommitted literal rows. */
+    public boolean sessionRowsActive() {
+        return sessionRowsActive;
+    }
+
+    private volatile boolean sessionRowsActive;
 
 	@Override
     public void modifyFact(List<Map<String, Entry<DataTypeJdbc, Object>>> sessionValues) {
@@ -2650,7 +2659,7 @@ public abstract class RolapCube extends CubeBase {
                 setFact(restoreFact);
                 register();
             }
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource fact = getFact();
+            RelationalSource fact = getFact();
             restoreFact = fact;
             Optional<RolapWritebackTable> oWritebackTable = getWritebackTable();
             Dialect dialect = getContext().getDialect();
@@ -2658,14 +2667,14 @@ public abstract class RolapCube extends CubeBase {
                 RolapWritebackTable writebackTable = oWritebackTable.get();
                 if (getWritebackTable() != null && getWritebackTable().isPresent()) {
                     List<Map<String, Entry<Datatype, Object>>> rolapSessionValues = EnumConvertor.convertSessionValues(sessionValues);
-                    if (fact instanceof org.eclipse.daanse.rolap.mapping.model.database.source.TableSource mappingTable) {
+                    if (fact instanceof TableSource mappingTable) {
                         String alias = mappingTable.getAlias() != null ? mappingTable.getAlias() : mappingTable.getTable().getName();
                         // The writeback fact view on the statement model: fact columns UNION ALL
                         // writeback table UNION ALL the session-value literal rows — rendered ONCE
                         // (quoting and literal spelling live in the renderer). Stored per the
                         // mapping-model contract as a pre-rendered string, tagged with the live
                         // dialect only (the body is dialect-rendered, not generic).
-                        java.util.List<org.eclipse.daanse.sql.statement.api.model.Statement> arms =
+                        List<org.eclipse.daanse.sql.statement.api.model.Statement> arms =
                             new ArrayList<>();
                         String factSchema = mappingTable.getTable()
                             .getNamespace() instanceof org.eclipse.daanse.cwm.model.cwm.resource.relational.Schema s
@@ -2681,26 +2690,26 @@ public abstract class RolapCube extends CubeBase {
                         sqlStatement.getDialects().add(dialect.name());
                         org.eclipse.daanse.rolap.mapping.model.database.relational.DialectSqlView sqlView = org.eclipse.daanse.rolap.mapping.model.database.relational.RelationalFactory.eINSTANCE.createDialectSqlView();
                         sqlView.getDialectStatements().add(sqlStatement);
-                        org.eclipse.daanse.rolap.mapping.model.database.source.SqlSelectSource sqlSelectQuery = SourceFactory.eINSTANCE.createSqlSelectSource();
+                        SqlSelectSource sqlSelectQuery = SourceFactory.eINSTANCE.createSqlSelectSource();
                         sqlSelectQuery.setSql(sqlView);
                         sqlSelectQuery.setAlias(alias);
                         changeFact(sqlSelectQuery);
                     }
-                    if (fact instanceof org.eclipse.daanse.rolap.mapping.model.database.source.InlineTableSource mappingInlineTable) {
+                    if (fact instanceof InlineTableSource mappingInlineTable) {
                     	List<String> columns =  writebackTable.getColumns().stream().map(c -> c.getColumn().getName()).toList();
-                    	org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource mappingRelation = convertInlineTableToRelation(mappingInlineTable, getContext().getDialect(), columns);
-                        if (mappingRelation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.SqlSelectSource mappingView) {
+                    	RelationalSource mappingRelation = convertInlineTableToRelation(mappingInlineTable, getContext().getDialect(), columns);
+                        if (mappingRelation instanceof SqlSelectSource mappingView) {
                             changeFact(mappingView, dialect, writebackTable, rolapSessionValues);
                         }
                     }
-                    if (fact instanceof org.eclipse.daanse.rolap.mapping.model.database.source.SqlSelectSource mappingView) {
+                    if (fact instanceof SqlSelectSource mappingView) {
                         changeFact(mappingView, dialect, writebackTable, rolapSessionValues);
                     }
                 }
             }
     }
 
-    private void changeFact(org.eclipse.daanse.rolap.mapping.model.database.source.SqlSelectSource mappingView, Dialect dialect, RolapWritebackTable writebackTable, List<Map<String, Map.Entry<Datatype, Object>>> sessionValues) {
+    private void changeFact(SqlSelectSource mappingView, Dialect dialect, RolapWritebackTable writebackTable, List<Map<String, Map.Entry<Datatype, Object>>> sessionValues) {
         if (mappingView.getSql() != null && mappingView.getSql().getDialectStatements() != null) {
             // The appended arms rendered once on the statement model; the existing per-dialect
             // view body stays the mapping-model string it always was.
@@ -2715,14 +2724,14 @@ public abstract class RolapCube extends CubeBase {
                 .toList();
             org.eclipse.daanse.rolap.mapping.model.database.relational.DialectSqlView sqlView = org.eclipse.daanse.rolap.mapping.model.database.relational.RelationalFactory.eINSTANCE.createDialectSqlView();
             sqlView.getDialectStatements().addAll(statements);
-            org.eclipse.daanse.rolap.mapping.model.database.source.SqlSelectSource sqlSelectQuery = SourceFactory.eINSTANCE.createSqlSelectSource();
+            SqlSelectSource sqlSelectQuery = SourceFactory.eINSTANCE.createSqlSelectSource();
             sqlSelectQuery.setSql(sqlView);
             sqlSelectQuery.setAlias(mappingView.getAlias());
             changeFact(sqlSelectQuery);
         }
     }
 
-    private void changeFact(org.eclipse.daanse.rolap.mapping.model.database.source.SqlSelectSource sqls) {
+    private void changeFact(SqlSelectSource sqls) {
         setFact(sqls);
         register();
     }
@@ -2747,9 +2756,9 @@ public abstract class RolapCube extends CubeBase {
      * legacy {@code generateUnionAllSql} shape) — the {@code union all} tail of the writeback
      * fact view, dialect-free until the renderer spells literals and quoting.
      */
-    static java.util.List<org.eclipse.daanse.sql.statement.api.model.Statement> writebackUnionArms(
+    static List<org.eclipse.daanse.sql.statement.api.model.Statement> writebackUnionArms(
             RolapWritebackTable writebackTable, List<Map<String, Map.Entry<Datatype, Object>>> sessionValues) {
-        java.util.List<org.eclipse.daanse.sql.statement.api.model.Statement> arms = new ArrayList<>();
+        List<org.eclipse.daanse.sql.statement.api.model.Statement> arms = new ArrayList<>();
         arms.add(writebackColumnsArm(writebackTable, writebackTable.getSchema(), writebackTable.getName()));
         if (sessionValues != null) {
             for (Map<String, Map.Entry<Datatype, Object>> row : sessionValues) {
@@ -2769,7 +2778,7 @@ public abstract class RolapCube extends CubeBase {
     /** The rendered {@code " union all ..."} tail appended to an existing view-fact body. */
     static String renderWritebackUnionArms(Dialect dialect, RolapWritebackTable writebackTable,
             List<Map<String, Map.Entry<Datatype, Object>>> sessionValues) {
-        java.util.List<org.eclipse.daanse.sql.statement.api.model.Statement> arms =
+        List<org.eclipse.daanse.sql.statement.api.model.Statement> arms =
             writebackUnionArms(writebackTable, sessionValues);
         String rendered = arms.size() == 1
             ? org.eclipse.daanse.rolap.common.SqlRender.render(arms.get(0), dialect).sql()
@@ -2792,6 +2801,23 @@ public abstract class RolapCube extends CubeBase {
     @Override
     public void commit(List<Map<String, Map.Entry<DataTypeJdbc, Object>>> sessionValues, String userId) {
         WritebackUtil.commit(this, catalog.getInternalConnection(), EnumConvertor.convertSessionValues(sessionValues), userId);
+        // the committed rows changed the fact: the shared cell caches and
+        // every external store still answer with pre-writeback values -
+        // flush this cube's measures region so the next read reloads.
+        // BEST-EFFORT: the rows are already permanent, so a flush failure
+        // must not fail the transaction (the caller would retry and insert
+        // the same rows a second time) - stale caches heal on the next
+        // flush, a double insert does not
+        try {
+            org.eclipse.daanse.olap.api.connection.Connection internalConnection =
+                    catalog.getInternalConnection();
+            org.eclipse.daanse.olap.api.cache.CacheControl cacheControl =
+                    internalConnection.getCacheControl(null);
+            cacheControl.flush(cacheControl.createMeasuresRegion(this));
+        } catch (RuntimeException | Error e) {
+            LOGGER.warn("post-commit cache flush failed; caches serve "
+                + "pre-writeback values until the next flush", e);
+        }
     }
 
     @Override

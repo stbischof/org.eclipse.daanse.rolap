@@ -319,6 +319,17 @@ public class CacheControlImpl implements CacheControl {
             // Figure out the bits.
             flushNonUnion(cellRegion, deadline);
         }
+        // fact-derived tuple lists (NON EMPTY crossjoins, HAVING filters,
+        // TopCount orderings) are stale once cells changed: a cell flush
+        // reaches the native tuple caches too - AFTER the region flush,
+        // and here in flushInternal so every entry point (XMLA Refresh,
+        // writeback COMMIT, admin flush) passes it. Conservative full
+        // clear; a native read still in flight can republish a pre-flush
+        // list into the cleared cache - accepted, same as the loader's
+        // rollup-overwrite window.
+        if (connection instanceof AbstractRolapConnection rolapConnection) {
+            rolapConnection.getCatalog().getNativeRegistry().flushNativeSetCaches();
+        }
     }
 
     /**
@@ -753,7 +764,7 @@ public class CacheControlImpl implements CacheControl {
 
             // native tuple lists of the flushed hierarchies are stale now
             ((AbstractRolapConnection) connection).getCatalog().getNativeRegistry()
-                .flushAllNativeSetCache();
+                .flushNativeSetCaches();
         }
         // finally, flush cells now invalid - OUTSIDE the member lock: the
         // cell flush waits on external store futures, and the lock guards
@@ -1030,6 +1041,10 @@ public class CacheControlImpl implements CacheControl {
                 }
                 // Apply it all.
                 ((MemberEditCommandPlus) cmd).commit();
+                // tuple flush LAST (bump/mutate first, clear last) - the
+                // order the publisher's flush-epoch validation relies on
+                ((AbstractRolapConnection) connection).getCatalog().getNativeRegistry()
+                    .flushNativeSetCaches();
             });
         }
     }

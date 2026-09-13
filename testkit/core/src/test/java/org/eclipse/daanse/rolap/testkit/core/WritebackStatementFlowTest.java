@@ -124,4 +124,41 @@ class WritebackStatementFlowTest {
         assertThat(during).isNotSameAs(before);
         assertThat(((org.eclipse.daanse.rolap.element.RolapCube) cube).getFact()).isSameAs(before);
     }
+
+    /**
+     * Native tuple lists computed while the fact unions in a session's
+     * UNCOMMITTED literal rows are session-private: the cube raises its
+     * veto flag for the whole bracket (RolapNativeSet refuses the put)
+     * and drops it at exit. Committed-only brackets (no literals) carry
+     * shared state and are not vetoed.
+     */
+    @Test
+    void sessionLiteralRowsRaiseTheNativeCacheVetoForTheBracket() {
+        var rolapCube = (org.eclipse.daanse.rolap.element.RolapCube) cube;
+        var row = new java.util.LinkedHashMap<String,
+                java.util.Map.Entry<org.eclipse.daanse.olap.api.DataTypeJdbc, Object>>();
+        for (var writebackColumn : rolapCube.getWritebackTable().orElseThrow().getColumns()) {
+            var column = writebackColumn.getColumn();
+            Object value = switch (column.getType()) {
+                case VARCHAR -> "x";
+                default -> 1;
+            };
+            row.put(column.getName(), java.util.Map.entry(column.getType(), value));
+        }
+        boolean[] activeDuring = new boolean[1];
+
+        cube.withPendingRows(java.util.List.of(row), () -> {
+            activeDuring[0] = rolapCube.sessionRowsActive();
+            return null;
+        });
+
+        assertThat(activeDuring[0]).as("veto flag inside the bracket").isTrue();
+        assertThat(rolapCube.sessionRowsActive()).as("dropped at bracket exit").isFalse();
+
+        cube.withPendingRows(java.util.List.of(), () -> {
+            activeDuring[0] = rolapCube.sessionRowsActive();
+            return null;
+        });
+        assertThat(activeDuring[0]).as("committed-only bracket is shared state").isFalse();
+    }
 }

@@ -26,12 +26,14 @@
 
 package org.eclipse.daanse.rolap.common.nativize;
 
-import java.util.HashMap;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.Set;
 
+import org.eclipse.daanse.olap.api.ContextConfig;
 import org.eclipse.daanse.olap.api.evaluator.NativeEvaluator;
 import org.eclipse.daanse.olap.api.function.FunctionDefinition;
 import org.eclipse.daanse.olap.api.query.component.Expression;
@@ -39,24 +41,40 @@ import org.eclipse.daanse.rolap.common.evaluator.RolapEvaluator;
 
 /**
  * Composite of {@link RolapNative}s. Uses chain of responsibility
- * to select the appropriate {@link RolapNative} evaluator.
+ * to select the appropriate {@link RolapNative} evaluator. The evaluator
+ * map is frozen at construction, so every lookup is lock-free.
  */
 public class RolapNativeRegistry extends RolapNative {
 
-    private Map<String, RolapNative> nativeEvaluatorMap =
-        new HashMap<>();
+    private final Map<String, RolapNative> nativeEvaluatorMap;
 
-    private final ReadWriteLock readWriteLock = new ReentrantReadWriteLock();
-    private final Lock readLock = readWriteLock.readLock();
-    private final Lock writeLock = readWriteLock.writeLock();
-
-    public RolapNativeRegistry(boolean enableNativeFilter, boolean enableNativeCrossJoin, boolean enableNativeTopCount) {
+    /**
+     * The enable flags are read live from the config on every createEvaluator
+     * call; nativeTupleCacheMaxTuples is a cache construction parameter and
+     * stays fixed for the registry's lifetime.
+     */
+    public RolapNativeRegistry(ContextConfig config, int nativeTupleCacheMaxTuples) {
         super.setEnabled(true);
-        // Mondrian functions which might be evaluated natively.
-        register("NonEmptyCrossJoin".toUpperCase(), new RolapNativeCrossJoin(enableNativeCrossJoin));
-        register("CrossJoin".toUpperCase(), new RolapNativeCrossJoin(enableNativeCrossJoin));
-        register("TopCount".toUpperCase(), new RolapNativeTopCount(enableNativeTopCount));
-        register("Filter".toUpperCase(), new RolapNativeFilter(enableNativeFilter));
+        Map<String, RolapNative> map = new LinkedHashMap<>();
+        // one instance under both names: identical constraints share the
+        // same tuple cache
+        RolapNativeCrossJoin nativeCrossJoin =
+            new RolapNativeCrossJoin(config::enableNativeCrossJoin, nativeTupleCacheMaxTuples);
+        map.put(upper("NonEmptyCrossJoin"), nativeCrossJoin);
+        map.put(upper("CrossJoin"), nativeCrossJoin);
+        // one instance under both names: the impl derives ASC/DESC from the
+        // function name
+        RolapNativeTopCount nativeTopCount =
+            new RolapNativeTopCount(config::enableNativeTopCount, nativeTupleCacheMaxTuples);
+        map.put(upper("TopCount"), nativeTopCount);
+        map.put(upper("BottomCount"), nativeTopCount);
+        map.put(upper("Filter"),
+            new RolapNativeFilter(config::enableNativeFilter, nativeTupleCacheMaxTuples));
+        this.nativeEvaluatorMap = Map.copyOf(map);
+    }
+
+    private static String upper(String name) {
+        return name.toUpperCase(Locale.ROOT);
     }
 
     /**
@@ -71,36 +89,32 @@ public class RolapNativeRegistry extends RolapNative {
             return null;
         }
 
-        RolapNative rn = null;
-        readLock.lock();
-        try {
-            rn = nativeEvaluatorMap.get(fun.getFunctionMetaData().operationAtom().name().toUpperCase());
-        } finally {
-            readLock.unlock();
-        }
-
+        RolapNative rn = nativeEvaluatorMap.get(upper(fun.getFunctionMetaData().operationAtom().name()));
         if (rn == null) {
             return null;
         }
 
         NativeEvaluator ne = rn.createEvaluator(evaluator, fun, args, enableNativeFilter);
 
-        if (ne != null) {
-            if (listener != null) {
-                NativeEvent e = new NativeEvent(this, ne);
-                listener.foundEvaluator(e);
-            }
+        if (ne != null && listener != null) {
+            listener.foundEvaluator(new NativeEvent(this));
         }
         return ne;
     }
 
-    public void register(String funName, RolapNative rn) {
-        writeLock.lock();
-        try {
-            nativeEvaluatorMap.put(funName, rn);
-        } finally {
-            writeLock.unlock();
+    /**
+     * Tuple-cache stats per registered evaluator; an instance registered
+     * under several names is reported once.
+     */
+    public Map<String, com.github.benmanes.caffeine.cache.stats.CacheStats> nativeCacheStats() {
+        Map<String, com.github.benmanes.caffeine.cache.stats.CacheStats> stats = new LinkedHashMap<>();
+        Set<RolapNative> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Map.Entry<String, RolapNative> entry : nativeEvaluatorMap.entrySet()) {
+            if (entry.getValue() instanceof RolapNativeSet set && seen.add(set)) {
+                stats.put(entry.getKey(), set.cacheStats());
+            }
         }
+        return stats;
     }
 
     /** for testing */
@@ -108,43 +122,24 @@ public class RolapNativeRegistry extends RolapNative {
     public
 	void setListener(Listener listener) {
         super.setListener(listener);
-        readLock.lock();
-        try {
-            for (RolapNative rn : nativeEvaluatorMap.values()) {
-                rn.setListener(listener);
-            }
-        } finally {
-            readLock.unlock();
+        for (RolapNative rn : nativeEvaluatorMap.values()) {
+            rn.setListener(listener);
         }
     }
 
-    /** for testing */
-    @Override
-    public
-	void useHardCache(boolean hard) {
-        readLock.lock();
-        try {
-            for (RolapNative rn : nativeEvaluatorMap.values()) {
-                rn.useHardCache(hard);
-            }
-        } finally {
-            readLock.unlock();
-        }
+
+    /** Drops every evaluator's tuple cache. */
+    public void flushNativeSetCaches() {
+        forEachDistinctSet(RolapNativeSet::flushCache);
     }
 
-    public void flushAllNativeSetCache() {
-        readLock.lock();
-        try {
-            for (String key : nativeEvaluatorMap.keySet()) {
-                RolapNative currentRolapNative = nativeEvaluatorMap.get(key);
-                if (currentRolapNative instanceof RolapNativeSet currentRolapNativeSet
-                        && currentRolapNative != null)
-                {
-                    currentRolapNativeSet.flushCache();
-                }
+    /** One visit per instance - registration under several names is normal. */
+    private void forEachDistinctSet(java.util.function.Consumer<RolapNativeSet> action) {
+        Set<RolapNative> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (RolapNative rolapNative : nativeEvaluatorMap.values()) {
+            if (rolapNative instanceof RolapNativeSet set && seen.add(set)) {
+                action.accept(set);
             }
-        } finally {
-            readLock.unlock();
         }
     }
 }

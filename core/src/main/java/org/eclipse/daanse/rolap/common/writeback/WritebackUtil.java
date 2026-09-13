@@ -84,6 +84,10 @@ public class WritebackUtil {
             AllocationPolicy allocationPolicy, Role role
         ) {
             List<Map<String, Map.Entry<DataTypeJdbc, Object>>> res = new ArrayList<>();
+            // the resolved value arrives as whatever the expression produced:
+            // Double, Integer, BigDecimal or null - a hard (Double) cast blew
+            // up on the first Integer literal or empty expression
+            final Double doubleValue = AllocationPolicyApplier.num(value);
             //[D1.HierarchyWithHasAll].[Level11], [Measures].[Measure1]
                 Optional<RolapWritebackTable> oWritebackTable = rolapCube.getWritebackTable();
                 if (oWritebackTable.isPresent()) {
@@ -103,7 +107,7 @@ public class WritebackUtil {
                             Optional<Member> oMember =
                                 rolapCube.getMeasures().stream().filter(m -> m.getUniqueName().equals(measureName)).findFirst();
                             if (oMember.isPresent() && oMember.get() instanceof RolapBaseCubeMeasure rolapBaseCubeMeasure) {
-                                if (!tuples.isEmpty()) {
+                                if (tuples.size() > 1) {
                                     String hierarchyName = tuples.get(1);
                                     Optional<Hierarchy> oRolapHierarchy =
                                         rolapCube.getHierarchies().stream()
@@ -127,7 +131,7 @@ public class WritebackUtil {
                                         }
                                         List<Set<Member>> rowMembers = getRowMembers(writebackTable, hierarchy.getDimension(), rolapCube, filterList, role);
                                         Map<List<Member>, Object> data = getData(columnMembers, rowMembers, rolapBaseCubeMeasure.getUniqueName(), rolapCube);
-                                        res.addAll(AllocationPolicyApplier.allocateData(data, measureName, (Double) value, allocationPolicy, writebackTable));
+                                        res.addAll(AllocationPolicyApplier.allocateData(data, measureName, doubleValue, allocationPolicy, writebackTable));
                                     }
                                 } else {
                                     List<Hierarchy> hs = rolapCube.getHierarchies();
@@ -142,10 +146,15 @@ public class WritebackUtil {
                                         if (!filterList.isEmpty()) {
                                             List<IdentifierSegment> fIdentifierSegment = filterList.getFirst();
                                             String filterUnicalName = getUnicalNameFromIdentifierSegment(fIdentifierSegment);
+                                            // a one-segment filter like [Year] has no hierarchy part
+                                            String filterDimensionName = fIdentifierSegment.isEmpty()
+                                                    ? null : fIdentifierSegment.get(0).getName();
+                                            String filterHierarchyName = fIdentifierSegment.size() > 1
+                                                    ? fIdentifierSegment.get(1).getName() : null;
                                             Optional<Hierarchy> oHierarchy = hs.stream()
-                                                    .filter(h -> (!h.getDimension().isMeasures() && 
-                                                        !h.getDimension().getName().equals(fIdentifierSegment.get(0).getName()) && 
-                                                        !h.getName().equals(fIdentifierSegment.get(1).getName()))).findFirst();
+                                                    .filter(h -> (!h.getDimension().isMeasures() &&
+                                                        !h.getDimension().getName().equals(filterDimensionName) &&
+                                                        !h.getName().equals(filterHierarchyName))).findFirst();
                                             if (oHierarchy.isPresent()) {
                                                 Hierarchy rolapCubeHierarchy = oHierarchy.get();
                                                 List<? extends Level> levels = rolapCubeHierarchy.getLevels();
@@ -154,7 +163,7 @@ public class WritebackUtil {
                                                         rolapCube, rolapCubeHierarchy, role);
                                                     List<Set<Member>> rowMembers = getRowMembers(writebackTable, rolapCubeHierarchy.getDimension(), rolapCube, filterList, role);
                                                     Map<List<Member>, Object> data = getData(columnMembers, rowMembers, rolapBaseCubeMeasure.getUniqueName(), rolapCube);
-                                                    res.addAll(AllocationPolicyApplier.allocateData(data, measureName, (Double) value, allocationPolicy,
+                                                    res.addAll(AllocationPolicyApplier.allocateData(data, measureName, doubleValue, allocationPolicy,
                                                         writebackTable));
                                                 }
                                             } else {
@@ -168,7 +177,7 @@ public class WritebackUtil {
                                                                 Set<Member> filterColumnMembers = columnMembers.stream().filter(m -> m.getUniqueName().startsWith(filterUnicalName)).collect(Collectors.toSet());
                                                                 List<Set<Member>> rowMembers = getRowMembers(writebackTable, rolapCubeHierarchy.getDimension(), rolapCube, List.of(), role);
                                                                 Map<List<Member>, Object> data = getData(filterColumnMembers, rowMembers, rolapBaseCubeMeasure.getUniqueName(), rolapCube);
-                                                                res.addAll(AllocationPolicyApplier.allocateData(data, measureName, (Double) value, allocationPolicy,
+                                                                res.addAll(AllocationPolicyApplier.allocateData(data, measureName, doubleValue, allocationPolicy,
                                                                     writebackTable));
                                                                 break;
                                                             }
@@ -187,7 +196,7 @@ public class WritebackUtil {
                                                                 rolapCube, rolapCubeHierarchy, role);
                                                             List<Set<Member>> rowMembers = getRowMembers(writebackTable, rolapCubeHierarchy.getDimension(), rolapCube, List.of(), role);
                                                             Map<List<Member>, Object> data = getData(columnMembers, rowMembers, rolapBaseCubeMeasure.getUniqueName(), rolapCube);
-                                                            res.addAll(AllocationPolicyApplier.allocateData(data, measureName, (Double) value, allocationPolicy,
+                                                            res.addAll(AllocationPolicyApplier.allocateData(data, measureName, doubleValue, allocationPolicy,
                                                                 writebackTable));
                                                             break;
                                                         }
@@ -198,7 +207,7 @@ public class WritebackUtil {
                                     } else {
                                         // Hierarchies is absent
                                         Map<List<Member>, Object> data = getData(rolapBaseCubeMeasure, rolapCube);
-                                        res.addAll(AllocationPolicyApplier.allocateData(data, measureName, (Double) value, allocationPolicy,
+                                        res.addAll(AllocationPolicyApplier.allocateData(data, measureName, doubleValue, allocationPolicy,
                                             writebackTable));
                                     }
                                 }
@@ -396,7 +405,8 @@ public class WritebackUtil {
             cube.getCatalog().getInternalConnection();
         final Query query = connection.parseQuery(mdx);
         final Result result = connection.execute(query);
-        res.put(List.of(measure), result.getCell(new int[]{0}).getValue());
+        Object cellValue = result.getCell(new int[]{0}).getValue();
+        res.put(List.of(measure), cellValue == null ? 0d : cellValue);
         return res;
     }
 
@@ -428,7 +438,8 @@ public class WritebackUtil {
         final Result result = connection.execute(query);
         int i = 0;
         for (Member m : members) {
-            res.put(List.of(m), result.getCell(new int[]{i}).getValue());
+            Object cellValue = result.getCell(new int[]{i}).getValue();
+            res.put(List.of(m), cellValue == null ? 0d : cellValue);
             i++;
         }
         return res;
@@ -487,10 +498,13 @@ public class WritebackUtil {
                 cube.getCatalog().getInternalConnection();
             final Query query = connection.parseQuery(mdx);
             final Result result = connection.execute(query);
-            org.eclipse.daanse.olap.api.result.Axis rAxis = result.getAxes()[0];
-            org.eclipse.daanse.olap.api.result.Axis cAxis = result.getAxes()[1];
-            List<List<Member>> rows = rAxis.getTupleList();
-            List<List<Member>> cols = cAxis.getTupleList();
+            // axes index by ORDINAL, not MDX text order: [0] is COLUMNS,
+            // [1] is ROWS - the old rAxis/cAxis names had it backwards and
+            // were only accidentally consistent
+            org.eclipse.daanse.olap.api.result.Axis columnsAxis = result.getAxes()[0];
+            org.eclipse.daanse.olap.api.result.Axis rowsAxis = result.getAxes()[1];
+            List<List<Member>> rows = columnsAxis.getTupleList();
+            List<List<Member>> cols = rowsAxis.getTupleList();
             for (int rIdx = 0; rIdx < rows.size(); rIdx++) {
                 List<Member> rowTuple = rows.get(rIdx);
                 for (int cIdx = 0; cIdx < cols.size(); cIdx++) {

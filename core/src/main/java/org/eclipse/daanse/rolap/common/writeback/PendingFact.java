@@ -56,6 +56,11 @@ public final class PendingFact {
      * {@code restore} runs however {@code work} ends - a statement that fails must
      * not leave the cube describing the session it failed in.
      */
+    /** Whether the CURRENT thread already runs inside a bracket (nesting probe). */
+    public boolean isHeldByCurrentThread() {
+        return lock.isHeldByCurrentThread();
+    }
+
     public <T> T run(FactChange modify, Supplier<T> work, FactChange restore) {
         lock.lock();
         try {
