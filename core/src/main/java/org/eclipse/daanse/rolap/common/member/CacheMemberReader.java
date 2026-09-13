@@ -49,11 +49,16 @@ import org.eclipse.daanse.rolap.element.RolapMemberBase;
  * CacheMemberReader implements {@link MemberReader} by reading
  * from a pre-populated array of {@link org.eclipse.daanse.olap.api.element.Member}s.
  * Note: CacheMemberReader can not handle ragged hierarchies. (HR
- * Tests fail if {@link SmartMemberReader} is replaced with
+ * Tests fail if {@link CachingMemberReader} is replaced with
  * CacheMemberReader).
  *
- * @author jhyde
- * @since 21 December, 2001
+ * Despite the name NOT a cache in the sense of the rest of this
+ * package: an EAGER reader over a fixed member list, materialized once
+ * at construction (ordinals assigned there). Used exclusively for the
+ * measures hierarchy - it cannot handle ragged hierarchies and never
+ * evicts. The backing map is an unsynchronized HashMap; that is safe
+ * only because the set is complete before publication and putMember
+ * afterwards only re-offers known members.
  */
 public class CacheMemberReader implements MemberReader, MemberCache {
     private final MemberSource source;
@@ -63,11 +68,7 @@ public class CacheMemberReader implements MemberReader, MemberCache {
 
     public CacheMemberReader(MemberSource source) {
         this.source = source;
-        if (false) {
-            // we don't want the reader to write back to our cache
-        	source.setCache(this);
-//            discard();
-        }
+        // the source never writes back into this cache
         this.mapKeyToMember = new HashMap<>();
         this.members = source.getMembers();
         for (int i = 0; i < members.size(); i++) {
@@ -124,15 +125,12 @@ public class CacheMemberReader implements MemberReader, MemberCache {
 	public RolapMember getMember(Object key) {
         return mapKeyToMember.get(key);
     }
-    @Override
-	public RolapMember getMember(Object key, boolean mustCheckCacheStatus) {
-        return mapKeyToMember.get(key);
-    }
 
     // implement MemberCache
     @Override
-	public Object putMember(Object key, RolapMember value) {
-        return mapKeyToMember.put(key, value);
+	public RolapMember putMember(Object key, RolapMember value) {
+        RolapMember existing = mapKeyToMember.putIfAbsent(key, value);
+        return existing != null ? existing : value;
     }
 
     // don't need to implement this MemberCache method because we're never
@@ -157,21 +155,8 @@ public class CacheMemberReader implements MemberReader, MemberCache {
         throw new UnsupportedOperationException();
     }
 
-    // this cache is immutable
-    @Override
-	public boolean isMutable()
-    {
-        return false;
-    }
-
     @Override
 	public RolapMember removeMember(Object key)
-    {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-	public RolapMember removeMemberAndDescendants(Object key)
     {
         throw new UnsupportedOperationException();
     }

@@ -53,10 +53,9 @@ import  org.eclipse.daanse.olap.util.Pair;
 import org.eclipse.daanse.rolap.api.element.RolapMember;
 import org.eclipse.daanse.rolap.common.RolapUtil;
 import org.eclipse.daanse.rolap.common.agg.CellRequest;
-import org.eclipse.daanse.rolap.common.cache.HardSmartCache;
 import org.eclipse.daanse.rolap.common.catalog.RolapCatalogReader;
-import org.eclipse.daanse.rolap.common.member.MemberCacheHelper;
-import org.eclipse.daanse.rolap.common.member.SmartMemberReader;
+import org.eclipse.daanse.rolap.common.member.MemberCacheImpl;
+import org.eclipse.daanse.rolap.common.member.CachingMemberReader;
 import org.eclipse.daanse.rolap.common.nativize.RolapNative.Listener;
 import org.eclipse.daanse.rolap.common.nativize.RolapNative.NativeEvent;
 import org.eclipse.daanse.rolap.common.nativize.RolapNative.TupleEvent;
@@ -416,11 +415,11 @@ public class BatchTestCase{
                             new IdImpl.NameSegmentImpl("Store", Quoting.UNQUOTED),
                             false);
             if (hierarchy != null) {
-                SmartMemberReader memberReader =
-                    (SmartMemberReader) hierarchy.getMemberReader();
-                MemberCacheHelper cacheHelper = memberReader.cacheHelper;
-                cacheHelper.mapLevelToMembers.cache.clear();
-                cacheHelper.mapMemberToChildren.cache.clear();
+                CachingMemberReader memberReader =
+                    (CachingMemberReader) hierarchy.getMemberReader();
+                MemberCacheImpl memberCache = memberReader.memberCache;
+                memberCache.mapLevelToMembers.getCache().clear();
+                memberCache.mapMemberToChildren.getCache().clear();
             }
         }
         // Flush the cache, to ensure that the query gets executed.
@@ -480,14 +479,8 @@ public class BatchTestCase{
         return s;
     }
 
-    void clearAndHardenCache(MemberCacheHelper helper) {
-        helper.mapLevelToMembers.setCache(
-            new HardSmartCache<Pair<RolapLevel, Object>, List<RolapMember>>());
-        helper.mapMemberToChildren.setCache(
-            new HardSmartCache<Pair<RolapMember, Object>, List<RolapMember>>());
-        helper.mapKeyToMember.clear();
-        helper.mapParentToNamedChildren.setCache(
-            new HardSmartCache<RolapMember, Collection<RolapMember>>());
+    void clearMemberCache(MemberCacheImpl helper) {
+        helper.flushCache();
     }
 
     protected RolapStar.Measure getMeasure(Connection connection, String cube, String measureName) {
@@ -632,7 +625,8 @@ public class BatchTestCase{
             //        .getConnection();
             Connection con = context.getConnectionWithDefaultRole();
             RolapNativeRegistry reg = getRegistry(con);
-            reg.useHardCache(true);
+            // the native tuple cache is strongly referenced and bounded, so
+            // the second run below is guaranteed to hit it
             TestListener listener = new TestListener();
             reg.setListener(listener);
             reg.setEnabled(true);
@@ -698,7 +692,6 @@ public class BatchTestCase{
             Connection con = context.getConnectionWithDefaultRole();
             RolapNativeRegistry reg = getRegistry(con);
             reg.setEnabled(true);
-            reg.useHardCache(false);
         }
     }
 

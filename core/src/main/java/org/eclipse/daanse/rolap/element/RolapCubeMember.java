@@ -51,7 +51,7 @@ public class RolapCubeMember
     extends DelegatingRolapMember
     implements RolapMemberInCube, CubeMember
 {
-    protected RolapCubeLevel cubeLevel;
+    protected final RolapCubeLevel cubeLevel;
     protected final RolapCubeMember parentCubeMember;
 
     /**
@@ -191,10 +191,19 @@ public class RolapCubeMember
         return cubeLevel;
     }
 
+    /**
+     * Cube-local ordinal. The shared member's ordinal depends on load order
+     * and may differ between cubes; a value set here shadows it.
+     */
+    private int ordinal = Integer.MIN_VALUE;
+
     @Override
-    public final void setLevel(Level level) {
-        super.setLevel(level);
-        this.cubeLevel = (RolapCubeLevel)level;
+    public int getOrdinal() {
+        return ordinal == Integer.MIN_VALUE ? member.getOrdinal() : ordinal;
+    }
+
+    public void setOrdinal(int ordinal) {
+        this.ordinal = ordinal;
     }
 
     @Override

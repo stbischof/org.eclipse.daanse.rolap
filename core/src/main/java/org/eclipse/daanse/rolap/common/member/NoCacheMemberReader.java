@@ -48,7 +48,7 @@ import org.eclipse.daanse.rolap.common.sql.MemberChildrenConstraint;
 import org.eclipse.daanse.rolap.common.sql.TupleConstraint;
 import org.eclipse.daanse.rolap.element.RolapHierarchy;
 import org.eclipse.daanse.rolap.element.RolapLevel;
-import org.eclipse.daanse.rolap.util.ConcatenableList;
+import org.eclipse.daanse.olap.util.ConcatenableList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -56,8 +56,15 @@ import org.slf4j.LoggerFactory;
  * NoCacheMemberReader implements {@link MemberReader} but
  * without doing any kind of caching and avoiding to read all members.
  *
- * @author jlopez, lcanals
- * @since 06 October, 2007
+ * Chosen for members=off (daanse:cache.members, via CachePolicy and
+ * RolapCatalog's shared-reader swap): reads straight through to SQL and
+ * implements MemberCache as a no-op. It still carries a
+ * {@link MemberLoadRegistry} whose generation the flush paths bump via
+ * {@link #removeMember}: nothing is cached HERE, but readers stacked
+ * above (the role-restricted reader's 1000-entry children cache) fence
+ * on that registry - and member edits require exactly this
+ * configuration, so without the bump their cache was never invalidated
+ * (the K5 gap, closed narrowly instead of the re-home design).
  */
 public class NoCacheMemberReader implements MemberReader, MemberCache {
     private static final Logger LOGGER =
@@ -68,6 +75,8 @@ public class NoCacheMemberReader implements MemberReader, MemberCache {
 
     private final MemberReader source;
 
+    /** Fence channel for readers stacked above; see the class comment. */
+    private final MemberLoadRegistry loadRegistry = new MemberLoadRegistry();
 
     public NoCacheMemberReader(MemberReader source) {
         this.source = source;
@@ -80,20 +89,16 @@ public class NoCacheMemberReader implements MemberReader, MemberCache {
 
     // implementes MemberCache
     @Override
-	public boolean isMutable() {
-        return false;
-    }
-
-    // implementes MemberCache
-    @Override
 	public RolapMember removeMember(Object key) {
+        // nothing cached here, but the bump is the flush fence for
+        // readers stacked above this one
+        loadRegistry.bumpGeneration();
         return null;
     }
 
-    // implementes MemberCache
-    @Override
-	public RolapMember removeMemberAndDescendants(Object key) {
-        return null;
+    /** The registry readers above fence on; flushes bump it. */
+    public MemberLoadRegistry loadRegistry() {
+        return loadRegistry;
     }
 
     // implement MemberReader
@@ -111,20 +116,11 @@ public class NoCacheMemberReader implements MemberReader, MemberCache {
     // implement MemberCache
     @Override
 	public Object makeKey(final RolapMember parent, final Object key) {
-        LOGGER.debug("Entering makeKey");
-        return new MemberKeyR(parent, key);
+                return new MemberKeyR(parent, key);
     }
 
     @Override
-	public synchronized RolapMember getMember(final Object key) {
-        return getMember(key, true);
-    }
-
-    @Override
-	public RolapMember getMember(
-        final Object key,
-        final boolean mustCheckCacheStatus)
-    {
+	public RolapMember getMember(final Object key) {
         LOGGER.debug("Returning null member: no cache");
         return null;
     }
@@ -132,8 +128,7 @@ public class NoCacheMemberReader implements MemberReader, MemberCache {
 
     // implement MemberCache
     @Override
-	public Object putMember(final Object key, final RolapMember value) {
-        LOGGER.debug("putMember void for no caching");
+	public RolapMember putMember(final Object key, final RolapMember value) {
         return value;
     }
 

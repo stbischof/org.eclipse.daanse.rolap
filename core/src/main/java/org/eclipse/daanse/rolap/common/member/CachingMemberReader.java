@@ -25,7 +25,6 @@
  *   SmartCity Jena - initial
  */
 
-
 package org.eclipse.daanse.rolap.common.member;
 
 import java.util.ArrayList;
@@ -34,6 +33,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 import org.eclipse.daanse.olap.api.access.AccessMember;
 import org.eclipse.daanse.olap.api.agg.Segment;
@@ -47,16 +47,16 @@ import org.eclipse.daanse.rolap.common.sql.MemberChildrenConstraint;
 import org.eclipse.daanse.rolap.common.sql.TupleConstraint;
 import org.eclipse.daanse.rolap.element.RolapHierarchy;
 import org.eclipse.daanse.rolap.element.RolapLevel;
-import org.eclipse.daanse.rolap.util.ConcatenableList;
+import org.eclipse.daanse.olap.util.ConcatenableList;
 
 /**
- * SmartMemberReader implements {@link MemberReader} by keeping a
+ * CachingMemberReader implements {@link MemberReader} by keeping a
  * cache of members and their children. If a member is 'in cache', there is a
  * list of its children. It also caches the members of levels.
  *
- * Synchronization: the MemberReader source must be called
- * from synchronized(this) context - it does not synchronize itself (probably
- * it should).
+ * Concurrency: cache reads are lock-free; loads are coordinated per cache
+ * key by a {@link MemberLoadRegistry}, so SQL never runs under a lock and
+ * concurrent readers of the same key share one load.
  *
  * Constraints: Member.Children and Level.Members may be constrained by a
  * SqlConstraint object. In this case a subset of all members is returned.
@@ -69,25 +69,33 @@ import org.eclipse.daanse.rolap.util.ConcatenableList;
  * @author jhyde
  * @since 21 December, 2001
  */
-public class SmartMemberReader implements MemberReader {
+public class CachingMemberReader implements MemberReader {
     private final SqlConstraintFactory sqlConstraintFactory =
         SqlConstraintFactory.instance();
 
-    /** access to source must be synchronized(this) */
     protected final MemberReader source;
 
-    public final MemberCacheHelper cacheHelper;
+    public final MemberCacheImpl memberCache;
 
-    protected List<RolapMember> rootMembers;
+    /** coordinates concurrent loads and fences cache writes against flushes */
+    private final MemberLoadRegistry loadRegistry = new MemberLoadRegistry();
 
-    public SmartMemberReader(MemberReader source) {
-        this(source, true);
+    /** The registry whose generation fences every cache fed by this reader. */
+    public MemberLoadRegistry loadRegistry() {
+        return loadRegistry;
     }
 
-    SmartMemberReader(MemberReader source, boolean cacheWriteback) {
+    /** Root members stamped with the flush generation they were read under. */
+    private record RootsMemo(long generation, List<RolapMember> members) {
+    }
+
+    private volatile RootsMemo rootsMemo;
+
+    public CachingMemberReader(MemberReader source) {
         this.source = source;
-        this.cacheHelper = new MemberCacheHelper(source.getHierarchy());
-        if (cacheWriteback && !source.setCache(cacheHelper)) {
+        this.memberCache = new MemberCacheImpl(source.getHierarchy());
+        this.memberCache.setLoadRegistry(loadRegistry);
+        if (!source.setCache(memberCache)) {
             throw Util.newInternal(
                 new StringBuilder("MemberSource (")
                     .append(source)
@@ -103,7 +111,7 @@ public class SmartMemberReader implements MemberReader {
     }
 
     public MemberCache getMemberCache() {
-        return cacheHelper;
+        return memberCache;
     }
 
     // implement MemberSource
@@ -147,10 +155,37 @@ public class SmartMemberReader implements MemberReader {
 
     @Override
 	public List<RolapMember> getRootMembers() {
-        if (rootMembers == null) {
-            rootMembers = source.getRootMembers();
+        return memoizedRoots(source::getRootMembers);
+    }
+
+    /**
+     * Generation-stamped memoization of the root members: a memo written
+     * by a load that raced a flush must not stick. The plain null-check
+     * memo had two holes - a loader that read null before the flush
+     * installed its pre-flush roots afterwards, and removeMember (which
+     * only bumps the generation) never invalidated the memo at all, so a
+     * deleted root member stayed visible via getRootMembers() and
+     * getDefaultMember() for the life of the reader.
+     */
+    protected List<RolapMember> memoizedRoots(
+            Supplier<List<RolapMember>> loader) {
+        final long generation = loadRegistry.generation();
+        final RootsMemo memo = rootsMemo;
+        if (memo != null && memo.generation() == generation) {
+            return memo.members();
         }
-        return rootMembers;
+        final List<RolapMember> roots = loader.get();
+        // install only if no flush intervened while we were reading
+        if (loadRegistry.generation() == generation) {
+            rootsMemo = new RootsMemo(generation, roots);
+        }
+        return roots;
+    }
+
+    /** Empties the member cache and the memoized root members together. */
+    public void flushCache() {
+        rootsMemo = null;
+        memberCache.flushCache();
     }
 
     @Override
@@ -162,25 +197,39 @@ public class SmartMemberReader implements MemberReader {
         return getMembersInLevel(level, constraint);
     }
 
-
-
     @Override
 	public List<RolapMember> getMembersInLevel(
         RolapLevel level, TupleConstraint constraint)
     {
-        synchronized (cacheHelper) {
-
-            List<RolapMember> members =
-                cacheHelper.getLevelMembersFromCache(level, constraint);
-            if (members != null) {
-                return members;
-            }
-
-            members =
-                source.getMembersInLevel(
-                    level, constraint);
-            cacheHelper.putLevelMembersInCache(level, constraint, members);
+        List<RolapMember> members =
+            memberCache.getLevelMembersFromCache(level, constraint);
+        if (members != null) {
             return members;
+        }
+        Object constraintKey = constraint.getCacheKey();
+        if (constraintKey == null || loadRegistry.inLoad()) {
+            // not cacheable, or a load on this thread asks for more members
+            return source.getMembersInLevel(level, constraint);
+        }
+        MemberLoadRegistry.Claim claim = loadRegistry.claim(
+            new MemberLoadRegistry.LevelKey(level, constraintKey));
+        if (!claim.loader()) {
+            return loadRegistry.await(claim);
+        }
+        loadRegistry.enterLoad();
+        try {
+            members = memberCache.getLevelMembersFromCache(level, constraint);
+            if (members == null) {
+                members = source.getMembersInLevel(level, constraint);
+                memberCache.putChildren(level, constraint, members);
+            }
+            loadRegistry.complete(claim, members);
+            return members;
+        } catch (RuntimeException | Error e) {
+            loadRegistry.fail(claim, e);
+            throw e;
+        } finally {
+            loadRegistry.exitLoad();
         }
     }
 
@@ -228,26 +277,120 @@ public class SmartMemberReader implements MemberReader {
         List<RolapMember> children,
         MemberChildrenConstraint constraint)
     {
-        synchronized (cacheHelper) {
-
-            List<RolapMember> missed = new ArrayList<>();
-            for (RolapMember parentMember : parentMembers) {
-                List<RolapMember> list =
-                    cacheHelper.getChildrenFromCache(parentMember, constraint);
-                if (list == null) {
-                    // the null member has no children
-                    if (!parentMember.isNull()) {
-                        missed.add(parentMember);
-                    }
-                } else {
-                    children.addAll(list);
+        List<RolapMember> missed = new ArrayList<>();
+        for (RolapMember parentMember : parentMembers) {
+            List<RolapMember> list =
+                childrenCache().getChildrenFromCache(parentMember, constraint);
+            if (list == null) {
+                // the null member has no children
+                if (!parentMember.isNull()) {
+                    missed.add(parentMember);
                 }
+            } else {
+                children.addAll(list);
             }
-            if (!missed.isEmpty()) {
+        }
+        if (!missed.isEmpty()) {
+            Object constraintKey = constraint.getCacheKey();
+            if (constraintKey == null || loadRegistry.inLoad()) {
                 readMemberChildren(missed, children, constraint);
+            } else {
+                loadMemberChildren(missed, children, constraint, constraintKey);
             }
         }
         return Util.toNullValuesMap(children);
+    }
+
+    /**
+     * The cache whose children entries {@link #getMemberChildren} consults;
+     * the cube reader overrides it with the cube-member cache.
+     */
+    protected MemberCacheImpl childrenCache() {
+        return memberCache;
+    }
+
+    /**
+     * Loads children of the missed parents, one load claim per parent: this
+     * thread loads the parents it claimed in one batch, and awaits the
+     * parents another thread is already loading.
+     */
+    private void loadMemberChildren(
+        List<RolapMember> missed,
+        List<RolapMember> result,
+        MemberChildrenConstraint constraint,
+        Object constraintKey)
+    {
+        List<RolapMember> toLoad = new ArrayList<>();
+        List<MemberLoadRegistry.Claim> ownClaims = new ArrayList<>();
+        List<MemberLoadRegistry.Claim> waits = new ArrayList<>();
+        // the try covers the claim call itself: a throw from claim() (or
+        // from the cache probe) fails every owner claim already taken -
+        // the counted-prefix discipline of withMemberLoadFences; a leaked
+        // claim strands every later claimer of the key for the full await
+        // timeout
+        try {
+            for (RolapMember parent : missed) {
+                MemberLoadRegistry.Claim claim = loadRegistry.claim(
+                    new MemberLoadRegistry.ChildrenKey(parent, constraintKey));
+                if (!claim.loader()) {
+                    waits.add(claim);
+                    continue;
+                }
+                ownClaims.add(claim);
+                List<RolapMember> cached =
+                    childrenCache().getChildrenFromCache(parent, constraint);
+                if (cached != null) {
+                    result.addAll(cached);
+                    loadRegistry.complete(claim, cached);
+                    ownClaims.remove(ownClaims.size() - 1);
+                } else {
+                    toLoad.add(parent);
+                }
+            }
+        } catch (RuntimeException | Error e) {
+            for (MemberLoadRegistry.Claim own : ownClaims) {
+                try {
+                    loadRegistry.fail(own, e);
+                } catch (RuntimeException suppressed) {
+                    e.addSuppressed(suppressed);
+                }
+            }
+            throw e;
+        }
+        if (!toLoad.isEmpty()) {
+            loadRegistry.enterLoad();
+            try {
+                List<RolapMember> loaded = new ArrayList<>();
+                readMemberChildren(toLoad, loaded, constraint);
+                result.addAll(loaded);
+                // complete each claim with its parent's slice
+                Map<RolapMember, List<RolapMember>> byParent = new HashMap<>();
+                for (RolapMember parent : toLoad) {
+                    byParent.put(parent, new ArrayList<>());
+                }
+                for (RolapMember child : loaded) {
+                    List<RolapMember> slice = byParent.get(child.getParentMember());
+                    if (slice != null) {
+                        slice.add(child);
+                    }
+                }
+                for (int i = 0; i < toLoad.size(); i++) {
+                    loadRegistry.complete(ownClaims.get(i), byParent.get(toLoad.get(i)));
+                }
+            } catch (RuntimeException | Error e) {
+                for (MemberLoadRegistry.Claim claim : ownClaims) {
+                    if (!claim.future().isDone()) {
+                        loadRegistry.fail(claim, e);
+                    }
+                }
+                throw e;
+            } finally {
+                loadRegistry.exitLoad();
+            }
+        }
+        for (MemberLoadRegistry.Claim wait : waits) {
+            result.addAll(loadRegistry.await(wait));
+        }
     }
 
     @Override
@@ -272,16 +415,6 @@ public class SmartMemberReader implements MemberReader {
         List<RolapMember> result,
         MemberChildrenConstraint constraint)
     {
-        if (false) {
-            // Pre-condition disabled. It makes sense to have the pre-
-            // condition, because lists of parent members are typically
-            // sorted by construction, and we should be able to exploit this
-            // when constructing the (significantly larger) set of children.
-            // But currently BasicQueryTest.testBasketAnalysis() fails this
-            // assert, and I haven't had time to figure out why.
-            //   -- jhyde, 2004/6/10.
-            Util.assertPrecondition(isSorted(members), "isSorted(members)");
-        }
         List<RolapMember> children = new ConcatenableList<>();
         source.getMemberChildren(members, children, constraint);
         // Put them in a temporary hash table first. Register them later, when
@@ -312,78 +445,56 @@ public class SmartMemberReader implements MemberReader {
                 list = new ArrayList<>();
                 tempMap.put(parentMember, list);
             }
-            ((List)list).add(child);
-            ((List)result).add(child);
+            list.add(child);
+            result.add(child);
         }
-        synchronized (cacheHelper) {
-            for (Map.Entry<RolapMember, List<RolapMember>> entry
-                : tempMap.entrySet())
+        for (Map.Entry<RolapMember, List<RolapMember>> entry
+            : tempMap.entrySet())
+        {
+            final RolapMember member = entry.getKey();
+            // deliberately the inherited cache, NOT childrenCache(): the
+            // cube reader stores the raw source children here and caches
+            // its wrapper members in childrenCache() itself
+            if (memberCache.getChildrenFromCache(member, constraint)
+                == null)
             {
-                final RolapMember member = entry.getKey();
-                if (cacheHelper.getChildrenFromCache(member, constraint)
-                    == null)
-                {
-                    final List<RolapMember> list = entry.getValue();
-                    cacheHelper.putChildren(member, constraint, list);
-                }
+                // never publish the immutable empty sentinel: cached
+                // children lists stay mutable for in-place removal
+                final List<RolapMember> list = entry.getValue();
+                memberCache.putChildren(member, constraint,
+                    list == Collections.EMPTY_LIST
+                        ? new ArrayList<>() : list);
             }
         }
-    }
-
-    /**
-     * Returns true if every element of members is not null and is
-     * strictly less than the following element; false otherwise.
-     */
-    public boolean isSorted(List<RolapMember> members) {
-        final int count = members.size();
-        if (count == 0) {
-            return true;
-        }
-        RolapMember m1 = members.getFirst();
-        if (m1 == null) {
-            // Special case check for 0th element, just in case length == 1.
-            return false;
-        }
-        for (int i = 1; i < count; i++) {
-            RolapMember m0 = m1;
-            m1 = members.get(i);
-            if (m1 == null || compare(m0, m1, false) >= 0) {
-                return false;
-            }
-        }
-        return true;
     }
 
     @Override
 	public RolapMember getLeadMember(RolapMember member, int n) {
-        // uncertain if this method needs to be synchronized
-        synchronized (cacheHelper) {
-            if (n == 0 || member.isNull()) {
-                return member;
-            } else {
-                SiblingIterator iter = new SiblingIterator(this, member);
-                if (n > 0) {
-                    RolapMember sibling = null;
-                    while (n-- > 0) {
-                        if (!iter.hasNext()) {
-                            return (RolapMember)
-                                member.getHierarchy().getNullMember();
-                        }
-                        sibling = iter.nextMember();
+        if (n == 0 || member.isNull()) {
+            return member;
+        } else {
+            SiblingIterator iter = new SiblingIterator(this, member);
+            if (n > 0) {
+                RolapMember sibling = null;
+                while (n-- > 0) {
+                    if (!iter.hasNext()) {
+                        return (RolapMember)
+                            member.getHierarchy().getNullMember();
                     }
-                    return sibling;
-                } else {
-                    n = -n;
-                    RolapMember sibling = null;
-                    while (n-- > 0) {
-                        if (!iter.hasPrevious()) {
-                            return (RolapMember)
-                                member.getHierarchy().getNullMember();
-                        }
-                        sibling = iter.previousMember();
-                    }
-                    return sibling;
+                    sibling = iter.nextMember();
                 }
+                return sibling;
+            } else {
+                n = -n;
+                RolapMember sibling = null;
+                while (n-- > 0) {
+                    if (!iter.hasPrevious()) {
+                        return (RolapMember)
+                            member.getHierarchy().getNullMember();
+                    }
+                    sibling = iter.previousMember();
+                }
+                return sibling;
             }
         }
     }
@@ -545,10 +656,6 @@ public class SmartMemberReader implements MemberReader {
                 && parentIterator.hasNext();
         }
 
-        Object next() {
-            return nextMember();
-        }
-
         RolapMember nextMember() {
             if (++this.position >= this.siblings.size()) {
                 if (parentIterator == null) {
@@ -567,10 +674,6 @@ public class SmartMemberReader implements MemberReader {
             return (this.position > 0)
                 || (parentIterator != null)
                 && parentIterator.hasPrevious();
-        }
-
-        Object previous() {
-            return previousMember();
         }
 
         RolapMember previousMember() {

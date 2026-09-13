@@ -34,7 +34,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Stream;
 
 import java.sql.Types;
 
@@ -247,6 +246,7 @@ public class RolapLevel extends LevelBase {
         }
         this.metaData = metaData;
         this.approxRowCount = loadApproxRowCount(approxRowCount);
+        this.declaredRowCount = this.approxRowCount;
         this.flags = flags;
         this.datatype = datatype;
         this.keyExp = keyExp;
@@ -650,12 +650,8 @@ public class RolapLevel extends LevelBase {
         } else if ("Date".equalsIgnoreCase(type)) {
             return Property.Datatype.TYPE_DATE;
         } else {
-
-            //TODO: Do log as warn
-//            throw Util.newError(new StringBuilder("Unknown property type '")
-//                .append(type).append("'").toString());
+            LOGGER.warn("Unknown property type '{}', falling back to String", type);
             return Property.Datatype.TYPE_STRING;
-
         }
     }
 
@@ -711,9 +707,27 @@ public class RolapLevel extends LevelBase {
         return inheritedProperties;
     }
 
+    /** The mapping-declared row count; never changes. */
+    private int declaredRowCount;
+
+    /** A measured cardinality (COUNT probe); reset on member flush. */
+    private volatile int measuredRowCount = Integer.MIN_VALUE;
+
     @Override
 	public int getApproxRowCount() {
-        return approxRowCount;
+        int measured = measuredRowCount;
+        return measured != Integer.MIN_VALUE ? measured : declaredRowCount;
+    }
+
+    /** Records a measured cardinality; the declared value stays untouched. */
+    @Override
+    public void setApproxRowCount(int approxRowCount) {
+        this.measuredRowCount = approxRowCount;
+    }
+
+    /** Drops the measured cardinality; the next reader sees the declared value. */
+    public void resetMeasuredRowCount() {
+        this.measuredRowCount = Integer.MIN_VALUE;
     }
 
     @Override

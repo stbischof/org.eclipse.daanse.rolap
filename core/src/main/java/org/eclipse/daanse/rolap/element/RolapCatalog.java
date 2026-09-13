@@ -40,6 +40,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -108,7 +109,7 @@ import org.eclipse.daanse.rolap.common.member.CacheMemberReader;
 import org.eclipse.daanse.rolap.common.member.MemberReader;
 import org.eclipse.daanse.rolap.common.member.MemberSource;
 import org.eclipse.daanse.rolap.common.member.NoCacheMemberReader;
-import org.eclipse.daanse.rolap.common.member.SmartMemberReader;
+import org.eclipse.daanse.rolap.common.member.CachingMemberReader;
 import org.eclipse.daanse.rolap.common.member.SqlMemberSource;
 import org.eclipse.daanse.rolap.common.nativize.RolapNativeRegistry;
 import org.eclipse.daanse.rolap.common.star.RolapStar;
@@ -349,6 +350,7 @@ public class RolapCatalog implements Catalog {
 //		sha512Bytes = new ByteString(Objects.toIdentityString(xmlSchema).getBytes());
 
 		load(mappingCatalog);
+		applySharedMemberCachePolicy();
 
 		aggTableManager.initialize(connectionProps, context.getConfig().useAggregates());
 		setSchemaLoadDate();
@@ -871,7 +873,7 @@ public class RolapCatalog implements Catalog {
 
     /** Cell-cache switch of the named cube; an unknown cube caches. */
     public boolean isCellCachingEnabled(String cubeName) {
-        return lookupCube(cubeName).map(RolapCube::isCacheAggregations).orElse(true);
+        return lookupCube(cubeName).map(cube -> cube.getCachePolicy().cells()).orElse(true);
     }
 
 	/**
@@ -987,6 +989,39 @@ public class RolapCatalog implements Catalog {
 	 *
 	 * Synchronization: thread safe
 	 */
+	/**
+	 * Runs after all cubes are loaded: an underlying hierarchy whose logical
+	 * hierarchy (mapping identity - every usage builds its own instance) has
+	 * no using cube with effective members=on (hierarchy tag over cube
+	 * policy) gets its caching member reader replaced
+	 * by a NoCacheMemberReader, so members are not retained below the cube
+	 * caches either. Measures hierarchies are not cube-hierarchy wrappers
+	 * and stay as built.
+	 */
+	private void applySharedMemberCachePolicy() {
+		// identity set: RolapHierarchy equals by unique name, but every
+		// usage builds its own instance and each one needs the swap
+		Set<RolapHierarchy> underlyingHierarchies =
+				Collections.newSetFromMap(new IdentityHashMap<>());
+		for (RolapCube cube : getCubeList()) {
+			for (RolapHierarchy hierarchy : cube.hierarchyList) {
+				if (hierarchy instanceof RolapCubeHierarchy cubeHierarchy) {
+					underlyingHierarchies.add(cubeHierarchy.getRolapHierarchy());
+				}
+			}
+		}
+		for (RolapHierarchy underlying : underlyingHierarchies) {
+			boolean anyCubeCaches = getCubeList().stream().anyMatch(
+					cube -> org.eclipse.daanse.rolap.common.CachePolicy
+							.membersFor(underlying.getMetaData(), cube.getCachePolicy())
+							&& cube.usesSharedHierarchy(underlying));
+			if (!anyCubeCaches && underlying.getMemberReader() instanceof CachingMemberReader caching) {
+				caching.flushCache();
+				underlying.setMemberReader(new NoCacheMemberReader(new SqlMemberSource(underlying)));
+			}
+		}
+	}
+
 	synchronized MemberReader createMemberReader(final org.eclipse.daanse.rolap.mapping.model.olap.dimension.Dimension xmlDimension, final RolapHierarchy hierarchy,
 			final String memberReaderClass) {
 		MemberReader reader;
@@ -1051,7 +1086,7 @@ public class RolapCatalog implements Catalog {
 				// depending on the functions used and all.
 				return new NoCacheMemberReader(source);
 			} else {
-				return new SmartMemberReader(source);
+				return new CachingMemberReader(source);
 			}
 
 		}

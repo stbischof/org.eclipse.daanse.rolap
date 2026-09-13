@@ -62,7 +62,7 @@ public class RestrictedMemberReader extends DelegatingMemberReader {
     private final SqlConstraintFactory sqlConstraintFactory =
         SqlConstraintFactory.instance();
     final Role role;
-    private final static String hierarchyHasNoAccessibleMembers = "Hierarchy ''{0}'' has no accessible members.";
+    private static final String HIERARCHY_HAS_NO_ACCESSIBLE_MEMBERS = "Hierarchy ''{0}'' has no accessible members.";
 
     /**
      * Creates a RestrictedMemberReader.
@@ -250,7 +250,7 @@ public class RestrictedMemberReader extends DelegatingMemberReader {
                 getMembersInLevel(topLevel);
             if (memberList.isEmpty()) {
                 throw new OlapRuntimeException(MessageFormat.format(
-                    hierarchyHasNoAccessibleMembers,
+                    HIERARCHY_HAS_NO_ACCESSIBLE_MEMBERS,
                         getHierarchy().getUniqueName()));
             }
             return memberList;

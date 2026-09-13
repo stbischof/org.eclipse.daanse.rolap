@@ -56,9 +56,9 @@ import org.eclipse.daanse.rolap.common.SqlTupleReader;
 import org.eclipse.daanse.rolap.common.TupleReader;
 import org.eclipse.daanse.rolap.common.TupleReader.MemberBuilder;
 import org.eclipse.daanse.rolap.common.aggmatcher.AggStar;
-import org.eclipse.daanse.rolap.common.cache.HardSmartCache;
-import org.eclipse.daanse.rolap.common.cache.SmartCache;
-import org.eclipse.daanse.rolap.common.cache.SoftSmartCache;
+import org.eclipse.daanse.rolap.common.cache.BoundedCache;
+import org.eclipse.daanse.rolap.common.cache.SimpleCache;
+import org.eclipse.daanse.rolap.common.cache.SoftValueCache;
 import org.eclipse.daanse.rolap.common.constraint.SqlContextConstraint;
 import org.eclipse.daanse.rolap.common.evaluator.RolapEvaluator;
 import org.eclipse.daanse.rolap.common.member.MemberExcludeConstraint;
@@ -90,8 +90,8 @@ public abstract class RolapNativeSet extends RolapNative {
   protected static final Logger LOGGER =
     LoggerFactory.getLogger( RolapNativeSet.class );
 
-  private SmartCache<Object, TupleList> cache =
-    new SoftSmartCache<>();
+  private SimpleCache<Object, TupleList> cache =
+    new SoftValueCache<>();
 
   /**
    * Returns whether certain member types (e.g. calculated members) should disable native SQL evaluation for
@@ -760,9 +760,9 @@ public abstract class RolapNativeSet extends RolapNative {
 @SuppressWarnings( { "unchecked", "rawtypes" } )
   void useHardCache( boolean hard ) {
     if ( hard ) {
-      cache = new HardSmartCache();
+      cache = BoundedCache.ofEntries(Long.MAX_VALUE);
     } else {
-      cache = new SoftSmartCache();
+      cache = new SoftValueCache();
     }
   }
 

@@ -81,9 +81,8 @@ import org.eclipse.daanse.rolap.common.sql.SqlConstraintFactory;
 import org.eclipse.daanse.rolap.common.constraint.CalculatedMemberExpander;
 import org.eclipse.daanse.rolap.common.evaluator.RolapEvaluator;
 import org.eclipse.daanse.rolap.common.member.MemberCache;
-import org.eclipse.daanse.rolap.common.member.MemberCacheHelper;
 import org.eclipse.daanse.rolap.common.member.MemberReader;
-import org.eclipse.daanse.rolap.common.member.SmartMemberReader;
+import org.eclipse.daanse.rolap.common.member.CachingMemberReader;
 import org.eclipse.daanse.rolap.common.nativize.RolapNativeSet;
 import org.eclipse.daanse.rolap.common.sql.MemberChildrenConstraint;
 import org.eclipse.daanse.rolap.common.sql.TupleConstraint;
@@ -281,41 +280,34 @@ public class RolapCatalogReader
             (RolapMember) dataMember, rolapMemberList);
     }
 
+    /**
+     * The member cache a reader answers from: the cube reader's wrapper
+     * cache, a caching reader's cache, or the reader itself.
+     */
+    private static MemberCache memberCacheBehind(MemberReader memberReader) {
+        if (memberReader
+                instanceof RolapCubeHierarchy.RolapCubeHierarchyMemberReader cubeReader) {
+            return cubeReader.getRolapCubeMemberCache();
+        }
+        if (memberReader instanceof CachingMemberReader cachingMemberReader) {
+            return cachingMemberReader.getMemberCache();
+        }
+        if (memberReader instanceof MemberCache memberCache) {
+            return memberCache;
+        }
+        return null;
+    }
+
     @Override
 	public int getChildrenCountFromCache(Member member) {
-        final Hierarchy hierarchy = member.getHierarchy();
-        final MemberReader memberReader = getMemberReader(hierarchy);
-        if (memberReader instanceof
-            RolapCubeHierarchy.RolapCubeHierarchyMemberReader)
-        {
-            List list =
-                ((RolapCubeHierarchy.RolapCubeHierarchyMemberReader)
-                 memberReader)
-                    .getRolapCubeMemberCacheHelper()
-                    .getChildrenFromCache((RolapMember) member, null);
-            if (list == null) {
-                return -1;
-            }
-            return list.size();
-        }
-
-        if (memberReader instanceof SmartMemberReader) {
-            List list = ((SmartMemberReader) memberReader).getMemberCache()
-                .getChildrenFromCache((RolapMember) member, null);
-            if (list == null) {
-                return -1;
-            }
-            return list.size();
-        }
-        if (!(memberReader instanceof MemberCache)) {
+        final MemberCache cache =
+            memberCacheBehind(getMemberReader(member.getHierarchy()));
+        if (cache == null) {
             return -1;
         }
-        List list = ((MemberCache) memberReader)
-            .getChildrenFromCache((RolapMember) member, null);
-        if (list == null) {
-            return -1;
-        }
-        return list.size();
+        final List<RolapMember> list =
+            cache.getChildrenFromCache((RolapMember) member, null);
+        return list == null ? -1 : list.size();
     }
 
     /**
@@ -327,50 +319,14 @@ public class RolapCatalogReader
      * @return number of members in level
      */
     private int getLevelCardinalityFromCache(Level level) {
-        final Hierarchy hierarchy = level.getHierarchy();
-        final MemberReader memberReader = getMemberReader(hierarchy);
-        if (memberReader instanceof
-            RolapCubeHierarchy.RolapCubeHierarchyMemberReader)
-        {
-            final MemberCacheHelper cache =
-                ((RolapCubeHierarchy.RolapCubeHierarchyMemberReader)
-                    memberReader).getRolapCubeMemberCacheHelper();
-            if (cache == null) {
-                return Integer.MIN_VALUE;
-            }
-            final List<RolapMember> list =
-                cache.getLevelMembersFromCache(
-                    (RolapLevel) level, null);
-            if (list == null) {
-                return Integer.MIN_VALUE;
-            }
-            return list.size();
+        final MemberCache cache =
+            memberCacheBehind(getMemberReader(level.getHierarchy()));
+        if (cache == null) {
+            return Integer.MIN_VALUE;
         }
-
-        if (memberReader instanceof SmartMemberReader) {
-            List<RolapMember> list =
-                ((SmartMemberReader) memberReader)
-                    .getMemberCache()
-                    .getLevelMembersFromCache(
-                        (RolapLevel) level, null);
-            if (list == null) {
-                return Integer.MIN_VALUE;
-            }
-            return list.size();
-        }
-
-        if (memberReader instanceof MemberCache) {
-            List<RolapMember> list =
-                ((MemberCache) memberReader)
-                    .getLevelMembersFromCache(
-                        (RolapLevel) level, null);
-            if (list == null) {
-                return Integer.MIN_VALUE;
-            }
-            return list.size();
-        }
-
-        return Integer.MIN_VALUE;
+        final List<RolapMember> list =
+            cache.getLevelMembersFromCache((RolapLevel) level, null);
+        return list == null ? Integer.MIN_VALUE : list.size();
     }
 
     @Override
@@ -396,14 +352,22 @@ public class RolapCatalogReader
 
         if (rowCount == Integer.MIN_VALUE) {
             if (materialize) {
-                // Either the approximate row count hasn't been set,
-                // or they want the precise row count.
-                final MemberReader memberReader =
-                    getMemberReader(level.getHierarchy());
-                rowCount =
-                    memberReader.getLevelMemberCount((RolapLevel) level);
-                // Cache it for future.
-                ((RolapLevel) level).setApproxRowCount(rowCount);
+                // single-flight per level: one COUNT even when concurrent
+                // cold readers ask at once
+                synchronized (level) {
+                    rowCount = level.getApproxRowCount();
+                    if (rowCount == Integer.MIN_VALUE) {
+                        rowCount = getLevelCardinalityFromCache(level);
+                    }
+                    if (rowCount == Integer.MIN_VALUE) {
+                        final MemberReader memberReader =
+                            getMemberReader(level.getHierarchy());
+                        rowCount =
+                            memberReader.getLevelMemberCount((RolapLevel) level);
+                        // Cache it for future.
+                        ((RolapLevel) level).setApproxRowCount(rowCount);
+                    }
+                }
             }
         }
         return rowCount;
@@ -577,7 +541,7 @@ public class RolapCatalogReader
             {
                 constraint = sqlConstraintFactory.getChildByNameConstraint(
                     (RolapMember) parent, (NameSegment) childName,
-                    context.getConfig().levelPreCacheThreshold());
+                    effectiveLevelPreCacheThreshold((RolapMember) parent));
             } else {
                 constraint =
                     sqlConstraintFactory.getMemberChildrenConstraint(null);
@@ -617,13 +581,24 @@ public class RolapCatalogReader
         MemberChildrenConstraint constraint = sqlConstraintFactory
             .getChildrenByNamesConstraint(
                 (RolapMember) parent, childNames,
-                context
-                .getConfig().levelPreCacheThreshold());
+                effectiveLevelPreCacheThreshold((RolapMember) parent));
         List<RolapMember> children =
             internalGetMemberChildren(parent, constraint);
         List<Member> childMembers = new ArrayList<>();
         childMembers.addAll(children);
         return childMembers;
+    }
+
+    /** Hierarchy/cube threshold tags override the global config value. */
+    private int effectiveLevelPreCacheThreshold(RolapMember parent) {
+        if (parent.getHierarchy() instanceof
+                org.eclipse.daanse.rolap.element.RolapCubeHierarchy cubeHierarchy) {
+            java.util.OptionalInt override = cubeHierarchy.levelPreCacheThresholdOverride();
+            if (override.isPresent()) {
+                return override.getAsInt();
+            }
+        }
+        return context.getConfig().levelPreCacheThreshold();
     }
 
     @Override

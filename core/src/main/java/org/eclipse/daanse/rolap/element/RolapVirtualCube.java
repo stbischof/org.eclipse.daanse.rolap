@@ -57,7 +57,7 @@ public class RolapVirtualCube extends RolapCube implements VirtualCube {
      */
     RolapVirtualCube(RolapCatalog catalog, org.eclipse.daanse.rolap.mapping.model.catalog.Catalog catalogMapping, org.eclipse.daanse.rolap.mapping.model.olap.cube.VirtualCube virtualCubeMapping,
             Context context) {
-        super(catalog, catalogMapping, virtualCubeMapping, true, null, context);
+        super(catalog, catalogMapping, virtualCubeMapping, null, context);
         // Since Measure and VirtualCubeMeasure cannot
         // be treated as the same, measure creation cannot be done in a common
         // constructor.

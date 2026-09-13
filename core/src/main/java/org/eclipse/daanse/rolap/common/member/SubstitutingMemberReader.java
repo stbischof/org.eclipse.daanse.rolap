@@ -274,11 +274,6 @@ public abstract class SubstitutingMemberReader extends DelegatingMemberReader {
         }
 
         @Override
-		public Object getMemberCacheLock() {
-            return memberReader.getMemberBuilder().getMemberCacheLock();
-        }
-
-        @Override
 		public RolapMember makeMember(
             RolapMember parentMember,
             RolapLevel childLevel,

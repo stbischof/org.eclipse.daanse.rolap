@@ -230,40 +230,6 @@ public class RolapStar {
         localBars.remove();
     }
 
-    /**
-     * Whether this star caches aggregates. One star can back several cubes; a
-     * single cube that declares cache=false turns caching off for all of them.
-     * The per-cube cache policy replaces this flag in a later step.
-     */
-    private boolean cacheAggregations = true;
-
-    public void setCacheAggregations(boolean cacheAggregations) {
-        // only ever changes from true to false
-        this.cacheAggregations = cacheAggregations;
-        clearCachedAggregations(false);
-    }
-
-    public boolean isCacheAggregations() {
-        return this.cacheAggregations;
-    }
-
-    boolean isCacheDisabled() {
-        return context.getConfig().disableCaching();
-    }
-
-    /**
-     * Empties the calling thread's working store when caching is off.
-     *
-     * @param forced clears regardless of the caching settings
-     */
-    public void clearCachedAggregations(boolean forced) {
-        if (forced || !cacheAggregations || isCacheDisabled()) {
-            LOGGER.debug("RolapStar.clearCachedAggregations: catalog={}, star={}", catalog.getName(),
-                    getFactTable().getAlias());
-            clearWorkingStore();
-        }
-    }
-
     /** Registers a converted segment in this thread's working store. */
     public void register(SegmentWithData segment) {
         final List<SoftReference<SegmentWithData>> refs = bar().segmentRefs

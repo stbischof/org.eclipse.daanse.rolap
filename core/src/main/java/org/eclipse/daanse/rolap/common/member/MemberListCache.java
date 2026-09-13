@@ -27,13 +27,12 @@
 
 package org.eclipse.daanse.rolap.common.member;
 
-import  org.eclipse.daanse.olap.util.Pair;
-import org.eclipse.daanse.rolap.common.cache.SmartCache;
-import org.eclipse.daanse.rolap.common.cache.SoftSmartCache;
+import org.eclipse.daanse.olap.util.Pair;
+import org.eclipse.daanse.rolap.common.cache.SimpleCache;
 import org.eclipse.daanse.rolap.common.sql.SqlConstraint;
 
 /**
- * Uses a {@link org.eclipse.daanse.rolap.common.cache.SmartCache} to store lists of members,
+ * Uses a {@link org.eclipse.daanse.rolap.common.cache.SimpleCache} to store lists of members,
  * where the key depends on a {@link org.eclipse.daanse.rolap.common.sql.SqlConstraint}.
  *
  * Example 1:
@@ -64,20 +63,24 @@ import org.eclipse.daanse.rolap.common.sql.SqlConstraint;
  * @author av
  * @since Nov 21, 2005
  */
-public class SmartMemberListCache <K, V> {
-    public SmartCache<Pair<K, Object>, V> cache;
+public class MemberListCache <K, V> {
+    private final SimpleCache<Pair<K, Object>, V> cache;
 
-    public SmartMemberListCache() {
-        cache = new SoftSmartCache<>();
+    public MemberListCache(SimpleCache<Pair<K, Object>, V> cache) {
+        this.cache = cache;
     }
 
-    public Object put(K key, SqlConstraint constraint, V value) {
+    /**
+     * Best-effort: a constraint WITHOUT a cache key (not cacheable) is a
+     * silent no-op - callers must never rely on a subsequent get hitting.
+     */
+    public void put(K key, SqlConstraint constraint, V value) {
         Object cacheKey = constraint.getCacheKey();
         if (cacheKey == null) {
-            return null;
+            return;
         }
         Pair<K, Object> key2 = new Pair<>(key, cacheKey);
-        return cache.put(key2, value);
+        cache.put(key2, value);
     }
 
     public V get(K key, SqlConstraint constraint) {
@@ -90,11 +93,7 @@ public class SmartMemberListCache <K, V> {
         cache.clear();
     }
 
-    SmartCache<Pair<K, Object>, V> getCache() {
+    public SimpleCache<Pair<K, Object>, V> getCache() {
         return cache;
-    }
-
-    public void setCache(SmartCache<Pair<K, Object>, V> cache) {
-        this.cache = cache;
     }
 }

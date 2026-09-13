@@ -36,32 +36,14 @@ import org.eclipse.daanse.rolap.api.element.RolapMember;
 import org.eclipse.daanse.rolap.element.RolapHierarchy;
 
 /**
- * A MemberSource has the basic operations to read the members of a
- * {@link RolapHierarchy hierarchy}.
+ * A <code>MemberSource</code> has the basic operations to read the members of a
+ * hierarchy: the root members, a member's children, a range on a level.
  *
- * A MemberSource may optionally support writeback to a
- * {@link MemberCache}. During the initialization of a
- * MemberSource, the consumer calls {@link #setCache}; the return
- * value indicates whether the MemberSource supports
- * cache-writeback.
- *
- * A custom member reader is a user-defined class which implements
- * the operations to retrieve members. It either implements the
- * MemberSource interface, or the derived interface
- * {@link MemberReader}, which has more operations. In addition to the interface
- * methods, the class must have a constructor which takes parameters
- * ({@link RolapHierarchy}, {@link java.util.Properties}) and
- * throws no exceptions. To declare a hierarchy based upon the class, use the
- * memberReaderClass attribute of the
- * &lt;Hierarchy&gt; element in your XML schema file; the
- * properties constructor parameter is populated from any
- * &lt;Param name="..." value="..."&gt; child elements.
- *
- * @see MemberReader
- * @see MemberCache
- *
- * @author jhyde
- * @since 21 December, 2001
+ * <p>A source may also support writeback to a cache; the writeback methods
+ * document that contract. The engine builds its sources itself
+ * ({@link SqlMemberSource} wrapped in a caching or non-caching reader) -
+ * the historical mechanism of naming an implementation class in the
+ * mapping is not supported.
  */
 public interface MemberSource {
     /**
@@ -87,7 +69,7 @@ public interface MemberSource {
     /**
      * Returns all members of this hierarchy, sorted by ordinal.
      *
-     * If this object {@link #setCache supports cache-writeaback}, also
+     * If this object {@link #setCache supports cache-writeback}, also
      * writes these members to the cache.
      */
     List<RolapMember> getMembers();
@@ -116,7 +98,7 @@ public interface MemberSource {
      * Returns all members which are a child of one of the members in
      * parentMembers, sorted by ordinal.
      *
-     * If this object {@link #setCache supports cache-writeaback}, also
+     * If this object {@link #setCache supports cache-writeback}, also
      * writes these members to the cache.
      */
     void getMemberChildren(

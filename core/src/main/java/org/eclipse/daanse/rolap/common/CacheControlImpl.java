@@ -74,7 +74,7 @@ import org.eclipse.daanse.rolap.common.constraint.DefaultTupleConstraint;
 import org.eclipse.daanse.rolap.common.member.MemberCache;
 import org.eclipse.daanse.olap.api.element.Hierarchy;
 import org.eclipse.daanse.rolap.common.member.MemberReader;
-import org.eclipse.daanse.rolap.common.member.SmartMemberReader;
+import org.eclipse.daanse.rolap.common.member.CachingMemberReader;
 import org.eclipse.daanse.rolap.common.sql.MemberChildrenConstraint;
 import org.eclipse.daanse.rolap.common.star.RolapStar;
 import org.eclipse.daanse.rolap.element.RolapCube;
@@ -927,11 +927,23 @@ public class CacheControlImpl implements CacheControl {
 
     @Override
 	public void execute(MemberEditCommand cmd) {
-        final Boolean prop = connection.getContext().getConfig().enableRolapCubeMemberCache();
-        if (prop) {
-            throw new IllegalArgumentException(
-                new StringBuilder("Member cache control operations are not allowed unless ")
-                .append("property ").append("daanse.rolap.EnableRolapCubeMemberCache").append(" is false").toString());
+        // member edits require effective members=off (hierarchy tag over
+        // cube policy) on every cube that uses an affected hierarchy;
+        // unrelated cubes may keep caching
+        final Set<RolapHierarchy> affectedHierarchies = new LinkedHashSet<>();
+        ((MemberEditCommandPlus) cmd).collectAffectedHierarchies(affectedHierarchies);
+        for (RolapHierarchy hierarchy : affectedHierarchies) {
+            for (Cube cube : connection.getCatalog().getCubes()) {
+                if (cube instanceof org.eclipse.daanse.rolap.element.RolapCube rolapCube
+                        && CachePolicy.membersFor(hierarchy.getMetaData(), rolapCube.getCachePolicy())
+                        && rolapCube.usesSharedHierarchy(hierarchy)) {
+                    throw new IllegalArgumentException(
+                        "Member cache control operations are not allowed while cube '" + cube.getName()
+                            + "' caches members of hierarchy '" + hierarchy.getUniqueName()
+                            + "'; tag the cube daanse:cache.members=off or set "
+                            + "daanse.rolap.EnableRolapCubeMemberCache to false");
+                }
+            }
         }
         // The cell flush below runs INSIDE this lock because commit() must
         // come after it (a flush failure leaves the un-edited, consistent
@@ -1032,9 +1044,10 @@ public class CacheControlImpl implements CacheControl {
     private static MemberCache getMemberCache(RolapMember member) {
         final MemberReader memberReader =
             member.getHierarchy().getMemberReader();
-        SmartMemberReader smartMemberReader =
-            (SmartMemberReader) memberReader;
-        return smartMemberReader.getMemberCache();
+        if (memberReader instanceof CachingMemberReader cachingMemberReader) {
+            return cachingMemberReader.getMemberCache();
+        }
+        return null;
     }
 
     // cell cache control implementation
@@ -1357,6 +1370,7 @@ public class CacheControlImpl implements CacheControl {
         void commit();
 
         /** Adds the shared hierarchies this command touches to {@code out}. */
+        void collectAffectedHierarchies(Set<RolapHierarchy> out);
     }
 
     /**
@@ -1714,8 +1728,35 @@ public class CacheControlImpl implements CacheControl {
      * Command consisting of a set of commands executed in sequence.
      */
     /** Shared hierarchies referenced by a member set, without loading members. */
+    private static void collectHierarchies(MemberSetPlus set, Set<RolapHierarchy> out) {
+        set.accept(new MemberSetVisitor() {
+            @Override
+            public void visit(SimpleMemberSet s) {
+                for (RolapMember member : s.members) {
+                    out.add(sharedHierarchy(member.getHierarchy()));
+                }
+            }
+
+            @Override
+            public void visit(UnionMemberSet s) {
+                for (MemberSetPlus item : s.items) {
+                    item.accept(this);
+                }
+            }
+
+            @Override
+            public void visit(RangeMemberSet s) {
+                out.add(sharedHierarchy(s.level.getHierarchy()));
+            }
+        });
+    }
 
     /** Members loaded through a cube can report the cube hierarchy; unwrap it. */
+    private static RolapHierarchy sharedHierarchy(RolapHierarchy hierarchy) {
+        return hierarchy instanceof org.eclipse.daanse.rolap.element.RolapCubeHierarchy cubeHierarchy
+            ? cubeHierarchy.getRolapHierarchy()
+            : hierarchy;
+    }
 
     private static class CompoundCommand implements MemberEditCommandPlus {
         private final List<MemberEditCommandPlus> commandList;
@@ -1743,6 +1784,12 @@ public class CacheControlImpl implements CacheControl {
             }
         }
 
+        @Override
+        public void collectAffectedHierarchies(Set<RolapHierarchy> out) {
+            for (MemberEditCommandPlus command : commandList) {
+                command.collectAffectedHierarchies(out);
+            }
+        }
     }
 
     /**
@@ -1788,6 +1835,10 @@ public class CacheControlImpl implements CacheControl {
             }
         }
 
+        @Override
+        public void collectAffectedHierarchies(Set<RolapHierarchy> out) {
+            collectHierarchies(set, out);
+        }
     }
 
     /**
@@ -1824,6 +1875,10 @@ public class CacheControlImpl implements CacheControl {
             }
         }
 
+        @Override
+        public void collectAffectedHierarchies(Set<RolapHierarchy> out) {
+            out.add(sharedHierarchy(member.getHierarchy()));
+        }
     }
 
     /**
@@ -1866,6 +1921,11 @@ public class CacheControlImpl implements CacheControl {
             }
         }
 
+        @Override
+        public void collectAffectedHierarchies(Set<RolapHierarchy> out) {
+            out.add(sharedHierarchy(stripMember(member).getHierarchy()));
+            out.add(sharedHierarchy(stripMember(newParent).getHierarchy()));
+        }
     }
 
     /**
@@ -1931,6 +1991,10 @@ public class CacheControlImpl implements CacheControl {
             }
         }
 
+        @Override
+        public void collectAffectedHierarchies(Set<RolapHierarchy> out) {
+            collectHierarchies(memberSet, out);
+        }
     }
 
     private static RolapMember stripMember(RolapMember member) {
@@ -2114,11 +2178,37 @@ public class CacheControlImpl implements CacheControl {
         RolapMember member,
         List<CellRegion> cellRegionList)
     {
-        final MemberCache memberCache = getMemberCache(member);
-        final Object key =
-            memberCache.makeKey(member.getParentMember(), member.getKey());
-        memberCache.removeMember(key);
-        cellRegionList.add(createMemberRegion(member, false));
+        final RolapMember stripped = stripMember(member);
+        final MemberCache sharedCache = getMemberCache(stripped);
+        if (sharedCache != null) {
+            removeFromCache(sharedCache, stripped);
+        }
+        // member sets are stripped to shared members on creation, but every
+        // cube usage of the hierarchy keeps its own caches: the wrapper
+        // cache (cube-member keys) and the reader's inherited shared-member
+        // cache. Member equality is shared/cube-agnostic, so the stripped
+        // key hits the wrapper entries too.
+        final Hierarchy sharedHierarchy = stripped.getHierarchy();
+        for (RolapCube cube
+                : ((AbstractRolapConnection) connection).getCatalog().getCubeList()) {
+            for (Hierarchy hierarchy : cube.getHierarchies()) {
+                if (hierarchy instanceof RolapCubeHierarchy cubeHierarchy
+                        && cubeHierarchy.getRolapHierarchy().equals(sharedHierarchy)
+                        && cubeHierarchy.getMemberReader()
+                            instanceof RolapCubeHierarchy.RolapCubeHierarchyMemberReader cubeReader) {
+                    removeFromCache(cubeReader.getRolapCubeMemberCache(), stripped);
+                    if (cubeReader instanceof CachingMemberReader cachingReader
+                            && cachingReader.getMemberCache() != sharedCache) {
+                        removeFromCache(cachingReader.getMemberCache(), stripped);
+                    }
+                }
+            }
+        }
+        cellRegionList.add(createMemberRegion(stripped, false));
     }
 
+    private static void removeFromCache(MemberCache cache, RolapMember member) {
+        cache.removeMember(
+            cache.makeKey(member.getParentMember(), member.getKey()));
+    }
 }

@@ -36,6 +36,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -59,7 +60,7 @@ import org.eclipse.daanse.olap.api.sql.SqlExpression;
 import org.eclipse.daanse.olap.common.Util;
 import org.eclipse.daanse.olap.exceptions.ResourceLimitExceededException;
 import org.eclipse.daanse.olap.key.BitKey;
-import  org.eclipse.daanse.olap.util.CancellationChecker;
+import org.eclipse.daanse.olap.util.CancellationChecker;
 import org.eclipse.daanse.sql.statement.api.render.RenderedSql;
 import org.eclipse.daanse.rolap.api.element.RolapMember;
 import org.eclipse.daanse.rolap.common.RolapAggregationManager;
@@ -92,13 +93,13 @@ import org.eclipse.daanse.rolap.element.RolapLevel;
 import org.eclipse.daanse.rolap.element.RolapMemberBase;
 import org.eclipse.daanse.rolap.element.RolapParentChildMemberNoClosure;
 import org.eclipse.daanse.rolap.element.RolapProperty;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * A SqlMemberSource reads members from a SQL database.
  *
- * It's a good idea to put a {@link CacheMemberReader} on top of this.
+ * In practice a {@link CachingMemberReader} sits on top of this (the
+ * eager {@link CacheMemberReader} cannot: it preloads a fixed list and
+ * handles no ragged hierarchies).
  *
  * @author jhyde
  * @since 21 December, 2001
@@ -106,23 +107,19 @@ import org.slf4j.LoggerFactory;
 public class SqlMemberSource
     implements MemberReader, MemberBuilder
 {
-    private static final Logger LOGGER =
-        LoggerFactory.getLogger(SqlMemberSource.class);
     private final SqlConstraintFactory sqlConstraintFactory =
         SqlConstraintFactory.instance();
     private final RolapHierarchy hierarchy;
     private final Context context;
     private MemberCache cache;
-    private int lastOrdinal = 0;
+    private final AtomicInteger lastOrdinal = new AtomicInteger();
     private boolean assignOrderKeys;
-    private Optional<Map<Object, Object>> oValuePool;
 
     public SqlMemberSource(RolapHierarchy hierarchy) {
         this.hierarchy = hierarchy;
         this.context =
             hierarchy.getRolapCatalog().getCatalogReaderWithDefaultRole().getContext();
         assignOrderKeys = ((Context<?>) context).getConfig().compareSiblingsByOrderKey();
-        oValuePool = context.getSqlMemberSourceValuePool();
     }
 
     // implement MemberSource
@@ -474,12 +471,12 @@ public class SqlMemberSource
                     if (member == null) {
                         RolapMemberBase memberBase =
                             new RolapMemberBase(parent, level, value);
-                        memberBase.setOrdinal(lastOrdinal++);
+                        memberBase.setOrdinal(lastOrdinal.getAndIncrement());
                         member = memberBase;
 /*
 RME is this right
                         if (level.getOrdinalExp() != level.getKeyExp()) {
-                            member.setOrdinal(lastOrdinal++);
+                            member.setOrdinal(lastOrdinal.getAndIncrement());
                         }
 */
                         if (value == Util.sqlNullValue) {
@@ -515,9 +512,7 @@ RME is this right
                             }
                         }
                     }
-                    //    column++;
-                    //}
-
+                                        
                     Property[] properties = level.getProperties();
                     for (Property property : properties) {
                         // REVIEW emcdermid 9-Jul-2009:
@@ -607,12 +602,6 @@ RME is this right
 
     @Override
 	public MemberCache getMemberCache() {
-        return cache;
-    }
-
-    @Override
-    @SuppressWarnings("java:S4144")
-	public Object getMemberCacheLock() {
         return cache;
     }
 
@@ -716,7 +705,6 @@ RME is this right
             // One or more calculated members. Cannot use agg table.
             return null;
         }
-        // TODO: RME why is this using the array of constrained columns
         // from the CellRequest rather than just the constrained columns
         // BitKey (method getConstrainedColumnsBitKey)?
         RolapStar.Column[] columns = request.getConstrainedColumns();
@@ -984,7 +972,7 @@ RME is this right
                     captionValue = null;
                 }
                 Object key = cache.makeKey(parentMember2, value);
-                RolapMember member = cache.getMember(key, checkCacheStatus);
+                RolapMember member = cache.getMember(key);
                 checkCacheStatus = false; /* Only check the first time */
                 if (member == null) {
                     member =
@@ -1050,7 +1038,7 @@ RME is this right
         RolapMemberBase member =
             new RolapMemberBase(parentMember, rolapChildLevel, value);
         if (childLevel.getOrdinalExps() != null && !childLevel.getOrdinalExps().isEmpty()) {
-            member.setOrdinal(lastOrdinal++);
+            member.setOrdinal(lastOrdinal.getAndIncrement());
         }
         
         if (captionValue != null) {
@@ -1066,10 +1054,7 @@ RME is this right
             // children.
             member = new RolapParentChildMemberNoClosure(
                     parentMember, rolapChildLevel, value, member);
-            //member = childLevel.hasClosedPeer()
-            //    ? new RolapParentChildMember(
             //        parentMember, rolapChildLevel, value, member)
-            //    : new RolapParentChildMemberNoClosure(
             //        parentMember, rolapChildLevel, value, member);
         }
         Property[] properties = childLevel.getProperties();
@@ -1100,11 +1085,10 @@ RME is this right
             if (accessors.size() > (columnOffset + j)) {
             	member.setProperty(
             			property.getName(),
-            			getPooledValue(accessors.get(columnOffset + j).get()));
+            			accessors.get(columnOffset + j).get());
             }
         }
-        cache.putMember(key, member);
-        return member;
+        return cache.putMember(key, member);
     }
 
     @Override
@@ -1116,39 +1100,6 @@ RME is this right
         return rolapHierarchy.getAllMember();
     }
 
-    /**
-     * Looks up an object (and if needed, stores it) in a cached value pool.
-     * This permits us to reuse references to an existing object rather than
-     * create new references to what are essentially duplicates.  The intent
-     * is to allow the duplicate object to be garbage collected earlier, thus
-     * keeping overall memory requirements down.
-     *
-     * If
-     * {@link org.eclipse.daanse.olap.common.SystemWideProperties#SqlMemberSourceValuePoolFactoryClass}
-     * is not set, then valuePool will be null and no attempt to cache the
-     * value will be made.  The method will simply return the incoming
-     * object reference.
-     *
-     * @param incoming An object to look up.  Must be immutable in usage,
-     *        even if not declared as such.
-     * @return a reference to a cached object equal to the incoming object,
-     *        or to the incoming object if either no cached object was found,
-     *        or caching is disabled.
-     */
-    private Object getPooledValue(Object incoming) {
-        if (oValuePool.isEmpty()) {
-            return incoming;
-        } else {
-        	Map<Object,Object> valuePool=oValuePool.get();
-            Object ret = valuePool.get(incoming);
-            if (ret != null) {
-                return ret;
-            } else {
-                valuePool.put(incoming, incoming);
-                return incoming;
-            }
-        }
-    }
 
     /**
      * Generates the SQL to find all root members of a parent-child hierarchy.

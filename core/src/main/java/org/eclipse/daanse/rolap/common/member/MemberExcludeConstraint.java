@@ -31,6 +31,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import java.util.Optional;
 import org.eclipse.daanse.olap.api.evaluator.Evaluator;
 import org.eclipse.daanse.rolap.api.element.RolapMember;
 import org.eclipse.daanse.rolap.common.aggmatcher.AggStar;
@@ -120,7 +121,7 @@ public class MemberExcludeConstraint implements TupleConstraint {
      * <p>The {@code csc != null} cross-join/role composition routes through
      * {@link #toContributionCscComposition} (the cross-join/role exclude composition, e.g. TopCount
      * completeWithNullValues re-reads); anything it cannot compose keeps the grep-stable
-     * {@code exclude-csc-*} bails. Returns {@link java.util.Optional#empty()} for an aggregate
+     * {@code exclude-csc-*} bails. Returns {@link Optional#empty()} for an aggregate
      * star, an empty exclude set (the recorder path emits {@code (1=1)}, not
      * modelled here), or any column the pure predicate builder cannot express — the consumer then
      * routes the read to the recorder, which carries the full restriction.
@@ -156,7 +157,7 @@ public class MemberExcludeConstraint implements TupleConstraint {
         }
         RolapLevel firstUniqueParentLevel =
             (firstUniqueParent != null) ? firstUniqueParent.getLevel() : null;
-        java.util.Optional<java.util.List<org.eclipse.daanse.sql.statement.api.expression.Predicate>> parts =
+        Optional<List<org.eclipse.daanse.sql.statement.api.expression.Predicate>> parts =
             MemberConstraintWriter.generateSingleValueInPredicatePure(
                 baseCube, excludes, firstUniqueParentLevel, true, true, true);
         if (parts.isEmpty()) {
@@ -166,7 +167,7 @@ public class MemberExcludeConstraint implements TupleConstraint {
         org.eclipse.daanse.sql.statement.api.expression.Predicate where =
             org.eclipse.daanse.sql.statement.api.Predicates.or(parts.get());
         return org.eclipse.daanse.rolap.common.sql.ContributionResult.of(
-            new ConstraintContribution(java.util.Optional.of(where), java.util.List.of()));
+            new ConstraintContribution(Optional.of(where), List.of()));
     }
 
     /**
@@ -217,7 +218,7 @@ public class MemberExcludeConstraint implements TupleConstraint {
             }
             // (1) the exclude itself, on its level (addLevelConstraintOps order).
             if (currLevel.equalsOlapElement(this.level)) {
-                java.util.Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate> cp =
+                Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate> cp =
                     MemberConstraintWriter.memberConstraintContributionFactoredExclude(
                         baseCube, excludes, true);
                 if (cp.isEmpty()) {
@@ -241,7 +242,7 @@ public class MemberExcludeConstraint implements TupleConstraint {
             // (3) the role-access member restriction on this level.
             if (roles.containsKey(currLevel)) {
                 List<RolapMember> roleMembers = roles.get(currLevel);
-                java.util.Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate> cp =
+                Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate> cp =
                     MemberConstraintWriter.memberConstraintContributionFactored(
                         baseCube, roleMembers, true, false);
                 if (cp.isPresent()) {
@@ -260,8 +261,8 @@ public class MemberExcludeConstraint implements TupleConstraint {
         }
         // Dimension-only: the mapper splits the top-level And into the recorder's WHERE conjuncts.
         return org.eclipse.daanse.rolap.common.sql.ContributionResult.of(new ConstraintContribution(
-            java.util.Optional.of(org.eclipse.daanse.sql.statement.api.Predicates.and(conjuncts)),
-            java.util.List.of()));
+            Optional.of(org.eclipse.daanse.sql.statement.api.Predicates.and(conjuncts)),
+            List.of()));
     }
 
     /** One csc arg's conjunct: {@code null} = bail; a null {@link #predicate()} = adds nothing (skip). */
@@ -303,7 +304,7 @@ public class MemberExcludeConstraint implements TupleConstraint {
         if (argMembers.stream().anyMatch(RolapMember::isNull)) {
             return null; // which addMemberConstraint branch runs is not modelled (see SetConstraint)
         }
-        java.util.Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate> cp =
+        Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate> cp =
             MemberConstraintWriter.memberConstraintContribution(
                 baseCube, argMembers, argRestrict, argExclude);
         if (cp.isEmpty()) {

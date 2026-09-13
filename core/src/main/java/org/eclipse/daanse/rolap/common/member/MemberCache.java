@@ -40,8 +40,11 @@ import org.eclipse.daanse.rolap.element.RolapLevel;
  * A MemberCache can retrieve members based upon their parent and
  * name.
  *
- * @author jhyde
- * @since 22 December, 2001
+ * A miss is {@code null}; an EMPTY list is a valid cached value (a
+ * parent with no children). Implementations gate their list writes on
+ * the hierarchy's load-registry fence: a put whose load a flush
+ * overtook may be SILENTLY discarded - callers must treat put as
+ * best-effort, never as a guarantee the next get hits.
  */
 public interface MemberCache {
     /**
@@ -64,55 +67,30 @@ public interface MemberCache {
     RolapMember getMember(Object key);
 
     /**
-     * Retrieves the {@link RolapMember} with a given key.
+     * Registers a member under its key and returns the canonical instance:
+     * an already-cached member wins over the offered one, so concurrent
+     * loaders converge on one object per member.
      *
      * @param key cache key, created by {@link #makeKey}
-     * @param mustCheckCacheStatus If {@code true}, do not check cache status
-     * @return member with a given cache key
+     * @param member member to register
+     * @return the instance now cached under the key (never null)
      */
-    RolapMember getMember(Object key, boolean mustCheckCacheStatus);
-
-    /**
-     * Replaces the {@link RolapMember} with a given key and returns the
-     * previous member if any.
-     *
-     * @param key cache key, created by {@link #makeKey}
-     * @param member new member
-     * @return Previous member with that key, or null.
-     */
-    Object putMember(Object key, RolapMember member);
-
-    /**
-     * Returns whether the cache supports removing selected items. If it does,
-     * it is valid to call the {@link #removeMember(Object)} and
-     * {@link #removeMemberAndDescendants(Object)} methods.
-     *
-     * REVIEW: remove isMutable and move removeMember and
-     * removeMemberAndDescendants to new interface MutableMemberCache
-     *
-     * @return true if the cache supports removing selected items.
-     */
-    boolean isMutable();
+    RolapMember putMember(Object key, RolapMember member);
 
     /**
      * Removes the {@link RolapMember} with a given key from the cache.
      * Returns the previous member with that key, or null.
-     * Optional operation: see {@link #isMutable}.
+     * Optional operation: non-mutable caches (the eager measures reader)
+     * throw UnsupportedOperationException.
      *
      * @param key cache key, created by {@link #makeKey}
      * @return previous member with that key, or null
      */
     RolapMember removeMember(Object key);
 
-    /**
-     * Removes the designated {@link RolapMember} and all its descendants.
-     * Returns the previous member with that key, or null.
-     * Optional operation: see {@link #isMutable}.
-     *
-     * @param key cache key, created by {@link #makeKey}
-     * @return previous member with that key, or null
-     */
-    RolapMember removeMemberAndDescendants(Object key);
+    /** Empties every map of this cache; a no-op cache has nothing to empty. */
+    default void flushCache() {
+    }
 
     /**
      * Returns the children of member if they are currently in the
