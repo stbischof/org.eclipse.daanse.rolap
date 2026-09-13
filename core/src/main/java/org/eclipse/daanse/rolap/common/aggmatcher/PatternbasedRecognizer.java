@@ -36,7 +36,7 @@ import java.util.List;
 
 import org.eclipse.daanse.olap.api.element.Hierarchy;
 import org.eclipse.daanse.olap.api.element.Level;
-import  org.eclipse.daanse.olap.util.Pair;
+import org.eclipse.daanse.olap.util.Pair;
 import org.eclipse.daanse.rolap.common.aggmatcher.JdbcSchema.Table.Column;
 import org.eclipse.daanse.rolap.common.star.HierarchyUsage;
 import org.eclipse.daanse.rolap.common.star.RolapStar;
@@ -46,7 +46,7 @@ import org.eclipse.daanse.rolap.recorder.MessageRecorder;
 
 /**
  * This is the default Recognizer. It uses the rules found in the file
- * PatternbasedRules.xml to find aggregate tables and there columns.
+ * the AggregationMatchRulesSupplier service to find aggregate tables and their columns.
  *
  * @author Richard M. Emberson
  */

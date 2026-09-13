@@ -110,7 +110,7 @@ public final class StarPredicateTranslator {
     }
 
     /**
-     * Like {@link #toPredicate} for a single-column {@link org.eclipse.daanse.rolap.common.star.StarColumnPredicate},
+     * Like {@link #toPredicate} for a single-column {@link StarColumnPredicate},
      * but renders the column with the supplied {@code col} expression instead of the predicate's own column —
      * used to substitute an aggregate-table column for the base column. Handles the shapes
      * {@code getColumnPredicates} produces (a {@link ValueColumnPredicate}, a {@link ListColumnPredicate} of
@@ -118,18 +118,18 @@ public final class StarPredicateTranslator {
      * own column) for anything else.
      */
     public static Predicate toColumnPredicate(
-            org.eclipse.daanse.rolap.common.star.StarColumnPredicate predicate, SqlExpression col) {
+            StarColumnPredicate predicate, SqlExpression col) {
         return toColumnPredicate(predicate, col, null);
     }
 
     /**
-     * As {@link #toColumnPredicate(org.eclipse.daanse.rolap.common.star.StarColumnPredicate, SqlExpression)}
+     * As {@link #toColumnPredicate(StarColumnPredicate, SqlExpression)}
      * but with an explicit literal datatype for predicates constructed WITHOUT a star column (a shared /
      * non-cube level constrained via its level key expression, where the literal datatype comes from the
      * level rather than a star column).
      */
     public static Predicate toColumnPredicate(
-            org.eclipse.daanse.rolap.common.star.StarColumnPredicate predicate, SqlExpression col,
+            StarColumnPredicate predicate, SqlExpression col,
             org.eclipse.daanse.sql.model.type.Datatype fallbackType) {
         if (predicate instanceof ValueColumnPredicate value) {
             Object v = value.getValue();
@@ -140,13 +140,13 @@ public final class StarPredicateTranslator {
                     typedLiteral(v, literalType(value, fallbackType)));
         }
         if (predicate instanceof ListColumnPredicate list) {
-            List<org.eclipse.daanse.rolap.common.star.StarColumnPredicate> children = list.getPredicates();
+            List<StarColumnPredicate> children = list.getPredicates();
             boolean allValues = !children.isEmpty()
                     && children.stream().allMatch(ValueColumnPredicate.class::isInstance);
             if (allValues) {
                 List<SqlExpression> values = new ArrayList<>();
                 boolean hasNull = false;
-                for (org.eclipse.daanse.rolap.common.star.StarColumnPredicate child : children) {
+                for (StarColumnPredicate child : children) {
                     ValueColumnPredicate v = (ValueColumnPredicate) child;
                     Object val = v.getValue();
                     if (val == null || val == Util.sqlNullValue) {
@@ -231,7 +231,7 @@ public final class StarPredicateTranslator {
      */
     private static Predicate listPredicate(
             ListColumnPredicate list, Function<RolapStar.Column, SqlExpression> columnResolver) {
-        List<org.eclipse.daanse.rolap.common.star.StarColumnPredicate> children = list.getPredicates();
+        List<StarColumnPredicate> children = list.getPredicates();
         boolean allValues = !children.isEmpty()
                 && children.stream().allMatch(ValueColumnPredicate.class::isInstance);
         if (allValues) {
@@ -241,7 +241,7 @@ public final class StarPredicateTranslator {
             //   col IS NULL  /  (col = v or col is null)  /  (col in (...) or col is null).
             List<SqlExpression> values = new ArrayList<>();
             boolean hasNull = false;
-            for (org.eclipse.daanse.rolap.common.star.StarColumnPredicate child : children) {
+            for (StarColumnPredicate child : children) {
                 ValueColumnPredicate v = (ValueColumnPredicate) child;
                 Object val = v.getValue();
                 if (val == null || val == Util.sqlNullValue) {
@@ -261,7 +261,7 @@ public final class StarPredicateTranslator {
             return hasNull ? Predicates.or(List.of(base, Predicates.isNull(col))) : base;
         }
         List<Predicate> parts = new ArrayList<>();
-        for (org.eclipse.daanse.rolap.common.star.StarColumnPredicate child : children) {
+        for (StarColumnPredicate child : children) {
             parts.add(toPredicate(child, columnResolver));
         }
         return Predicates.or(parts);

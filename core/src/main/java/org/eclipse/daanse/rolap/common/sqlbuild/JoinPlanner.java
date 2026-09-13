@@ -83,7 +83,7 @@ public final class JoinPlanner {
      * aggregator bakes the (dialect-quoted) column into its rendering.
      */
     public static SqlExpression expressionFor(RolapStar.Measure measure, Dialect dialect) {
-        org.eclipse.daanse.olap.api.aggregator.Aggregator aggregator = measure.getAggregator();
+        Aggregator aggregator = measure.getAggregator();
         // Dialect-free node measure (mirrors AbstractQuerySpec.addMeasure): the inner operand is the measure
         // column node (plain Column / computed RawVariant) wrapped by the aggregator — the same aggregate
         // over the same column rendering as the raw string fallback below.
@@ -209,18 +209,18 @@ public final class JoinPlanner {
      * parent lands. A table whose chain never reaches the tree (defensive; chains are registered
      * whole) is appended parent-first so the SQL stays valid.
      */
-    public static java.util.List<JoinStep> foldJoinSteps(java.util.LinkedHashSet<RolapStar.Table> pending,
+    public static java.util.List<JoinStep> foldJoinSteps(LinkedHashSet<RolapStar.Table> pending,
             RolapStar.Table fact) {
         return foldJoinSteps(pending, fact, Set.of());
     }
 
     /**
-     * As {@link #foldJoinSteps(java.util.LinkedHashSet, RolapStar.Table)} with tables that are
+     * As {@link #foldJoinSteps(LinkedHashSet, RolapStar.Table)} with tables that are
      * ALREADY part of the caller's FROM (e.g. a chain table whose alias lives inside the FROM-root
      * relation): they are seeded as placed — never re-joined (the same alias twice is invalid SQL) —
      * but their children still attach to them.
      */
-    public static java.util.List<JoinStep> foldJoinSteps(java.util.LinkedHashSet<RolapStar.Table> pending,
+    public static java.util.List<JoinStep> foldJoinSteps(LinkedHashSet<RolapStar.Table> pending,
             RolapStar.Table fact, Set<RolapStar.Table> prePlaced) {
         java.util.List<JoinStep> steps = new java.util.ArrayList<>();
         Set<RolapStar.Table> placed = new java.util.HashSet<>(prePlaced);
@@ -312,7 +312,7 @@ public final class JoinPlanner {
      * Returns an always-false predicate for a null member. Only plain single-member key constraints
      * are produced here; richer constraints (context/slicer, multi-value {@code IN}) are not.
      */
-    public static java.util.Optional<Predicate> memberKeyConstraint(
+    public static Optional<Predicate> memberKeyConstraint(
             org.eclipse.daanse.rolap.api.element.RolapMember parent) {
         java.util.List<Predicate> equalities = new java.util.ArrayList<>();
         for (org.eclipse.daanse.rolap.api.element.RolapMember m = parent;
@@ -320,7 +320,7 @@ public final class JoinPlanner {
             if (m.isNull()) {
                 org.eclipse.daanse.rolap.common.RolapUtil.SQL_GEN_LOGGER.trace(
                         "member-key {}: always-false (null member)", m);
-                return java.util.Optional.of(Predicates.or(java.util.List.of())); // always false → 1 = 0
+                return Optional.of(Predicates.or(java.util.List.of())); // always false → 1 = 0
             }
             org.eclipse.daanse.rolap.element.RolapLevel level =
                     (org.eclipse.daanse.rolap.element.RolapLevel) m.getLevel();
@@ -343,8 +343,8 @@ public final class JoinPlanner {
                 break;
             }
         }
-        return equalities.isEmpty() ? java.util.Optional.empty()
-                : java.util.Optional.of(Predicates.and(equalities));
+        return equalities.isEmpty() ? Optional.empty()
+                : Optional.of(Predicates.and(equalities));
     }
 
     /** The {@code left = right} equality for a join condition. */

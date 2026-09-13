@@ -50,7 +50,9 @@ import org.eclipse.daanse.olap.api.element.Member;
 import org.eclipse.daanse.olap.api.element.NamedSet;
 import org.eclipse.daanse.olap.api.function.FunctionDefinition;
 import org.eclipse.daanse.olap.api.query.component.Expression;
+import org.eclipse.daanse.olap.api.query.component.HierarchyExpression;
 import org.eclipse.daanse.olap.api.query.component.LevelExpression;
+import org.eclipse.daanse.olap.api.DataType;
 import org.eclipse.daanse.olap.api.query.component.Literal;
 import org.eclipse.daanse.olap.api.query.component.MemberExpression;
 import org.eclipse.daanse.olap.api.query.component.NamedSetExpression;
@@ -59,6 +61,8 @@ import org.eclipse.daanse.olap.api.query.component.QueryAxis;
 import org.eclipse.daanse.olap.api.type.HierarchyType;
 import org.eclipse.daanse.olap.api.type.Type;
 import org.eclipse.daanse.olap.common.Util;
+import org.eclipse.daanse.olap.fun.FunUtil;
+import org.eclipse.daanse.olap.fun.sort.Sorter;
 import org.eclipse.daanse.olap.function.def.parentheses.ParenthesesFunDef;
 import org.eclipse.daanse.olap.function.def.set.SetFunDef;
 import org.eclipse.daanse.olap.function.def.tuple.TupleFunDef;
@@ -152,13 +156,13 @@ public class CrossJoinArgFactory {
      *
      * member.Children
      * level.members
-     * descendents of a member
+     * descendants of a member
      * member list
      * filter on a dimension
      *
      *
      * @param evaluator Evaluator
-     * @param exp       Expresssion
+     * @param exp       Expression
      * @return List of CrossJoinArg arrays. The first array represent the
      *         CJ CrossJoinArg and the second array represent the additional
      *         constraints.
@@ -200,6 +204,19 @@ public class CrossJoinArgFactory {
         if (cjArgs != null) {
             return Collections.singletonList(cjArgs);
         }
+        cjArgs = checkRange(evaluator, fun, args);
+        if (cjArgs != null) {
+            return Collections.singletonList(cjArgs);
+        }
+        cjArgs = checkUnion(evaluator, fun, args);
+        if (cjArgs != null) {
+            return Collections.singletonList(cjArgs);
+        }
+        List<CrossJoinArg[]> exceptArgs =
+            checkExcept(evaluator, fun, args, enableNativeFilter);
+        if (exceptArgs != null) {
+            return exceptArgs;
+        }
 
         if (returnAny) {
             cjArgs = checkConstrainedMeasures(evaluator, fun, args);
@@ -222,6 +239,190 @@ public class CrossJoinArgFactory {
             return checkCrossJoinArg(evaluator, args[0], returnAny, enableNativeFilter);
         }
         return checkCrossJoin(evaluator, fun, args, returnAny);
+    }
+
+    /**
+     * Checks for a member range m1 : m2 over plain same-level
+     * members. The member set comes from the same call the calc engine makes
+     * ( FunUtil#memberRange  - endpoint-swap retry included), so set and
+     * order are identical by construction (ranges are hierarchically ordered);
+     * oversized ranges fall back to the calc engine via the maxConstraints
+     * gate in  MemberListCrossJoinArg#create.
+     */
+    private CrossJoinArg[] checkRange(
+        RolapEvaluator evaluator, FunctionDefinition fun, Expression[] args)
+    {
+        if (!":".equals(fun.getFunctionMetaData().operationAtom().name())
+            || args.length != 2
+            || !(args[0] instanceof MemberExpression firstExpr)
+            || !(args[1] instanceof MemberExpression secondExpr))
+        {
+            return null;
+        }
+        final Member first = firstExpr.getMember();
+        final Member second = secondExpr.getMember();
+        if (first.isCalculated() || second.isCalculated()
+            || first.getLevel() != second.getLevel())
+        {
+            return null;
+        }
+        List<Member> range = FunUtil.memberRange(evaluator, first, second);
+        List<RolapMember> memberList = new ArrayList<>(range.size());
+        for (Member member : range) {
+            memberList.add((RolapMember) member);
+        }
+        final CrossJoinArg cjArg = MemberListCrossJoinArg.create(
+            evaluator, memberList, restrictMemberTypes(), false);
+        return cjArg == null ? null : new CrossJoinArg[]{cjArg};
+    }
+
+    /**
+     * Checks for Union(set1, set2) - DISTINCT only; ALL keeps
+     * duplicates, which a relational constraint cannot carry. Both sides must
+     * reduce to one same-level include member list. The union keeps
+     * first-occurrence order like the calc engine and is accepted only when
+     * that order is already hierarchical - the native evaluator hierarchizes
+     * its result, the calc engine does not.
+     */
+    private CrossJoinArg[] checkUnion(
+        RolapEvaluator evaluator, FunctionDefinition fun, Expression[] args)
+    {
+        if (!"Union".equalsIgnoreCase(fun.getFunctionMetaData().operationAtom().name())) {
+            return null;
+        }
+        if (args.length == 3) {
+            if (!(args[2].getCategory() == DataType.SYMBOL
+                    && args[2] instanceof Literal flag
+                    && "DISTINCT".equalsIgnoreCase(String.valueOf(flag.getValue()))))
+            {
+                return null;
+            }
+        } else if (args.length != 2) {
+            return null;
+        }
+        final MemberListCrossJoinArg left = singleIncludeList(evaluator, args[0]);
+        final MemberListCrossJoinArg right = singleIncludeList(evaluator, args[1]);
+        if (left == null || right == null
+            || left.getLevel() == null || right.getLevel() == null
+            || !left.getLevel().equalsOlapElement(right.getLevel()))
+        {
+            return null;
+        }
+        List<RolapMember> union = new ArrayList<>(left.getMembers());
+        for (RolapMember member : right.getMembers()) {
+            if (!union.contains(member)) {
+                union.add(member);
+            }
+        }
+        if (!isHierarchicallyOrdered(union)) {
+            return null;
+        }
+        final CrossJoinArg cjArg = MemberListCrossJoinArg.create(
+            evaluator, union, restrictMemberTypes(), false);
+        return cjArg == null ? null : new CrossJoinArg[]{cjArg};
+    }
+
+    /**
+     * Checks for Except(set1, set2), tolerating the parsed third
+     * ALL symbol the same way the calc implementation does (it is ignored
+     * there). Two native shapes:
+     *
+     *  set1 is a level-shaped arg (level.Members, member.Children,
+     * Descendants) and set2 a same-level member list: emitted as the existing
+     * base-arg-plus-exclude-list pair - position 1 only ever joins the WHERE
+     * constraints, never the projection, and renders as NOT IN;
+     *  both sides are member lists: the difference in side-0 order as one
+     * include list, accepted only when that order is already hierarchical
+     * (the native evaluator hierarchizes its result).
+     */
+    private List<CrossJoinArg[]> checkExcept(
+        RolapEvaluator evaluator, FunctionDefinition fun, Expression[] args,
+        boolean enableNativeFilter)
+    {
+        if (!"Except".equalsIgnoreCase(fun.getFunctionMetaData().operationAtom().name())
+            || args.length < 2 || args.length > 3)
+        {
+            return null;
+        }
+        final MemberListCrossJoinArg subtrahend = singleIncludeList(evaluator, args[1]);
+        if (subtrahend == null || subtrahend.getLevel() == null) {
+            return null;
+        }
+        final MemberListCrossJoinArg minuendList = singleIncludeList(evaluator, args[0]);
+        if (minuendList != null) {
+            if (minuendList.getLevel() == null
+                || !minuendList.getLevel().equalsOlapElement(subtrahend.getLevel()))
+            {
+                return null;
+            }
+            List<RolapMember> difference = new ArrayList<>(minuendList.getMembers());
+            difference.removeAll(subtrahend.getMembers());
+            if (!isHierarchicallyOrdered(difference)) {
+                return null;
+            }
+            final CrossJoinArg cjArg = MemberListCrossJoinArg.create(
+                evaluator, difference, restrictMemberTypes(), false);
+            return cjArg == null
+                ? null : Collections.singletonList(new CrossJoinArg[]{cjArg});
+        }
+        final List<CrossJoinArg[]> minuend =
+            checkCrossJoinArg(evaluator, args[0], false, enableNativeFilter);
+        if (minuend == null || minuend.size() != 1
+            || minuend.get(0) == null || minuend.get(0).length != 1
+            || !(minuend.get(0)[0] instanceof DescendantsCrossJoinArg base)
+            || base.getLevel() == null
+            || !base.getLevel().equalsOlapElement(subtrahend.getLevel()))
+        {
+            return null;
+        }
+        final CrossJoinArg excludeArg = MemberListCrossJoinArg.create(
+            evaluator, new ArrayList<>(subtrahend.getMembers()),
+            restrictMemberTypes(), true);
+        if (excludeArg == null) {
+            return null;
+        }
+        return Arrays.asList(minuend.get(0), new CrossJoinArg[]{excludeArg});
+    }
+
+    /**
+     * Reduces an expression to one same-level include member list: an
+     * enumeration {m1, m2}, also behind redundant braces. Returns
+     * null for anything else.
+     */
+    private MemberListCrossJoinArg singleIncludeList(
+        RolapEvaluator evaluator, Expression exp)
+    {
+        if (!(exp instanceof ResolvedFunCallImpl funCall)) {
+            return null;
+        }
+        final CrossJoinArg[] result = checkEnumeration(
+            evaluator, funCall.getFunDef(), funCall.getArgs(), false);
+        if (result == null) {
+            if ("{}".equalsIgnoreCase(
+                    funCall.getFunDef().getFunctionMetaData().operationAtom().name())
+                && funCall.getArgCount() == 1)
+            {
+                return singleIncludeList(evaluator, funCall.getArg(0));
+            }
+            return null;
+        }
+        if (result.length != 1
+            || !(result[0] instanceof MemberListCrossJoinArg list)
+            || list.isExclude())
+        {
+            return null;
+        }
+        return list;
+    }
+
+    /**
+     * Whether the list already carries the order the native evaluator's
+     * hierarchize pass would produce.
+     */
+    private static boolean isHierarchicallyOrdered(List<RolapMember> memberList) {
+        List<Member> copy = new ArrayList<>(memberList);
+        Sorter.hierarchizeMemberList(copy, false);
+        return copy.equals(memberList);
     }
 
     private CrossJoinArg[] checkConstrainedMeasures(
@@ -578,6 +779,12 @@ public class CrossJoinArgFactory {
     /**
      * Checks for &lt;Level&gt;.Members.
      *
+     * &lt;Hierarchy&gt;.Members counts only for an all-less single-level
+     * hierarchy, where it equals the only level's Members. Any other
+     * hierarchy spans the all member plus several levels, and a native arg
+     * models exactly one level with a relational expression — MDX that wants
+     * native evaluation there writes &lt;Level&gt;.Members.
+     *
      * @return an {@link org.eclipse.daanse.rolap.common.sql.CrossJoinArg} instance describing the Level.members
      *         function, or null if fun represents something else.
      */
@@ -592,10 +799,18 @@ public class CrossJoinArgFactory {
         if (args.length != 1) {
             return null;
         }
-        if (!(args[0] instanceof LevelExpression)) {
+        RolapLevel level;
+        if (args[0] instanceof LevelExpression levelExpression) {
+            level = (RolapLevel) levelExpression.getLevel();
+        } else if (args[0] instanceof HierarchyExpression hierarchyExpression
+                && !hierarchyExpression.getHierarchy().hasAll()
+                && hierarchyExpression.getHierarchy().getLevels().size() == 1) {
+            // an all-less single-level hierarchy: its Members equal the only
+            // level's Members
+            level = (RolapLevel) hierarchyExpression.getHierarchy().getLevels().get(0);
+        } else {
             return null;
         }
-        RolapLevel level = (RolapLevel) ((LevelExpression) args[0]).getLevel();
         if (!level.isSimple()) {
             return null;
         }
@@ -643,7 +858,9 @@ public class CrossJoinArgFactory {
     }
 
     /**
-     * Checks for Descendants(&lt;member&gt;, &lt;Level&gt;)
+     * Checks for Descendants(&lt;member&gt;, &lt;Level&gt;), also with a numeric depth
+     * or an explicit SELF flag (the 2-arg form's default; every other flag
+     * changes the result set and stays non-native).
      *
      * @return an {@link org.eclipse.daanse.rolap.common.sql.CrossJoinArg} instance describing the Descendants
      *         function, or null if fun represents something else.
@@ -656,7 +873,13 @@ public class CrossJoinArgFactory {
         if (!"Descendants".equalsIgnoreCase(fun.getFunctionMetaData().operationAtom().name())) {
             return null;
         }
-        if (args.length != 2) {
+        if (args.length == 3) {
+            if (!(args[2].getCategory() == DataType.SYMBOL
+                    && args[2] instanceof Literal flag
+                    && "SELF".equalsIgnoreCase(String.valueOf(flag.getValue())))) {
+                return null;
+            }
+        } else if (args.length != 2) {
             return null;
         }
         if (!(args[0] instanceof MemberExpression)) {
@@ -762,7 +985,7 @@ public class CrossJoinArgFactory {
         final boolean exclude = false;
 
         // Check that filterArgs[1] is a qualified predicate
-        // Composites such as AND/OR are not supported at this time
+        // (IS/IN with NOT/AND/OR composites where the structure allows)
         CrossJoinArg[] currentPredicateArgs;
         if (filterArgs[1] instanceof ResolvedFunCallImpl predicateCall) {
             currentPredicateArgs =
@@ -827,36 +1050,75 @@ public class CrossJoinArgFactory {
             return checkFilterPredicate(evaluator, predicateCall, exclude);
         }
 
-        if (predicateCall.getOperationAtom().name().equals("AND")) {
-            Expression andArg0 = predicateCall.getArg(0);
-            Expression andArg1 = predicateCall.getArg(1);
-
-            if (andArg0 instanceof ResolvedFunCallImpl andArg0ResolvedFunCall
-                && andArg1 instanceof ResolvedFunCallImpl andArg1ResolvedFunCall)
+        String opName = predicateCall.getOperationAtom().name();
+        if (opName.equals("AND") || opName.equals("OR")) {
+            Expression arg0 = predicateCall.getArg(0);
+            Expression arg1 = predicateCall.getArg(1);
+            if (!(arg0 instanceof ResolvedFunCallImpl side0)
+                || !(arg1 instanceof ResolvedFunCallImpl side1))
             {
-                CrossJoinArg[] andCJArgs0;
-                CrossJoinArg[] andCJArgs1;
-                andCJArgs0 =
-                    checkFilterPredicate(
-                        evaluator, andArg0ResolvedFunCall, exclude);
-                if (andCJArgs0 != null) {
-                    andCJArgs1 =
-                        checkFilterPredicate(
-                            evaluator, andArg1ResolvedFunCall, exclude);
-                    if (andCJArgs1 != null) {
-                        predicateCJArgs =
-                            Util.appendArrays(andCJArgs0, andCJArgs1);
-                    }
-                }
+                return null;
             }
-            // predicateCJArgs is either initialized or null
-            return predicateCJArgs;
+            CrossJoinArg[] cjArgs0 = checkFilterPredicate(evaluator, side0, exclude);
+            if (cjArgs0 == null) {
+                return null;
+            }
+            CrossJoinArg[] cjArgs1 = checkFilterPredicate(evaluator, side1, exclude);
+            if (cjArgs1 == null) {
+                return null;
+            }
+            // Downstream every arg is a separate conjunct, so only true
+            // conjunctions may concatenate: include-AND directly, and
+            // exclude-OR because NOT(a OR b) = NOT a AND NOT b. The other two
+            // shapes collapse into ONE same-level member-list arg:
+            // include-OR as the union, exclude-AND as the intersection
+            // (NOT(a AND b) = NOT IN (a ∩ b) for one current member).
+            if (opName.equals("AND") != exclude) {
+                return Util.appendArrays(cjArgs0, cjArgs1);
+            }
+            return mergeSameLevelMemberLists(evaluator, cjArgs0, cjArgs1, exclude, opName.equals("OR"));
         }
 
         // Now check the broken down predicate clause.
         predicateCJArgs =
             checkFilterPredicateInIs(evaluator, predicateCall, exclude);
         return predicateCJArgs;
+    }
+
+    /**
+     * Collapses two one-element member-list sides of the same level into one
+     * arg — the union (include-OR) or the intersection (exclude-AND). Null
+     * when the sides span levels or are not plain member lists.
+     */
+    private CrossJoinArg[] mergeSameLevelMemberLists(
+        RolapEvaluator evaluator,
+        CrossJoinArg[] cjArgs0,
+        CrossJoinArg[] cjArgs1,
+        boolean exclude,
+        boolean union)
+    {
+        if (cjArgs0.length != 1 || cjArgs1.length != 1
+            || !(cjArgs0[0] instanceof MemberListCrossJoinArg left)
+            || !(cjArgs1[0] instanceof MemberListCrossJoinArg right)
+            || left.isExclude() != exclude || right.isExclude() != exclude
+            || left.getLevel() == null || right.getLevel() == null
+            || !left.getLevel().equalsOlapElement(right.getLevel()))
+        {
+            return null;
+        }
+        List<RolapMember> members = new ArrayList<>(left.getMembers());
+        if (union) {
+            for (RolapMember member : right.getMembers()) {
+                if (!members.contains(member)) {
+                    members.add(member);
+                }
+            }
+        } else {
+            members.retainAll(right.getMembers());
+        }
+        CrossJoinArg merged =
+            MemberListCrossJoinArg.create(evaluator, members, restrictMemberTypes, exclude);
+        return merged == null ? null : new CrossJoinArg[]{merged};
     }
 
     /**
@@ -1004,7 +1266,7 @@ public class CrossJoinArgFactory {
         return isSet(exp) && allArgsCheapToExpand(exp);
     }
 
-    private static final List<String> cheapFuns =
+    private static final List<String> CHEAP_FUNS =
         List.of("LastChild", "FirstChild", "Lag");
 
     private boolean allArgsCheapToExpand(Expression exp) {
@@ -1013,7 +1275,7 @@ public class CrossJoinArgFactory {
         }
         for (Expression arg : ((ResolvedFunCallImpl) exp).getArgs()) {
             if (arg instanceof ResolvedFunCallImpl resolvedFunCall) {
-                if (!cheapFuns.contains(resolvedFunCall.getOperationAtom().name())) {
+                if (!CHEAP_FUNS.contains(resolvedFunCall.getOperationAtom().name())) {
                     return false;
                 }
             } else if (!(arg instanceof MemberExpression)) {

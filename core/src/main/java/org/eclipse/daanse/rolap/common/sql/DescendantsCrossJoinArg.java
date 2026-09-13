@@ -31,9 +31,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.eclipse.daanse.rolap.api.element.RolapMember;
-import org.eclipse.daanse.rolap.common.aggmatcher.AggStar;
-import org.eclipse.daanse.rolap.common.constraint.MemberConstraintWriter;
-import org.eclipse.daanse.rolap.element.RolapCube;
 import org.eclipse.daanse.rolap.element.RolapLevel;
 
 /**
@@ -75,19 +72,15 @@ public class DescendantsCrossJoinArg implements CrossJoinArg {
         return false;
     }
 
-    private boolean equals(Object o1, Object o2) {
-        return o1 == null ? o2 == null : o1.equals(o2);
-    }
-
     @Override
 	public boolean equals(Object obj) {
         if (!(obj instanceof DescendantsCrossJoinArg that)) {
             return false;
         }
-        if (!equals(this.level, that.level)) {
+        if (!java.util.Objects.equals(this.level, that.level)) {
             return false;
         }
-        return equals(this.member, that.member);
+        return java.util.Objects.equals(this.member, that.member);
     }
 
     @Override

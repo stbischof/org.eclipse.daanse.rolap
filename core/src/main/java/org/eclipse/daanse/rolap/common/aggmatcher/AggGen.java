@@ -811,13 +811,14 @@ public class AggGen {
         pw.println("WHERE ");
         k = 0;
         for (RolapStar.Table rt : collapsedColumnUsages.keySet()) {
-            if (k++ > 0) {
-                pw.println(" and");
-            }
-
             RolapStar.Condition cond = rt.getJoinCondition();
             if (cond == null) {
+                // decide BEFORE printing the separator - a skipped table
+                // used to leave a dangling " and" in the generated WHERE
                 continue;
+            }
+            if (k++ > 0) {
+                pw.println(" and");
             }
             pw.print(prefix);
             pw.print(cond.toString(dialect));

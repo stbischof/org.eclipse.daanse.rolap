@@ -32,6 +32,7 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 
+import org.eclipse.daanse.olap.util.ConcatenableList;
 import org.junit.jupiter.api.Test;
 
 /**

@@ -31,8 +31,6 @@ package org.eclipse.daanse.rolap.element;
 
 
 
-import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
 import java.text.MessageFormat;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -46,7 +44,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Optional;
-import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -117,7 +114,6 @@ import org.eclipse.daanse.rolap.common.star.RolapStarRegistry;
 import org.eclipse.daanse.cwm.model.cwm.objectmodel.core.util.Namespaces;
 import org.eclipse.daanse.cwm.model.cwm.resource.relational.util.ColumnSets;
 import org.eclipse.daanse.rolap.mapping.model.database.relational.ColumnInternalDataType;
-import org.eclipse.daanse.rolap.util.ClassResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -1077,24 +1073,13 @@ public class RolapCatalog implements Catalog {
 	 */
 	private MemberReader createMemberReader(final RolapHierarchy hierarchy, final String memberReaderClass) {
 		if (memberReaderClass != null) {
-			Exception e2;
-			try {
-				Properties properties = null;
-				Class<?> clazz = ClassResolver.INSTANCE.forName(memberReaderClass, true);
-				Constructor<?> constructor = clazz.getConstructor(RolapHierarchy.class, Properties.class);
-				Object o = constructor.newInstance(hierarchy, properties);
-				if (o instanceof MemberReader) {
-					return (MemberReader) o;
-				} else if (o instanceof MemberSource) {
-					return new CacheMemberReader((MemberSource) o);
-				} else {
-					throw Util.newInternal(new StringBuilder("member reader class ").append(clazz)
-							.append(" does not implement ").append(MemberSource.class).toString());
-				}
-			} catch (ClassNotFoundException | NoSuchMethodException | InstantiationException | IllegalAccessException | InvocationTargetException e) {
-				e2 = e;
-			}
-			throw Util.newInternal(e2, "while instantiating member reader '" + memberReaderClass);
+			// the reflective thread-context-classloader mechanism is gone:
+			// it cannot see bundle classes under OSGi, and no mapping ever
+			// used it. A custom reader would arrive as a registered service
+			// (OSGi whiteboard / ServiceLoader), not as a class name.
+			throw new UnsupportedOperationException(
+				"memberReaderClass '" + memberReaderClass
+				+ "' is not supported: custom member readers must be provided as a service, not by class name");
 		} else {
 			SqlMemberSource source = new SqlMemberSource(hierarchy);
 

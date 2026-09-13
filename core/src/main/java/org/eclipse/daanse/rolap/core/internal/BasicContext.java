@@ -33,6 +33,7 @@ import static org.osgi.service.component.annotations.ReferencePolicy.DYNAMIC;
 import static org.osgi.service.component.annotations.ServiceScope.SINGLETON;
 
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
@@ -105,6 +106,7 @@ public class BasicContext extends AbstractRolapContext implements RolapContext {
 
     private volatile org.eclipse.daanse.rolap.mapping.model.catalog.Catalog cachedCatalogMapping;
 
+
     private ExpressionCompilerFactory expressionCompilerFactory;
 
     private MdxParserProvider mdxParserProvider;
@@ -132,6 +134,45 @@ public class BasicContext extends AbstractRolapContext implements RolapContext {
     public void activate(Map<String, Object> configuration) throws Exception {
         updateConfiguration(configuration);
         activate1();
+        startCacheStatsLogger(configuration);
+    }
+
+    /**
+     * Optional periodic cache observability: with
+     * {@code cacheStatsLogSeconds > 0} in the component configuration a
+     * daemon thread logs {@code CacheStatsReport.capture(this)} at INFO on
+     * that period. Default off - the report stays a pull-only seam.
+     */
+    private java.util.concurrent.ScheduledExecutorService cacheStatsLogger;
+
+    /** Component-config key for the optional periodic stats log. */
+    static final String CACHE_STATS_LOG_SECONDS = "cacheStatsLogSeconds";
+
+    private void startCacheStatsLogger(Map<String, Object> configuration) {
+        long seconds = 0;
+        Object raw = configuration == null ? null : configuration.get(CACHE_STATS_LOG_SECONDS);
+        if (raw != null) {
+            try {
+                seconds = Long.parseLong(String.valueOf(raw));
+            } catch (NumberFormatException e) {
+                LOGGER.warn(CACHE_STATS_LOG_SECONDS + " carries '{}' (expected a number); stats logging stays off", raw);
+            }
+        }
+        if (seconds <= 0) {
+            return;
+        }
+        cacheStatsLogger = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "daanse.rolap.cacheStatsLogger");
+            thread.setDaemon(true);
+            return thread;
+        });
+        cacheStatsLogger.scheduleAtFixedRate(() -> {
+            try {
+                LOGGER.info(org.eclipse.daanse.rolap.common.CacheStatsReport.capture(this).formatted());
+            } catch (RuntimeException e) {
+                LOGGER.debug("cache stats capture failed", e);
+            }
+        }, seconds, seconds, java.util.concurrent.TimeUnit.SECONDS);
     }
 
     /**
@@ -141,6 +182,55 @@ public class BasicContext extends AbstractRolapContext implements RolapContext {
      * context exhausts ports, server processes or table locks depending on the
      * database.
      */
+    // O1: monitoring event buses bind as whiteboard services (same shape
+    // as the segment caches below); with none bound the logging default
+    // keeps the engine observable. Dispatch reads the live list, so a bus
+    // arriving or leaving after activation takes effect immediately.
+    private final List<org.eclipse.daanse.olap.api.monitor.EventBus> eventBuses =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    @Reference(cardinality = MULTIPLE, policy = DYNAMIC, policyOption = org.osgi.service.component.annotations.ReferencePolicyOption.GREEDY)
+    protected void bindEventBus(org.eclipse.daanse.olap.api.monitor.EventBus bus) {
+        eventBuses.add(bus);
+    }
+
+    protected void unbindEventBus(org.eclipse.daanse.olap.api.monitor.EventBus bus) {
+        eventBuses.remove(bus);
+    }
+
+    // external segment caches bind as whiteboard services; the provider owns
+    // their lifecycle, unbind never tears a cache down
+    private final List<org.eclipse.daanse.olap.spi.SegmentCache> segmentCaches =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    // synchronized with the activate replay loop: a bind racing activate must
+    // either land in the pre-activation buffer or see the manager — never
+    // neither. Attach order is bind order; service ranking is not consulted.
+    // Services marked daanse.segmentcache.hidden=true stay unbound; they
+    // feed a decorating cache that republishes itself without the marker.
+    @Reference(cardinality = MULTIPLE, policy = DYNAMIC, policyOption = org.osgi.service.component.annotations.ReferencePolicyOption.GREEDY, target = "(!(daanse.segmentcache.hidden=true))")
+    protected void bindSegmentCache(org.eclipse.daanse.olap.spi.SegmentCache segmentCache) {
+        synchronized (segmentCaches) {
+            segmentCaches.add(segmentCache);
+            if (aggMgr != null) {
+                sharedCacheManager().addExternalCache(segmentCache);
+            }
+        }
+    }
+
+    protected void unbindSegmentCache(org.eclipse.daanse.olap.spi.SegmentCache segmentCache) {
+        synchronized (segmentCaches) {
+            segmentCaches.remove(segmentCache);
+            if (aggMgr != null) {
+                sharedCacheManager().removeExternalCache(segmentCache);
+            }
+        }
+    }
+
+    private org.eclipse.daanse.rolap.common.agg.SegmentCacheManager sharedCacheManager() {
+        return (org.eclipse.daanse.rolap.common.agg.SegmentCacheManager) aggMgr.getSegmentCacheManager();
+    }
+
     @Reference(name = BASIC_CONTEXT_REF_NAME_CONNECTION_POOL, target = UNRESOLVABLE_FILTER)
     protected void setConnectionPool(ConnectionPool connectionPool) {
         this.connectionPool = connectionPool;
@@ -149,7 +239,7 @@ public class BasicContext extends AbstractRolapContext implements RolapContext {
     protected void unsetConnectionPool(ConnectionPool connectionPool) {
         if (this.connectionPool == connectionPool) {
             this.connectionPool = null;
-        }
+            }
     }
 
     @Reference(name = BASIC_CONTEXT_REF_NAME_DIALECT_FACTORY, target = UNRESOLVABLE_FILTER)
@@ -173,7 +263,7 @@ public class BasicContext extends AbstractRolapContext implements RolapContext {
         if (this.catalogMappingSupplier == catalogMappingSupplier) {
             this.catalogMappingSupplier = null;
             this.cachedCatalogMapping = null;
-        }
+            }
     }
 
     @Reference(name = BASIC_CONTEXT_REF_NAME_EXPRESSION_COMPILER_FACTORY)
@@ -253,7 +343,25 @@ public class BasicContext extends AbstractRolapContext implements RolapContext {
 
     private void activate1() throws Exception {
 
-        this.eventBus = new LoggingEventBus();
+        final org.eclipse.daanse.olap.api.monitor.EventBus loggingFallback = new LoggingEventBus();
+        this.eventBus = event -> {
+            if (eventBuses.isEmpty()) {
+                loggingFallback.accept(event);
+                return;
+            }
+            for (org.eclipse.daanse.olap.api.monitor.EventBus bus : eventBuses) {
+                // per-bus isolation: emission sites sit on hot paths
+                // (statement execution, the cache actor) - a buggy
+                // third-party bus must neither break the query nor
+                // suppress the remaining buses
+                try {
+                    bus.accept(event);
+                } catch (RuntimeException | Error e) {
+                    LOGGER.warn("event bus {} failed; continuing with the others",
+                            bus.getClass().getName(), e);
+                }
+            }
+        };
 
         catalogCache = new RolapCatalogCache(this);
         queryLimitSemaphore = new Semaphore(
@@ -270,7 +378,16 @@ public class BasicContext extends AbstractRolapContext implements RolapContext {
                 getConfig().rolapConnectionShepherdThreadPollingInterval(),
                 getConfig().rolapConnectionShepherdThreadPollingIntervalUnit(),
                 getConfig().rolapConnectionShepherdNbThreads());
-        aggMgr = new AggregationManager(this);
+        synchronized (segmentCaches) {
+            aggMgr = new AggregationManager(this);
+            for (org.eclipse.daanse.olap.spi.SegmentCache segmentCache : segmentCaches) {
+                sharedCacheManager().addExternalCache(segmentCache);
+            }
+        }
+
+        // arm the orphaned-context safety net now that every resource the
+        // cleanup needs exists
+        registerCleanup();
 
         if (LOGGER.isDebugEnabled()) {
             LOGGER.debug("new DaanseServer: id=" + getId());
@@ -279,6 +396,10 @@ public class BasicContext extends AbstractRolapContext implements RolapContext {
 
     @Deactivate
     public void deactivate(Map<String, Object> configuration) throws Exception {
+        if (cacheStatsLogger != null) {
+            cacheStatsLogger.shutdownNow();
+            cacheStatsLogger = null;
+        }
         shutdown();
         updateConfiguration(null);
     }
@@ -320,12 +441,6 @@ public class BasicContext extends AbstractRolapContext implements RolapContext {
         }
         return cachedCatalogMapping;
     }
-
-//
-//	@Override
-//	public QueryProvider getQueryProvider() {
-//		return queryProvider;
-//	}
 
     @Override
     public ExpressionCompilerFactory getExpressionCompilerFactory() {

@@ -172,7 +172,7 @@ class MemberSqlMapperComputedFactJoinTest {
                 + " join \"sales_fact_1997\" as \"sales_fact_1997\""
                 + " on \"sales_fact_1997\".\"promotion_id\" = \"promotion\".\"promotion_id\""
                 + " group by RTRIM(\"promotion_name\")"
-                + " order by CASE WHEN RTRIM(\"promotion_name\") IS NULL THEN 1 ELSE 0 END,"
+                + " order by CASE WHEN RTRIM(\"promotion_name\") IS NULL THEN 0 ELSE 1 END,"
                 + " RTRIM(\"promotion_name\") ASC");
     }
 
@@ -199,7 +199,7 @@ class MemberSqlMapperComputedFactJoinTest {
                 + " join \"sales_fact_1997\" as \"sales_fact_1997\""
                 + " on \"sales_fact_1997\".\"promotion_id\" = \"promotion\".\"promotion_id\""
                 + " group by \"promotion\".\"promotion_name\", RTRIM(\"promotion_name\")"
-                + " order by CASE WHEN RTRIM(\"promotion_name\") IS NULL THEN 1 ELSE 0 END,"
+                + " order by CASE WHEN RTRIM(\"promotion_name\") IS NULL THEN 0 ELSE 1 END,"
                 + " RTRIM(\"promotion_name\") ASC");
     }
 
@@ -227,7 +227,7 @@ class MemberSqlMapperComputedFactJoinTest {
                 + " join \"sales_fact_1997\" as \"sales_fact_1997\""
                 + " on \"sales_fact_1997\".\"promotion_id\" = \"promotion\".\"promotion_id\""
                 + " group by \"promotion\".\"promotion_name\", RTRIM(\"promotion_name\")"
-                + " order by CASE WHEN \"promotion\".\"promotion_name\" IS NULL THEN 1 ELSE 0 END,"
+                + " order by CASE WHEN \"promotion\".\"promotion_name\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"promotion\".\"promotion_name\" ASC");
     }
 
@@ -254,7 +254,7 @@ class MemberSqlMapperComputedFactJoinTest {
                 + " join \"sales_fact_1997\" as \"sales_fact_1997\""
                 + " on \"sales_fact_1997\".\"promotion_id\" = \"promotion\".\"promotion_id\""
                 + " group by \"promotion\".\"promotion_name\", RTRIM(\"promotion_name\")"
-                + " order by CASE WHEN \"promotion\".\"promotion_name\" IS NULL THEN 1 ELSE 0 END,"
+                + " order by CASE WHEN \"promotion\".\"promotion_name\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"promotion\".\"promotion_name\" ASC");
     }
 
@@ -310,7 +310,7 @@ class MemberSqlMapperComputedFactJoinTest {
                 + " CONCAT(\"customer\".\"fname\", ' ', \"customer\".\"lname\"),"
                 + " \"customer\".\"gender\""
                 + " order by CASE WHEN CONCAT(\"customer\".\"fname\", ' ', \"customer\".\"lname\")"
-                + " IS NULL THEN 1 ELSE 0 END,"
+                + " IS NULL THEN 0 ELSE 1 END,"
                 + " CONCAT(\"customer\".\"fname\", ' ', \"customer\".\"lname\") ASC");
     }
 }

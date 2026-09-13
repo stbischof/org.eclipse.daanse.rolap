@@ -84,11 +84,6 @@ final class DialectSqlQueryCapabilities implements SqlQueryCapabilities {
     }
 
     @Override
-    public boolean drillthroughMaxRowsInLimit() {
-        return dialect.requiresDrillthroughMaxRowsInLimit();
-    }
-
-    @Override
     public int maxColumnNameLength() {
         return dialect.getMaxColumnNameLength();
     }

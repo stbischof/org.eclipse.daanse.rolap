@@ -16,7 +16,7 @@
  * (stars, relations, levels, constraints) into the generic {@code org.eclipse.daanse.sql.statement}
  * model, which a {@code DialectSqlRenderer} then spells for a concrete dialect. These are the
  * expressive, purpose-specific builders that sit <em>behind</em> the engine's existing seams
- * ({@code MemberReader}, {@code TupleReader}, {@code QuerySpec}).
+ * ({@code MemberReader}, {@code TupleReader}, {@code AbstractQuerySpec}).
  * <p>
  * Cohesive translators:
  * <ul>

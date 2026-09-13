@@ -25,6 +25,7 @@ public interface RolapContext extends Context<Connection> {
 
 	Catalog getCatalogMapping();
 
+
 	Optional<AggregationMatchRulesSupplier> getAggMatchRulesSupplier();
 
 	/**

@@ -57,9 +57,6 @@ public interface SqlQueryCapabilities {
     /** Regular-expression predicates are available in WHERE (native Filter feasibility). */
     boolean regexInWhere();
 
-    /** A drill-through row limit must be inlined as a LIMIT clause (not setMaxRows). */
-    boolean drillthroughMaxRowsInLimit();
-
     /** Maximum column-name/alias length; 0 = unlimited. */
     int maxColumnNameLength();
 

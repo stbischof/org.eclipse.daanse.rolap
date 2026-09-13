@@ -34,7 +34,7 @@ import org.eclipse.daanse.sql.statement.api.model.TableAlias;
 /**
  * Builds the segment / aggregate-measure SELECT for a {@link RolapStar} query with the generic
  * statement builder — the dialect-free counterpart of {@code AbstractQuerySpec.generateSql}
- * (the {@code QuerySpec} seam). The expressive aggregate builder behind that seam.
+ * (the query-spec seam). The expressive aggregate builder behind that seam.
  * <p>
  * Segment SQL conventions: FROM rooted at the fact table with each reachable dimension table
  * ANSI-joined in ({@code JOIN…ON}, parent-first, deduped, fact-side first); per dimension

@@ -58,7 +58,7 @@ import org.eclipse.daanse.rolap.element.RolapLevel;
  */
 public class SqlConstraintFactory {
 
-    private static final SqlConstraintFactory instance =
+    private static final SqlConstraintFactory INSTANCE =
         new SqlConstraintFactory();
 
     /**
@@ -86,7 +86,7 @@ public class SqlConstraintFactory {
     }
 
     public static SqlConstraintFactory instance() {
-        return instance;
+        return INSTANCE;
     }
 
     public MemberChildrenConstraint getMemberChildrenConstraint(

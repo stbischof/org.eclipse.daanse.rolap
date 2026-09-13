@@ -141,7 +141,9 @@ class BasicContextServiceTest {
         props.put(Constants.BASIC_CONTEXT_REF_NAME_EXPRESSION_COMPILER_FACTORY + TARGET_EXT, "(ecf=1)");
 
         c.update(props);
-        Context<?> ctx = saContext.waitForService(1000);
+        // generous timeout: the first activation class-loads the whole engine
+        // and takes over a second on a busy machine; success returns instantly
+        Context<?> ctx = saContext.waitForService(15_000);
 
         assertThat(saContext).isNotNull().extracting(ServiceAware::size).isEqualTo(1);
         assertThat(ctx.getConnectionWithDefaultRole()).isNotNull();

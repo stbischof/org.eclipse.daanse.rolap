@@ -35,8 +35,6 @@ import org.eclipse.daanse.rolap.api.aggmatch.AggregationMatchRules;
 import org.eclipse.daanse.rolap.api.aggmatch.AggregationTableMatch;
 import org.eclipse.daanse.rolap.common.star.RolapStar;
 import org.eclipse.daanse.rolap.recorder.MessageRecorder;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Container for aggregate recognition rules.
@@ -47,12 +45,10 @@ import org.slf4j.LoggerFactory;
  */
 public class PatternbasedRules {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(PatternbasedRules.class);
-
     private final AggregationMatchRules rules;
     private final Map<String, Recognizer.Matcher> factToPattern;
     private final Map<String, Recognizer.Matcher> foreignKeyMatcherMap;
-    private Recognizer.Matcher ignoreMatcherMap;
+    private Recognizer.Matcher ignoreMatcher;
     private Recognizer.Matcher factCountMatcher;
     private String tag;
 
@@ -116,13 +112,13 @@ public class PatternbasedRules {
      * Gets the {@link Recognizer.Matcher} for columns that should be ignored.
      */
     public Recognizer.Matcher getIgnoreMatcher() {
-        if (ignoreMatcherMap == null) {
+        if (ignoreMatcher == null) {
             AggregationMatchRule rule = requireAggRule();
-            ignoreMatcherMap = rule.getIgnoreMap()
+            ignoreMatcher = rule.getIgnoreMap()
                 .map(AggMatchService::createIgnoreMatcher)
                 .orElse(name -> false);
         }
-        return ignoreMatcherMap;
+        return ignoreMatcher;
     }
 
     /**

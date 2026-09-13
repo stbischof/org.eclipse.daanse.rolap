@@ -92,7 +92,7 @@ class MemberSqlMapperCollapsedSingleColumnTest {
                 + " from \"" + AGG + "\" as \"" + AGG + "\""
                 + " where (\"" + AGG + "\".\"the_year\" = 1997)"
                 + " group by \"" + AGG + "\".\"quarter\""
-                + " order by CASE WHEN \"" + AGG + "\".\"quarter\" IS NULL THEN 1 ELSE 0 END,"
+                + " order by CASE WHEN \"" + AGG + "\".\"quarter\" IS NULL THEN 0 ELSE 1 END,"
                 + " \"" + AGG + "\".\"quarter\" ASC");
     }
 }

@@ -21,6 +21,10 @@ import org.eclipse.daanse.rolap.common.RolapUtil;
 import org.eclipse.daanse.rolap.common.util.JoinUtil;
 import org.eclipse.daanse.rolap.common.util.RelationUtil;
 import org.eclipse.daanse.rolap.common.util.ViewUtil;
+import org.eclipse.daanse.rolap.mapping.model.database.source.InlineTableSource;
+import org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource;
+import org.eclipse.daanse.rolap.mapping.model.database.source.SqlSelectSource;
+import org.eclipse.daanse.rolap.mapping.model.database.source.TableSource;
 import org.eclipse.daanse.sql.statement.api.Expressions;
 import org.eclipse.daanse.sql.statement.api.From;
 import org.eclipse.daanse.sql.statement.api.Predicates;
@@ -54,8 +58,8 @@ public final class RelationFromMapper {
     /** True if {@link #from} can map this relation: a {@code TableSource} or a {@code JoinSource}
      * (of any nesting depth) of supported sides. */
     public static boolean supports(
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation) {
-        if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.TableSource) {
+            RelationalSource relation) {
+        if (relation instanceof TableSource) {
             return true;
         }
         if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.JoinSource join) {
@@ -75,9 +79,9 @@ public final class RelationFromMapper {
      * authoritatively.
      */
     public static boolean isSingleViewOrInline(
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation) {
-        return relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.SqlSelectSource
-                || relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.InlineTableSource;
+            RelationalSource relation) {
+        return relation instanceof SqlSelectSource
+                || relation instanceof InlineTableSource;
     }
 
     /**
@@ -85,7 +89,7 @@ public final class RelationFromMapper {
      * to a non-empty FROM body — as opposed to a DEGENERATE relation whose {@link #from} would emit
      * broken SQL. The writeback {@code [Scenario]} dimension carries a {@code SqlSelectSource} with
      * an EMPTY body: it renders as {@code from () as "foo"} and even the recorder emits a
-     * {@code SQLSyntaxError} (caught upstream). Guards the count widening so ONLY the resolvable
+     * {@code SQLSyntaxErrorException} (caught upstream). Guards the count widening so ONLY the resolvable
      * exotic single-relation shapes ({@code [Alternative Promotion]},
      * {@code [Shared Alternative Promotion]}) route to the builder count; the degenerate scenario
      * relation stays on the recorder (its broken read is unchanged). A view resolves when at least
@@ -93,12 +97,12 @@ public final class RelationFromMapper {
      * at least one column.
      */
     public static boolean resolvesSingleViewOrInline(
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation) {
-        if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.SqlSelectSource view) {
+            RelationalSource relation) {
+        if (relation instanceof SqlSelectSource view) {
             return ViewUtil.getCodeSet(view).asMap().values().stream()
                     .anyMatch(sql -> sql != null && !sql.isBlank());
         }
-        if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.InlineTableSource inline) {
+        if (relation instanceof InlineTableSource inline) {
             return !RolapUtil.inlineTableData(inline).columnNames().isEmpty();
         }
         return false;
@@ -106,21 +110,21 @@ public final class RelationFromMapper {
 
     /** The {@link FromClause} tree for a supported relation (see {@link #supports}). */
     public static FromClause from(
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation) {
-        if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.TableSource table) {
+            RelationalSource relation) {
+        if (relation instanceof TableSource table) {
             return fromTable(table);
         }
         if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.JoinSource join) {
             return new FromClause.FromJoin(from(join.getLeft().getSource()), JoinKind.INNER,
                     from(join.getRight().getSource()), joinOn(join));
         }
-        if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.SqlSelectSource view) {
+        if (relation instanceof SqlSelectSource view) {
             // Dialect-free: hand the renderer the whole per-dialect view map (DialectSqlRenderer.chooseVariant
             // picks the live dialect's entry at render).
             return new FromClause.FromVariant(ViewUtil.getCodeSet(view).asMap(),
                     TableAlias.of(RelationUtil.getAlias(view)));
         }
-        if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.InlineTableSource inline) {
+        if (relation instanceof InlineTableSource inline) {
             // Dialect-free: carry the inline data as a FromInline node; the renderer generates the
             // dialect-specific VALUES SQL at render time.
             RolapUtil.InlineTableData d = RolapUtil.inlineTableData(inline);
@@ -137,9 +141,9 @@ public final class RelationFromMapper {
      * relation tables a query does not reach. Returns {@code null} when no table is included.
      */
     public static FromClause fromReferenced(
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation,
+            RelationalSource relation,
             Set<String> included) {
-        if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.TableSource table) {
+        if (relation instanceof TableSource table) {
             return included.contains(RelationUtil.getAlias(table)) ? fromTable(table) : null;
         }
         if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.JoinSource join) {
@@ -153,13 +157,13 @@ public final class RelationFromMapper {
             }
             return new FromClause.FromJoin(left, JoinKind.INNER, right, joinOn(join));
         }
-        if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.SqlSelectSource view) {
+        if (relation instanceof SqlSelectSource view) {
             return included.contains(RelationUtil.getAlias(view))
                     ? new FromClause.FromVariant(ViewUtil.getCodeSet(view).asMap(),
                             TableAlias.of(RelationUtil.getAlias(view)))
                     : null;
         }
-        if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.InlineTableSource inline) {
+        if (relation instanceof InlineTableSource inline) {
             if (!included.contains(RelationUtil.getAlias(inline))) {
                 return null;
             }
@@ -179,11 +183,11 @@ public final class RelationFromMapper {
      * counterpart of {@code RolapHierarchy.addToFrom}'s {@code relationSubset}.
      */
     public static Set<String> memberFromTables(
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation,
+            RelationalSource relation,
             Set<String> levelTableAliases) {
         Set<String> out = new LinkedHashSet<>();
         for (String alias : levelTableAliases) {
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource subset =
+            RelationalSource subset =
                     relationSubset(relation, alias);
             collectTableAliases(subset == null ? relation : subset, out);
         }
@@ -206,10 +210,10 @@ public final class RelationFromMapper {
      * {@code FilterChildlessSnowflakeMembers} — the single home of the algorithm
      * ({@code RolapHierarchy.addToFrom} delegates here). A null relation node is a model error.
      */
-    public static org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relationSubset(
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation, String alias) {
+    public static RelationalSource relationSubset(
+            RelationalSource relation, String alias) {
         if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.JoinSource join) {
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource right =
+            RelationalSource right =
                     relationSubset(join.getRight().getSource(), alias);
             if (right == null) {
                 return relationSubset(join.getLeft().getSource(), alias);
@@ -233,8 +237,8 @@ public final class RelationFromMapper {
      * or a {@code null} alias, maps whole — the same guard {@code addToFromInverse} applies.
      */
     public static FromClause fromInverse(
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation, String alias) {
-        org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource subRelation = relation;
+            RelationalSource relation, String alias) {
+        RelationalSource subRelation = relation;
         if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.JoinSource
                 && alias != null) {
             subRelation = relationSubsetInverse(relation, alias);
@@ -250,10 +254,10 @@ public final class RelationFromMapper {
      * {@link #relationSubset} this does NOT consult {@code FilterChildlessSnowflakeMembers}.
      * Returns {@code null} when no table matches; a null relation node is a model error.
      */
-    public static org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relationSubsetInverse(
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation, String alias) {
+    public static RelationalSource relationSubsetInverse(
+            RelationalSource relation, String alias) {
         if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.JoinSource join) {
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource left =
+            RelationalSource left =
                     relationSubsetInverse(join.getLeft().getSource(), alias);
             return left == null ? relationSubsetInverse(join.getRight().getSource(), alias) : join;
         }
@@ -263,27 +267,9 @@ public final class RelationFromMapper {
         return RelationUtil.getAlias(relation).equals(alias) ? relation : null;
     }
 
-    /**
-     * The alias of the table a FROM emits FIRST when adding the relation
-     * subset for {@code tableAlias} — the leftmost leaf of {@link #relationSubset} (or of the whole
-     * relation when {@code tableAlias} is null/unresolvable — the whole-relation
-     * fallback for computed columns). This is the query's BASE FROM table, the anchor a base-table
-     * provenance comment ({@code commentFrom}) must be keyed to.
-     */
-    public static String baseAliasFor(
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation,
-            String tableAlias) {
-        if (relation == null) {
-            return null;
-        }
-        org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource subset =
-                tableAlias == null ? null : relationSubset(relation, tableAlias);
-        return leftmostAlias(subset != null ? subset : relation);
-    }
-
     /** The alias of the leftmost leaf of a relation tree (the first table a FROM emits). */
     private static String leftmostAlias(
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation) {
+            RelationalSource relation) {
         if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.JoinSource join) {
             return leftmostAlias(join.getLeft().getSource());
         }
@@ -292,20 +278,20 @@ public final class RelationFromMapper {
 
     /** The table aliases a relation contributes to a FROM clause (its own table(s)/view(s)). */
     public static Set<String> tableAliases(
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation) {
+            RelationalSource relation) {
         Set<String> out = new java.util.LinkedHashSet<>();
         collectTableAliases(relation, out);
         return out;
     }
 
     private static void collectTableAliases(
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation, Set<String> out) {
+            RelationalSource relation, Set<String> out) {
         if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.JoinSource join) {
             collectTableAliases(join.getLeft().getSource(), out);
             collectTableAliases(join.getRight().getSource(), out);
-        } else if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.TableSource
-                || relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.SqlSelectSource
-                || relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.InlineTableSource) {
+        } else if (relation instanceof TableSource
+                || relation instanceof SqlSelectSource
+                || relation instanceof InlineTableSource) {
             // views (SqlSelectSource) and inline tables (InlineTableSource) are leaf relations too —
             // collect their alias so a view/inline-backed level resolves into the snowflake subset
             // (the FROM renders them via FromVariant/FromInline; the recorder registers inline
@@ -325,8 +311,8 @@ public final class RelationFromMapper {
      * star/mapping table into a FROM, so a table-level filter is never silently dropped.
      */
     public static Predicate tableFilter(
-            org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource relation) {
-        if (relation instanceof org.eclipse.daanse.rolap.mapping.model.database.source.TableSource ts
+            RelationalSource relation) {
+        if (relation instanceof TableSource ts
                 && ts.getSqlWhereExpression() != null) {
             String sql = ts.getSqlWhereExpression().getBody();
             if (sql != null && !sql.isBlank()) {
@@ -375,7 +361,7 @@ public final class RelationFromMapper {
     }
 
     private static FromClause.FromTable fromTable(
-            org.eclipse.daanse.rolap.mapping.model.database.source.TableSource table) {
+            TableSource table) {
         org.eclipse.daanse.cwm.model.cwm.resource.relational.NamedColumnSet ncs = table.getTable();
         String name = ncs.getName();
         String alias = RelationUtil.getAlias(table);

@@ -171,10 +171,7 @@ public class RolapCubeDimension extends RolapDimension {
 
     @Override
 	public void setCaption(String caption) {
-        if (true) {
-            throw new UnsupportedOperationException();
-        }
-        rolapDimension.setCaption(caption);
+        throw new UnsupportedOperationException();
     }
 
     @Override

@@ -42,8 +42,6 @@ import org.eclipse.daanse.olap.api.formatter.MemberPropertyFormatter;
 import org.eclipse.daanse.olap.api.sql.SqlExpression;
 import org.eclipse.daanse.olap.element.PropertyBase;
 import org.eclipse.daanse.rolap.common.star.RolapStar;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * RolapProperty is the definition of a member property.
@@ -52,7 +50,6 @@ import org.slf4j.LoggerFactory;
  */
 public class RolapProperty extends PropertyBase implements LevelProperty, OlapElement {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(RolapProperty.class);
     private final static String mdxPropertyName = "property ''{0}''";
 
     /** Array of RolapProperty of length 0. */
