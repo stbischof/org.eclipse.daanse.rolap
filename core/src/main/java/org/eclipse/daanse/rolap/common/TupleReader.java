@@ -60,15 +60,6 @@ public interface TupleReader {
         MemberCache getMemberCache();
 
         /**
-         * Returns the object which acts as the member cache
-         * synchronization lock.
-         *
-         * @return Object to lock
-         */
-        Object getMemberCacheLock();
-
-
-        /**
          * Creates a new member (together with its properties).
          *
          * @param parentMember Parent member

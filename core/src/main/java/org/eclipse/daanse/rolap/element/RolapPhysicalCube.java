@@ -83,8 +83,12 @@ public class RolapPhysicalCube extends RolapCube implements PhysicalCube {
      */
     RolapPhysicalCube(RolapCatalog catalog, org.eclipse.daanse.rolap.mapping.model.catalog.Catalog catalogMapping, org.eclipse.daanse.rolap.mapping.model.olap.cube.PhysicalCube cubeMapping,
             Context context) {
-        super(catalog, catalogMapping, cubeMapping, cubeMapping.isCache(),
+        super(catalog, catalogMapping, cubeMapping,
                 (org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource) cubeMapping.getSource(), context);
+
+        if (!cubeMapping.isCache()) {
+            applyCellsOffAlias();
+        }
 
         if (getFact() == null) {
             throw Util.newError(

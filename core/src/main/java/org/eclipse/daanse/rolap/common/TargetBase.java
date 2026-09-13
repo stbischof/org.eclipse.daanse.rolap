@@ -53,7 +53,6 @@ public abstract class TargetBase {
     final RolapLevel level;
     private RolapMember currMember;
     private List<RolapMember> list;
-    final Object cacheLock;
     final TupleReader.MemberBuilder memberBuilder;
 
     public TargetBase(
@@ -63,7 +62,6 @@ public abstract class TargetBase {
     {
         this.srcMembers = srcMembers;
         this.level = level;
-        cacheLock = memberBuilder.getMemberCacheLock();
         this.memberBuilder = memberBuilder;
     }
 
@@ -84,10 +82,6 @@ public abstract class TargetBase {
         return this.currMember;
     }
 
-    public void removeCurrMember() {
-        this.currMember = null;
-    }
-
     public void setCurrMember(final RolapMember m) {
         this.currMember = m;
     }
@@ -102,7 +96,9 @@ public abstract class TargetBase {
     }
 
     /**
-     * Adds a row to the collection.
+     * Adds a row to the collection. Thread-confined: a target is filled and
+     * closed on the thread running prepareTuples; cross-thread publication
+     * happens only through the (itself thread-safe) member cache.
      *
      * @param stmt Statement
      * @param column Column ordinal (0-based)
@@ -110,9 +106,7 @@ public abstract class TargetBase {
      * @throws SQLException On error
      */
     public final int addRow(SqlStatement stmt, int column) throws SQLException {
-        synchronized (cacheLock) {
-            return internalAddRow(stmt, column);
-        }
+        return internalAddRow(stmt, column);
     }
 
     public abstract void open();

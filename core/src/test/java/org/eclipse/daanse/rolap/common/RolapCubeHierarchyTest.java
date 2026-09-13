@@ -84,6 +84,8 @@ class RolapCubeHierarchyTest {
     RolapCube factCube = null;
 
     doReturn(cubeDimension_cube).when(cubeDimension).getCube();
+    doReturn(new org.eclipse.daanse.rolap.common.CachePolicy(true, true, true, java.util.OptionalInt.empty()))
+        .when(cubeDimension_cube).getCachePolicy();
     doReturn(dimName).when(cubeDimension).getName();
     doReturn(cubeDimension_schema).when(cubeDimension).getCatalog();
     doReturn(schemaReader).when(cubeDimension_schema)
@@ -143,6 +145,8 @@ class RolapCubeHierarchyTest {
     RolapCube factCube_Fact = null;
 
     doReturn(cubeDimension_cube).when(cubeDimension).getCube();
+    doReturn(new org.eclipse.daanse.rolap.common.CachePolicy(true, true, true, java.util.OptionalInt.empty()))
+        .when(cubeDimension_cube).getCachePolicy();
     doReturn(dimName).when(cubeDimension).getName();
     doReturn(cubeDimension_schema).when(cubeDimension).getCatalog();
     doReturn(cubeDimension_schema_connection).when(cubeDimension_schema)
@@ -204,6 +208,8 @@ class RolapCubeHierarchyTest {
       assertThat(rolapHierarchy_relation.equals(factCube_Fact)).isEqualTo(factCube_Fact_equals);
 
     doReturn(cubeDimension_cube).when(cubeDimension).getCube();
+    doReturn(new org.eclipse.daanse.rolap.common.CachePolicy(true, true, true, java.util.OptionalInt.empty()))
+        .when(cubeDimension_cube).getCachePolicy();
     doReturn(dimName).when(cubeDimension).getName();
     doReturn(cubeDimension_schema).when(cubeDimension).getCatalog();
     doReturn(cubeDimension_schema_connection).when(cubeDimension_schema)
@@ -268,6 +274,8 @@ class RolapCubeHierarchyTest {
       assertThat(rolapHierarchy_relation.equals(factCube_Fact)).isEqualTo(factCube_Fact_equals);
 
     doReturn(cubeDimension_cube).when(cubeDimension).getCube();
+    doReturn(new org.eclipse.daanse.rolap.common.CachePolicy(true, true, true, java.util.OptionalInt.empty()))
+        .when(cubeDimension_cube).getCachePolicy();
     doReturn(dimName).when(cubeDimension).getName();
     doReturn(cubeDimension_schema).when(cubeDimension).getCatalog();
     doReturn(cubeDimension_schema_connection).when(cubeDimension_schema)

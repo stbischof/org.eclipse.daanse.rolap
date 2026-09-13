@@ -114,16 +114,15 @@ import org.eclipse.daanse.olap.query.component.QueryImpl;
 import org.eclipse.daanse.olap.query.component.ResolvedFunCallImpl;
 import org.eclipse.daanse.rolap.api.element.RolapMember;
 import org.eclipse.daanse.rolap.common.AbstractRolapAction;
+import org.eclipse.daanse.rolap.common.CachePolicy;
 import org.eclipse.daanse.rolap.common.EnumConvertor;
 import org.eclipse.daanse.rolap.common.RolapUtil;
 import org.eclipse.daanse.rolap.common.Utils;
 import org.eclipse.daanse.rolap.common.aggmatcher.ExplicitRules;
-import org.eclipse.daanse.rolap.common.cache.SoftSmartCache;
 import org.eclipse.daanse.rolap.common.catalog.RolapCubeCatalogReader;
 import org.eclipse.daanse.rolap.common.catalog.RolapCubeComparator;
-import org.eclipse.daanse.rolap.common.member.MemberCacheHelper;
 import org.eclipse.daanse.rolap.common.member.MemberReader;
-import org.eclipse.daanse.rolap.common.member.SmartMemberReader;
+import org.eclipse.daanse.rolap.common.member.CachingMemberReader;
 import org.eclipse.daanse.rolap.common.star.HierarchyUsage;
 import org.eclipse.daanse.rolap.common.star.RelNode;
 import org.eclipse.daanse.rolap.common.star.RolapStar;
@@ -200,8 +199,6 @@ public abstract class RolapCube extends CubeBase {
     /**
      * Role-based cache of calculated members
      */
-    private final SoftSmartCache<Role, List<Member>>
-        roleToAccessibleCalculatedMembers = new SoftSmartCache<>(); //TODO not used
 
     /**
      * List of named sets.
@@ -249,11 +246,44 @@ public abstract class RolapCube extends CubeBase {
 
     private Context context;
 
+
+    /**
+     * Whether this cube maps a usage of the same logical hierarchy. Every
+     * usage builds its own RolapHierarchy instance, so logical identity is
+     * the mapping object, not the instance.
+     */
+    public boolean usesSharedHierarchy(RolapHierarchy shared) {
+        var mapping = shared.getHierarchyMapping();
+        if (mapping == null) {
+            return false;
+        }
+        for (RolapHierarchy hierarchy : hierarchyList) {
+            if (hierarchy instanceof RolapCubeHierarchy cubeHierarchy
+                    && cubeHierarchy.getRolapHierarchy().getHierarchyMapping() == mapping) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Resolved once from the daanse:cache.* tags; immutable after load. */
+    private CachePolicy cachePolicy;
+
+    public CachePolicy getCachePolicy() {
+        return cachePolicy;
+    }
+
+    /** PhysicalCube.cache=false is the model-level alias for cells=off. */
+    void applyCellsOffAlias() {
+        cachePolicy = new CachePolicy(cachePolicy.members(), false, cachePolicy.nativeSets(),
+                cachePolicy.levelPreCacheThreshold());
+        LOGGER.info("cube '{}' declares cache=false; its cells bypass the segment cache", getName());
+    }
+
     protected RolapCube(
             RolapCatalog catalog,
             org.eclipse.daanse.rolap.mapping.model.catalog.Catalog catalogMapping,
             org.eclipse.daanse.rolap.mapping.model.olap.cube.PhysicalCube cubeMapping,
-            boolean isCache,
             org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource fact,
             Context context)
         {
@@ -264,7 +294,6 @@ public abstract class RolapCube extends CubeBase {
                 cubeMapping.isVisible(),
                 cubeMapping.getName(),
                 Descriptions.localizedBody(cubeMapping, CwmHelper.TYPE_DOCUMENTATION, null).orElse(null),
-                isCache,
                 fact,
                 cubeMapping.getDimensionConnectors(),
                 RolapMetaData.createMetaData(cubeMapping),
@@ -278,7 +307,6 @@ public abstract class RolapCube extends CubeBase {
             RolapCatalog catalog,
             org.eclipse.daanse.rolap.mapping.model.catalog.Catalog catalogMapping,
             org.eclipse.daanse.rolap.mapping.model.olap.cube.VirtualCube cubeMapping,
-            boolean isCache,
             org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource fact,
             Context context)
         {
@@ -289,7 +317,6 @@ public abstract class RolapCube extends CubeBase {
                 cubeMapping.isVisible(),
                 cubeMapping.getName(),
                 Descriptions.localizedBody(cubeMapping, CwmHelper.TYPE_DOCUMENTATION, null).orElse(null),
-                isCache,
                 fact,
                 cubeMapping.getDimensionConnectors(),
                 RolapMetaData.createMetaData(cubeMapping),
@@ -316,7 +343,6 @@ public abstract class RolapCube extends CubeBase {
         boolean visible,
         String caption,
         String description,
-        boolean isCache,
         org.eclipse.daanse.rolap.mapping.model.database.source.RelationalSource fact,
         List<? extends org.eclipse.daanse.rolap.mapping.model.olap.dimension.DimensionConnector> dimensions,
         MetaData metaData,
@@ -336,15 +362,13 @@ public abstract class RolapCube extends CubeBase {
         this.fact = fact;
         this.hierarchyUsages = new ArrayList<>();
         this.context = context;
+        this.cachePolicy = CachePolicy.resolve(catalog.getMetaData(), metaData, context.getConfig());
 
         if (getFact() != null && this instanceof RolapPhysicalCube) {
             this.star = catalog.getRolapStarRegistry().getOrCreateStar(getFact());
             // only set if different from default (so that if two cubes share
             // the same fact table, either can turn off caching and both are
             // effected).
-            if (! isCache) {
-                star.setCacheAggregations(isCache);
-            }
         }
 
         RolapDimension measuresDimension =
@@ -1078,53 +1102,31 @@ public abstract class RolapCube extends CubeBase {
     }
 
     /**
-     * Returns true if this Cube is either virtual or if the Cube's
-     * RolapStar is caching aggregates.
-     *
-     * @return Whether this Cube's RolapStar should cache aggregations
+     * Invalidates the thread-local working stores of this cube's stars, but
+     * only when caching is globally disabled.
      */
-    public boolean isCacheAggregations() {
-        return this instanceof RolapVirtualCube || star.isCacheAggregations();
-    }
-
-    /**
-     * Set if this (non-virtual) Cube's RolapStar should cache
-     * aggregations.
-     *
-     * @param cache Whether this Cube's RolapStar should cache aggregations
-     */
-    public void setCacheAggregations(boolean cache) {
-        if (this instanceof RolapPhysicalCube) {
-            star.setCacheAggregations(cache);
+    public void clearCachedAggregations() {
+        if (getContext().getConfig().disableCaching()) {
+            clearCachedAggregations(true);
         }
     }
 
-    /**
-     * Clear the in memory aggregate cache associated with this Cube, but
-     * only if Disabling Caching has been enabled.
-     */
-    public void clearCachedAggregations() {
-        clearCachedAggregations(false);
-    }
-
-    /**
-     * Clear the in memory aggregate cache associated with this Cube.
-     */
+    /** Empties the calling thread's working stores of this cube's stars -
+     * per-query hygiene, never a cross-thread invalidation (that is the
+     * flush path's generation counter). */
     public void clearCachedAggregations(boolean forced) {
+        if (!forced) {
+            clearCachedAggregations();
+            return;
+        }
         if (this instanceof RolapVirtualCube) {
-            // TODO:
-            // Currently a virtual cube does not keep a list of all of its
-            // base cubes, so we need to iterate through each and flush
-            // the ones that should be flushed. Could use a CacheControl
-            // method here.
+            // a virtual cube keeps no list of its base cubes; clear for
+            // every star of the catalog
             for (RolapStar star1 : catalog.getRolapStarRegistry().getStars()) {
-                // this will only flush the star's aggregate cache if
-                // 1) DisableCaching is true or 2) the star's cube has
-                // cacheAggregations set to false in the schema.
-                star1.clearCachedAggregations(forced);
+                star1.clearWorkingStore();
             }
         } else {
-            star.clearCachedAggregations(forced);
+            star.clearWorkingStore();
         }
     }
 
@@ -2446,15 +2448,13 @@ public abstract class RolapCube extends CubeBase {
             if (rolapHierarchy instanceof RolapCubeHierarchy rolapCubeHierarchy) {
                 MemberReader memberReader = rolapCubeHierarchy.getMemberReader();
                 if(memberReader instanceof RolapCubeHierarchy.CacheRolapCubeHierarchyMemberReader crhmr) {
-                    ((MemberCacheHelper)crhmr.getMemberCache()).flushCache();
-                    crhmr.getRolapCubeMemberCacheHelper().flushCache();
+                    crhmr.flushCache();
                 }
 
                 RolapHierarchy sharedRolapHierarchy = rolapCubeHierarchy.getRolapHierarchy();
                 memberReader = sharedRolapHierarchy.getMemberReader();
-                if (memberReader instanceof SmartMemberReader smartMemberReader) {
-                    final MemberCacheHelper memberCacheHelper = (MemberCacheHelper) smartMemberReader.getMemberCache();
-                    memberCacheHelper.flushCache();
+                if (memberReader instanceof CachingMemberReader cachingMemberReader) {
+                    cachingMemberReader.flushCache();
                 }
             }
         }

@@ -108,7 +108,6 @@ import org.eclipse.daanse.rolap.element.RolapLevel;
 import org.eclipse.daanse.rolap.element.RolapMemberBase;
 import org.eclipse.daanse.rolap.element.RolapParentChildMember;
 import org.eclipse.daanse.rolap.element.RolapPhysicalCube;
-import org.eclipse.daanse.rolap.element.RolapProperty;
 import org.eclipse.daanse.rolap.element.RolapStoredMeasure;
 import org.eclipse.daanse.rolap.element.RolapVirtualCube;
 import org.slf4j.Logger;
@@ -168,10 +167,6 @@ public class SqlTupleReader implements TupleReader {
   // allow hints by default
   private boolean allowHints = true;
   private HashMap<RolapMember, Object> rolapToOrdinalMap = new HashMap<>();
-
-  public boolean isAllowHints() {
-    return allowHints;
-  }
 
   public void setAllowHints( boolean allowHints ) {
     this.allowHints = allowHints;
@@ -285,7 +280,7 @@ public class SqlTupleReader implements TupleReader {
           } else {
             key = cache.makeKey( parentMember, value );
           }
-          member = cache.getMember( key, checkCacheStatus );
+          member = cache.getMember(key);
           checkCacheStatus = false; // only check the first time
           if ( member == null ) {
             if ( constraint instanceof RolapNativeCrossJoin.NonEmptyCrossJoinConstraint
@@ -377,9 +372,7 @@ public class SqlTupleReader implements TupleReader {
 
     @Override
 	public List<Member> close() {
-      synchronized ( cacheLock ) {
-        return internalClose();
-      }
+      return internalClose();
     }
 
     /**
@@ -1057,7 +1050,7 @@ public TupleList readTuples(
       List<BestFitColumnType> types = null;
       BuiltSql lastGuarded = null;
       final List<org.eclipse.daanse.sql.statement.api.model.Statement> unionInputs =
-        new java.util.ArrayList<>();
+        new ArrayList<>();
 
       final int savepoint =
         getEvaluator( constraint ).savepoint();
@@ -1142,14 +1135,14 @@ public TupleList readTuples(
         wrapper.from( org.eclipse.daanse.sql.statement.api.From.set(
           new org.eclipse.daanse.sql.statement.api.model.SetOperation(
             org.eclipse.daanse.sql.statement.api.model.SetOperation.SetOp.UNION,
-            unionInputs, java.util.List.of(), java.util.Optional.empty() ),
+            unionInputs, List.of(), Optional.empty() ),
           org.eclipse.daanse.sql.statement.api.model.TableAlias.of( "unionQuery" ) ) );
         for ( int i = 0; i < types.size(); i++ ) {
           wrapper.orderOn(
             org.eclipse.daanse.sql.statement.api.Expressions.ordinal( i + 1 ),
             new org.eclipse.daanse.sql.statement.api.model.SortSpec(
               org.eclipse.daanse.sql.statement.api.model.SortDirection.ASC, nullable,
-              org.eclipse.daanse.sql.statement.api.model.NullOrder.LAST, false ) );
+              org.eclipse.daanse.sql.statement.api.model.NullOrder.FIRST, false ) );
         }
         org.eclipse.daanse.sql.statement.api.model.SelectStatement wrapperStatement = wrapper.build();
         String sql = SqlRender.render( wrapperStatement, context.getDialect() ).sql();
@@ -1311,7 +1304,7 @@ public TupleList readTuples(
       // agg-st-neutral, agg-st-dimjoin and agg-descendants). The residue — union arms (agg-arm),
       // untranslatable contributions (agg-unavailable:*) and the agg-mixed gate — stays on
       // the recorder below.
-      final java.util.Optional<BuiltSql> aggAuthoritative = aggAuthoritativeLevelMembersSql(
+      final Optional<BuiltSql> aggAuthoritative = aggAuthoritativeLevelMembersSql(
         context, baseCube, aggStar, whichSelect, targetGroup, sqlTargetGroup );
       if ( aggAuthoritative.isPresent() ) {
         return aggAuthoritative.get();
@@ -1360,12 +1353,12 @@ public TupleList readTuples(
     // and the computed-expression tuple read. Both routes are recorder-independent,
     // so they are decided BEFORE any QueryRecorder work — the recorder is not built for these
     // families. Empty Optional = documented decline, recorder below.
-    final java.util.Optional<BuiltSql> noFactAdjacentAuthoritative =
+    final Optional<BuiltSql> noFactAdjacentAuthoritative =
       noFactAdjacentTupleSql( context, baseCube, aggStar, whichSelect, targetGroup );
     if ( noFactAdjacentAuthoritative.isPresent() ) {
       return noFactAdjacentAuthoritative.get();
     }
-    final java.util.Optional<BuiltSql> computedTupleAuthoritative =
+    final Optional<BuiltSql> computedTupleAuthoritative =
       computedTupleSql( context, baseCube, aggStar, whichSelect, targetGroup );
     if ( computedTupleAuthoritative.isPresent() ) {
       return computedTupleAuthoritative.get();
@@ -1525,7 +1518,7 @@ public TupleList readTuples(
       // dominated by an (All) first/co-target on a virtual-cube arm — reads authoritatively
       // through the (All)-dropped tupleLevelMembersSql build. An empty
       // Optional keeps the recorder via the reason line below (documented decline).
-      final java.util.Optional<BuiltSql> noStarKeyAuthoritative = firstTargetNoStarKeySql(
+      final Optional<BuiltSql> noStarKeyAuthoritative = firstTargetNoStarKeySql(
         context, baseCube, targetLevels, contribution, unionArm );
       if ( noStarKeyAuthoritative.isPresent() ) {
         return TupleRouteOutcome.built( noStarKeyAuthoritative.get() );
@@ -1703,35 +1696,35 @@ public TupleList readTuples(
    * inexpressible constraint, an empty survivor set, or a MULTI-target survivor set that fails
    * {@code supportsTupleRead} (no resolvable fact join) keeps the recorder as a documented decline.
    */
-  private java.util.Optional<BuiltSql> firstTargetNoStarKeySql(
+  private Optional<BuiltSql> firstTargetNoStarKeySql(
     Context<?> context, RolapCube baseCube, List<RolapLevel> targetLevels,
     org.eclipse.daanse.rolap.common.sql.ContributionResult contribution,
     boolean unionArm ) {
     if ( !contribution.isSupported()
         || targetLevels.stream().anyMatch( l -> !TupleSqlMapper.supports( l ) ) ) {
-      return java.util.Optional.empty(); // inexpressible / level-unsupported family — not this shape
+      return Optional.empty(); // inexpressible / level-unsupported family — not this shape
     }
     // Precisely the first-target-no-star-key sub-reason: a first target that resolves its star
     // key (or is no cube level at all) belongs to another decline family.
     if ( !( targetLevels.get( 0 ) instanceof RolapCubeLevel firstCube )
         || firstCube.getBaseStarKeyColumn( baseCube ) != null ) {
-      return java.util.Optional.empty();
+      return Optional.empty();
     }
     final List<RolapLevel> nonAll = targetLevels.stream().filter( l -> !l.isAll() ).toList();
     if ( nonAll.isEmpty() ) {
-      return java.util.Optional.empty();
+      return Optional.empty();
     }
     if ( nonAll.size() > 1 && !TupleSqlMapper.supportsTupleRead( nonAll, baseCube ) ) {
       RolapUtil.SQL_GEN_LOGGER.debug(
         "level members: recorder path (first-target-no-star-key survivor set not buildable)" );
-      return java.util.Optional.empty();
+      return Optional.empty();
     }
     final org.eclipse.daanse.rolap.common.sql.ConstraintContribution c = contribution.contribution();
     final QueryBuildContext buildCtx = QueryBuildContext.of( context );
     RolapUtil.SQL_GEN_LOGGER.debug(
       "level members: first-target-no-star-key (all-dropped, targets={}) -> builder authoritative",
       targetLevels.size() );
-    return java.util.Optional.of( buildCtx.build(
+    return Optional.of( buildCtx.build(
       () -> TupleSqlMapper.tupleLevelMembersSql( nonAll, true, c, baseCube, !unionArm ) ) );
   }
 
@@ -1748,9 +1741,9 @@ public TupleList readTuples(
     List<List<RolapCubeLevel>> collapsedTargets,
     org.eclipse.daanse.rolap.common.sql.ConstraintContribution contribution,
     org.eclipse.daanse.rolap.common.sql.AggPlan aggPlan,
-    java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> having,
-    java.util.List<org.eclipse.daanse.rolap.common.sqlbuild.AggTupleQueries.HavingJoin> havingJoins,
-    java.util.Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.NativeOrder> order ) {
+    Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> having,
+    List<org.eclipse.daanse.rolap.common.sqlbuild.AggTupleQueries.HavingJoin> havingJoins,
+    Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.NativeOrder> order ) {
     static AggReadPlan harvest( String label ) {
       return new AggReadPlan( label, null, null, null, null, null, null, null );
     }
@@ -1887,9 +1880,9 @@ public TupleList readTuples(
       label = "agg-mixed";
     }
     // ONE HAVING/ORDER channel (see the method javadoc): the SCC agg twins, else the contribution.
-    final java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> having;
-    final java.util.List<org.eclipse.daanse.rolap.common.sqlbuild.AggTupleQueries.HavingJoin> havingJoins;
-    final java.util.Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.NativeOrder> order;
+    final Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> having;
+    final List<org.eclipse.daanse.rolap.common.sqlbuild.AggTupleQueries.HavingJoin> havingJoins;
+    final Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.NativeOrder> order;
     if ( constraint instanceof SqlContextConstraint scc ) {
       final SqlContextConstraint.AggHaving aggHaving = scc.levelMembersAggHavingWithJoins( aggStar );
       having = aggHaving.having();
@@ -1897,7 +1890,7 @@ public TupleList readTuples(
       order = scc.levelMembersAggOrder( aggStar );
     } else {
       having = c.nativeHaving();
-      havingJoins = java.util.List.of();
+      havingJoins = List.of();
       order = c.nativeOrder();
     }
     return new AggReadPlan( label, mappedTargets, collapsedTargets, c, plan, having, havingJoins,
@@ -1923,10 +1916,10 @@ public TupleList readTuples(
    * {@link DescendantsConstraint} reads authoritatively (agg-descendants); the {@code agg-mixed}
    * mixed-collapsed multi-target and virtual-cube-mapped reads route authoritatively.
    */
-  private java.util.Optional<BuiltSql> aggAuthoritativeLevelMembersSql(
+  private Optional<BuiltSql> aggAuthoritativeLevelMembersSql(
     Context<?> context, RolapCube baseCube, AggStar aggStar, WhichSelect whichSelect,
     List<TargetBase> targetGroup, List<TargetBase> sqlTargetGroup ) {
-    final java.util.Optional<BuiltSql> collapsedAuthoritative =
+    final Optional<BuiltSql> collapsedAuthoritative =
       aggCollapsedLevelMembersSql( context, baseCube, aggStar, whichSelect, targetGroup );
     if ( collapsedAuthoritative.isPresent() ) {
       return collapsedAuthoritative;
@@ -1935,18 +1928,18 @@ public TupleList readTuples(
       .map( TargetBase::getLevel ).toList();
     final AggReadPlan plan = planAggRead( baseCube, aggStar, whichSelect, targetLevels );
     if ( !plan.classified() ) {
-      return java.util.Optional.empty();
+      return Optional.empty();
     }
     final org.eclipse.daanse.rolap.common.sql.ConstraintContribution c = plan.contribution();
     final QueryBuildContext buildCtx = QueryBuildContext.of( context );
     RolapUtil.SQL_GEN_LOGGER.debug(
       "level members: {} (targets={}) -> builder authoritative", plan.label(), targetLevels.size() );
     if ( "agg-mt-collapsed".equals( plan.label() ) ) {
-      return java.util.Optional.of( buildCtx.build(
+      return Optional.of( buildCtx.build(
         () -> AggTupleQueries.collapsedTupleLevelMembersSql( plan.collapsedTargets(), aggStar,
           c.where(), plan.order(), plan.having() ) ) );
     }
-    return java.util.Optional.of( buildCtx.build(
+    return Optional.of( buildCtx.build(
       () -> AggTupleQueries.aggTupleLevelMembersSql( plan.targetLevels(), aggStar,
         true, c.where(), plan.aggPlan().orderedAggPredicates(),
         plan.havingJoins(), plan.order(), plan.having(), c.factJoinRequired(), baseCube, true ) ) );
@@ -2025,19 +2018,19 @@ public TupleList readTuples(
    * The routing condition IS the guard (no runtime fallback): an empty Optional (shape outside
    * the family, or an inexpressible constraint) keeps the recorder as a documented decline.
    */
-  private java.util.Optional<BuiltSql> computedTupleSql(
+  private Optional<BuiltSql> computedTupleSql(
     Context<?> context, RolapCube baseCube, AggStar aggStar, WhichSelect whichSelect,
     List<TargetBase> targetGroup ) {
     if ( aggStar != null ) {
-      return java.util.Optional.empty();
+      return Optional.empty();
     }
     if ( targetGroup.stream().anyMatch( t -> t.getSrcMembers() != null ) ) {
-      return java.util.Optional.empty();
+      return Optional.empty();
     }
     final List<RolapLevel> targetLevels = targetGroup.stream()
       .map( TargetBase::getLevel ).toList();
     if ( !isComputedExpressionTupleFamily( targetLevels ) ) {
-      return java.util.Optional.empty();
+      return Optional.empty();
     }
     final org.eclipse.daanse.rolap.common.sql.ContributionResult contribution =
       ( constraint instanceof org.eclipse.daanse.rolap.common.constraint.DescendantsConstraint dc )
@@ -2047,14 +2040,14 @@ public TupleList readTuples(
       RolapUtil.SQL_GEN_LOGGER.debug(
         "level members: recorder path (computed-tuple constraint {} not expressible as a contribution)",
         constraint.getClass().getSimpleName() );
-      return java.util.Optional.empty();
+      return Optional.empty();
     }
     final org.eclipse.daanse.rolap.common.sql.ConstraintContribution c = contribution.contribution();
     final QueryBuildContext buildCtx = QueryBuildContext.of( context );
     RolapUtil.SQL_GEN_LOGGER.debug(
       "level members: computed-expression tuple read (whichSelect={} targets={}) -> builder authoritative",
       whichSelect, targetGroup.size() );
-    return java.util.Optional.of( buildCtx.build(
+    return Optional.of( buildCtx.build(
       () -> TupleSqlMapper.tupleLevelMembersSqlRecorderJoinOrder( targetLevels, true, c, baseCube,
         whichSelect == WhichSelect.ONLY ) ) );
   }
@@ -2097,22 +2090,22 @@ public TupleList readTuples(
    * The routing condition IS the guard (no runtime fallback): an empty Optional keeps the
    * recorder as a documented decline.
    */
-  private java.util.Optional<BuiltSql> noFactAdjacentTupleSql(
+  private Optional<BuiltSql> noFactAdjacentTupleSql(
     Context<?> context, RolapCube baseCube, AggStar aggStar, WhichSelect whichSelect,
     List<TargetBase> targetGroup ) {
     if ( aggStar != null || whichSelect != WhichSelect.ONLY ) {
-      return java.util.Optional.empty();
+      return Optional.empty();
     }
     if ( targetGroup.stream().anyMatch( t -> t.getSrcMembers() != null ) ) {
-      return java.util.Optional.empty();
+      return Optional.empty();
     }
     final List<RolapLevel> targetLevels = targetGroup.stream()
       .map( TargetBase::getLevel ).toList();
     if ( targetLevels.stream().anyMatch( l -> !TupleSqlMapper.supports( l ) ) ) {
-      return java.util.Optional.empty(); // level-unsupported family = computedTupleSql / rump, not this route
+      return Optional.empty(); // level-unsupported family = computedTupleSql / rump, not this route
     }
     if ( TupleSqlMapper.supportsTupleRead( targetLevels, baseCube ) ) {
-      return java.util.Optional.empty(); // authoritative branch took it (or would have)
+      return Optional.empty(); // authoritative branch took it (or would have)
     }
     final org.eclipse.daanse.rolap.common.sql.ContributionResult contribution =
       constraint.toContribution( baseCube, aggStar );
@@ -2120,7 +2113,7 @@ public TupleList readTuples(
       RolapUtil.SQL_GEN_LOGGER.debug(
         "level members: recorder path (no-fact-adjacent constraint {} not expressible as a contribution)",
         constraint.getClass().getSimpleName() );
-      return java.util.Optional.empty();
+      return Optional.empty();
     }
     final org.eclipse.daanse.rolap.common.sql.ConstraintContribution c = contribution.contribution();
     final QueryBuildContext buildCtx = QueryBuildContext.of( context );
@@ -2129,7 +2122,7 @@ public TupleList readTuples(
       RolapUtil.SQL_GEN_LOGGER.debug(
         "level members {}: no-fact-adjacent (all-dropped) -> builder authoritative",
         nonAll.get( 0 ).getUniqueName() );
-      return java.util.Optional.of( buildCtx.build(
+      return Optional.of( buildCtx.build(
         () -> c.producesPlainLevelMembers()
           ? TupleSqlMapper.levelMembersSql( nonAll.get( 0 ), true )
           : TupleSqlMapper.levelMembersSql( nonAll.get( 0 ), true, c.where(),
@@ -2141,7 +2134,7 @@ public TupleList readTuples(
       RolapUtil.SQL_GEN_LOGGER.debug(
         "level members {}: no-fact-adjacent (all-dropped) tuple -> builder authoritative",
         nonAll.get( 0 ).getUniqueName() );
-      return java.util.Optional.of( buildCtx.build(
+      return Optional.of( buildCtx.build(
         () -> TupleSqlMapper.tupleLevelMembersSql( nonAll, true,
           c.where(), c.joinTables(), c.orderedPredicates(), c.nativeOrder(), c.nativeHaving(),
           c.factJoinRequired(), baseCube, true ) ) );
@@ -2150,12 +2143,12 @@ public TupleList readTuples(
     // decline (the recorder keeps any other no-fact-adjacent topology as the rump).
     if ( !TupleSqlMapper.supportsSameTableTupleRead( targetLevels, baseCube, c.joinTables(),
         c.orderedPredicates() ) ) {
-      return java.util.Optional.empty();
+      return Optional.empty();
     }
     RolapUtil.SQL_GEN_LOGGER.debug(
       "level members: no-fact-adjacent same-table (targets={}) -> builder authoritative",
       targetGroup.size() );
-    return java.util.Optional.of( buildCtx.build(
+    return Optional.of( buildCtx.build(
       () -> TupleSqlMapper.sameTableTupleLevelMembersSql( targetLevels, true,
         c.where(), c.joinTables(), c.orderedPredicates(), c.nativeOrder(), c.nativeHaving(),
         baseCube, true ) ) );
@@ -2180,14 +2173,14 @@ public TupleList readTuples(
    * router {@link #aggAuthoritativeLevelMembersSql}, where this shortcut keeps FIRST precedence —
    * classifies it next.
    */
-  private java.util.Optional<BuiltSql> aggCollapsedLevelMembersSql(
+  private Optional<BuiltSql> aggCollapsedLevelMembersSql(
     Context<?> context, RolapCube baseCube, AggStar aggStar, WhichSelect whichSelect,
     List<TargetBase> targetGroup ) {
     // Only the aggStar (recorder-taken) single-target standalone read — the shape addLevelMemberSql
     // reduces to pure addAggColumnToSql projection. A null aggStar is the ordinary non-agg recorder
     // fallback (already attributed by the routing lines above), not an agg-collapsed decline — no log.
     if ( aggStar == null ) {
-      return java.util.Optional.empty();
+      return Optional.empty();
     }
     // Every decline below carries one grep-stable
     // "agg-collapsed decline reason=" line on the gen channel (mirrors supportsTupleRead).
@@ -2195,20 +2188,20 @@ public TupleList readTuples(
       RolapUtil.SQL_GEN_LOGGER.debug(
         "agg-collapsed decline reason=not-only-or-multi-target (whichSelect={} targets={})",
         whichSelect, targetGroup.size() );
-      return java.util.Optional.empty();
+      return Optional.empty();
     }
     final TargetBase only = targetGroup.get( 0 );
     if ( only.getSrcMembers() != null ) {
       RolapUtil.SQL_GEN_LOGGER.debug(
         "agg-collapsed decline reason=src-members level={}",
         only.getLevel().getUniqueName() );
-      return java.util.Optional.empty();
+      return Optional.empty();
     }
     if ( !( constraint instanceof SqlContextConstraint scc ) ) {
       RolapUtil.SQL_GEN_LOGGER.debug(
         "agg-collapsed decline reason=not-scc level={} constraint={}",
         only.getLevel().getUniqueName(), constraint.getClass().getSimpleName() );
-      return java.util.Optional.empty();
+      return Optional.empty();
     }
     final RolapLevel targetLevel = only.getLevel();
     // Resolve the level's hierarchy exactly as addLevelMemberSql does (a virtual-cube read maps to the
@@ -2223,7 +2216,7 @@ public TupleList readTuples(
     final int levelDepth = targetLevel.getDepth();
     // Every non-all level root..target must be single-column collapsed; otherwise the recorder query
     // carries a dimension join / non-agg projection this route does not model.
-    final List<RolapCubeLevel> collapsedLevels = new java.util.ArrayList<>();
+    final List<RolapCubeLevel> collapsedLevels = new ArrayList<>();
     for ( int i = 0; i <= levelDepth; i++ ) {
       RolapLevel lvl = levels.get( i );
       if ( lvl.isAll() ) {
@@ -2235,7 +2228,7 @@ public TupleList readTuples(
         RolapUtil.SQL_GEN_LOGGER.debug(
           "agg-collapsed decline reason=level-not-collapsed-single-column level={} target={}",
           lvl.getUniqueName(), targetLevel.getUniqueName() );
-        return java.util.Optional.empty();
+        return Optional.empty();
       }
       collapsedLevels.add( cubeLevel );
     }
@@ -2243,14 +2236,14 @@ public TupleList readTuples(
       RolapUtil.SQL_GEN_LOGGER.debug(
         "agg-collapsed decline reason=level-not-collapsed-single-column level={} target={}",
         targetLevel.getUniqueName(), targetLevel.getUniqueName() );
-      return java.util.Optional.empty();
+      return Optional.empty();
     }
     // The agg-substituted context WHERE (addConstraintOps -> addContextConstraint), TRI-STATE: a BAIL
     // (shape outside the twin — virtual cube, calc/slicer exotic, role access, missing agg node) keeps
     // the recorder. An EMPTY live WHERE is decided by the candidate twin (below).
     final SqlContextConstraint.AggWhereResult aggWhereState =
       scc.levelMembersAggWhereState( aggStar );
-    final java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> aggWhere =
+    final Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> aggWhere =
       aggWhereState.where();
     if ( aggWhere.isEmpty() ) {
       // When the LIVE tri-state carries no WHERE,
@@ -2270,19 +2263,19 @@ public TupleList readTuples(
           "agg-collapsed decline reason={} level={}",
           aggWhereState.bailed() ? "agg-where-empty-bail" : "agg-where-empty-unconstrained",
           targetLevel.getUniqueName() );
-        return java.util.Optional.empty();
+        return Optional.empty();
       }
-      final java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> candidateWhere =
+      final Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> candidateWhere =
         candidateState.where();
-      final java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> candidateHaving =
+      final Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> candidateHaving =
         scc.levelMembersAggHaving( aggStar );
-      final java.util.Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.NativeOrder> candidateOrder =
+      final Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.NativeOrder> candidateOrder =
         scc.levelMembersAggOrder( aggStar );
       final QueryBuildContext buildCtx = QueryBuildContext.of( context );
       RolapUtil.SQL_GEN_LOGGER.debug(
         "level members {}: aggstar collapsed single-column (candidate twin) -> builder authoritative",
         targetLevel.getUniqueName() );
-      return java.util.Optional.of( buildCtx.build(
+      return Optional.of( buildCtx.build(
         () -> AggTupleQueries.collapsedSingleColumnSql( collapsedLevels, aggStar, candidateWhere,
           candidateOrder, candidateHaving ) ) );
     }
@@ -2290,9 +2283,9 @@ public TupleList readTuples(
     // nativised filter/topcount recorder read (which emits a native HAVING / measure ORDER on top of the
     // context WHERE). Both come from the constraint's agg-substituted helpers (the aggStar
     // toContribution bails, so it cannot resolve them). A plain context constraint returns both empty.
-    final java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> aggHaving =
+    final Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> aggHaving =
       scc.levelMembersAggHaving( aggStar );
-    final java.util.Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.NativeOrder> aggOrder =
+    final Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.NativeOrder> aggOrder =
       scc.levelMembersAggOrder( aggStar );
     // Authoritative render: AggTupleQueries.collapsedSingleColumnSql rebuilds the pure agg-column
     // projection body; QueryBuildContext.build wraps it into the executed BuiltSql (compact/formatted per
@@ -2301,7 +2294,7 @@ public TupleList readTuples(
     RolapUtil.SQL_GEN_LOGGER.debug(
       "level members {}: aggstar collapsed single-column -> builder authoritative",
       targetLevel.getUniqueName() );
-    return java.util.Optional.of( buildCtx.build(
+    return Optional.of( buildCtx.build(
       () -> AggTupleQueries.collapsedSingleColumnSql( collapsedLevels, aggStar, aggWhere, aggOrder, aggHaving ) ) );
   }
 
@@ -2343,71 +2336,6 @@ public TupleList readTuples(
     return false;
   }
 
-  /**
-   * Returns a map of the various RolapLevel expressions (keyExp, ordinalExp, captionExp, properties) to the
-   * corresponding target expression to be used.  If there's no aggStar available then we'll just return an identity
-   * map. If an AggStar is present the target Expression may be on the aggregate table.
-   */
-  private Map<SqlExpression, SqlExpression> getLevelTargetExpMap( RolapLevel level,
-                                                                                    AggStar aggStar ) {
-    Map<SqlExpression, SqlExpression> map =
-      initializeIdentityMap( level );
-    if ( aggStar == null ) {
-      return Collections.unmodifiableMap( map );
-    }
-    AggStar.Table.Level aggLevel =
-      getAggLevel( aggStar, (RolapCubeLevel) level );
-    if ( aggLevel == null ) {
-      // If no AggStar Level is defined, then the key exp is
-      // a raw AggStar Column.  No extra columns.
-      AggStar.Table.Column aggStarColumn =
-        getAggColumn( aggStar, (RolapCubeLevel) level );
-      assert aggStarColumn.getExpression() != null;
-      map.put( level.getKeyExp(), aggStarColumn.getExpression() );
-    } else {
-      assert aggLevel.getExpression() != null;
-      map.put( level.getKeyExp(), aggLevel.getExpression() );
-      //put in target map elements where indexes are same.
-      if ( aggLevel.getOrdinalExps() != null ) {
-        int size = Math.min(aggLevel.getOrdinalExps().size(), level.getOrdinalExps().size());
-        for (int i = 0; i < size; i++) {
-            map.put( level.getOrdinalExps().get(i), aggLevel.getOrdinalExps().get(i) );
-        }
-      }
-      if ( aggLevel.getCaptionExp() != null ) {
-        map.put( level.getCaptionExp(), aggLevel.getCaptionExp() );
-      }
-      for ( RolapProperty prop : level.getProperties() ) {
-        String propName = prop.getName();
-        if ( aggLevel.getProperties().containsKey( propName ) ) {
-          map.put(
-            prop.getExp(), aggLevel.getProperties().get( propName ) );
-        }
-      }
-    }
-    return Collections.unmodifiableMap( map );
-  }
-
-  /**
-   * Creates a map of the expressions from a RolapLevel to themselves.  This is the starting assumption of what the
-   * target expression is.
-   */
-  private Map<SqlExpression, SqlExpression> initializeIdentityMap( RolapLevel level ) {
-    Map<SqlExpression, SqlExpression> map = new HashMap<>();
-    map.put( level.getKeyExp(), level.getKeyExp() );
-    for (SqlExpression oe : level.getOrdinalExps()) { 
-        map.put( oe, oe );
-    }
-    map.put( level.getCaptionExp(), level.getCaptionExp() );
-    for ( RolapProperty prop : level.getProperties() ) {
-      if ( !map.containsKey( prop.getExp() ) ) {
-        map.put( prop.getExp(), prop.getExp() );
-      }
-    }
-    return map;
-  }
-
-
   private void addAggColumnToSql(
     QueryRecorder sqlQuery, WhichSelect whichSelect, AggStar aggStar,
     RolapCubeLevel level, Dialect dialect ) {
@@ -2424,13 +2352,6 @@ public TupleList readTuples(
     aggColumn.getTable().addToFrom( sqlQuery, false, true );
   }
 
-
-  private AggStar.Table.Level getAggLevel(
-    AggStar aggStar, RolapCubeLevel level ) {
-    RolapStar.Column starColumn =
-      level.getStarKeyColumn();
-    return aggStar.lookupLevel( starColumn.getBitPosition() );
-  }
 
 
   private AggStar.Table.Column getAggColumn(
@@ -2587,10 +2508,6 @@ public TupleList readTuples(
     // find the aggstar using the masks
     return AggregationManager.findAgg(
       star, levelBitKey, measureBitKey, new boolean[] { false } );
-  }
-
-  int getMaxRows() {
-    return maxRows;
   }
 
   public void setMaxRows( int maxRows ) {

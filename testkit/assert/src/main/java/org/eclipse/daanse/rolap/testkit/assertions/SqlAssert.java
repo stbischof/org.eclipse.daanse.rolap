@@ -30,8 +30,7 @@ import org.eclipse.daanse.olap.common.ConfigConstants;
 import org.eclipse.daanse.olap.common.Util;
 import org.eclipse.daanse.olap.query.component.IdImpl;
 import org.eclipse.daanse.rolap.common.RolapUtil;
-import org.eclipse.daanse.rolap.common.member.MemberCacheHelper;
-import org.eclipse.daanse.rolap.common.member.SmartMemberReader;
+import org.eclipse.daanse.rolap.common.member.CachingMemberReader;
 import org.eclipse.daanse.rolap.element.RolapCube;
 import org.eclipse.daanse.rolap.element.RolapHierarchy;
 import org.eclipse.daanse.sql.dialect.api.Dialect;
@@ -506,12 +505,12 @@ public final class SqlAssert {
             (RolapHierarchy) salesCube.lookupHierarchy(
                 new IdImpl.NameSegmentImpl("Store", Quoting.UNQUOTED),
                 false);
-        if (hierarchy != null) {
-            SmartMemberReader memberReader =
-                (SmartMemberReader) hierarchy.getMemberReader();
-            MemberCacheHelper cacheHelper = memberReader.cacheHelper;
-            cacheHelper.mapLevelToMembers.cache.clear();
-            cacheHelper.mapMemberToChildren.cache.clear();
+        if (hierarchy != null && hierarchy.getMemberReader()
+                instanceof CachingMemberReader memberReader) {
+            // flushCache() empties every member map, drops the roots memo and
+            // bumps the flush generation (the cube-reader subclass also
+            // reaches its wrapper cache)
+            memberReader.flushCache();
         }
         // Flush the cache, to ensure that the query gets executed.
         cube.clearCachedAggregations(true);

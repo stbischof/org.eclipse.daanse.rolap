@@ -46,9 +46,10 @@ import org.eclipse.daanse.rolap.element.RolapLevel;
  * from a hierarchy.
  *
  * MemberReader is an extension of {@link MemberSource}, which
- * implements only the very basic operations. {@link CacheMemberReader} is an
- * adapter which converts a {@link MemberSource} into a {@link MemberReader}
- * and does caching too.
+ * implements only the very basic operations. The general caching adapter
+ * over a {@link MemberSource} is {@link CachingMemberReader} (lazy,
+ * evictable, fence-aware); {@link CacheMemberReader} is the EAGER
+ * fixed-list reader used for the measures hierarchy only.
  *
  * @author jhyde
  * @since 10 August, 2001

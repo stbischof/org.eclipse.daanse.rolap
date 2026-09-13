@@ -25,9 +25,9 @@
 package org.eclipse.daanse.rolap.common;
 
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 
 import org.eclipse.daanse.olap.api.sql.SqlExpression;
@@ -48,14 +48,118 @@ import org.eclipse.daanse.rolap.sql.SqlStatisticsProviderNew;
  * followed by a cache to store the results.
  */
 public class RolapStatisticsCache {
+    private static final org.slf4j.Logger LOGGER =
+        org.slf4j.LoggerFactory.getLogger(RolapStatisticsCache.class);
     private final RolapStar star;
-    private final Map<List, Long> columnMap = new HashMap<>();
-    private final Map<List, Long> tableMap = new HashMap<>();
-    private final Map<String, Long> queryMap =
-        new HashMap<>();
+    // probes run OUTSIDE the map: SQL inside computeIfAbsent held the CHM
+    // bin lock for the probe's duration, coupling every same-bin reader -
+    // the cache manager's actor included - to a foreign probe's latency
+    // (one half of a real deadlock cycle with the query-limit semaphore).
+    // putIfAbsent keeps the first answer; duplicate concurrent probes are
+    // accepted. -1 is cached so failed probes are not retried.
+    private final Map<List<String>, Long> columnMap = new ConcurrentHashMap<>();
+    private final Map<List<String>, Long> tableMap = new ConcurrentHashMap<>();
+    // in-flight probes per map: single-flight without a bin lock -
+    // concurrent cold callers of the SAME key wait on the probe's future,
+    // readers of other keys never wait at all
+    private final Map<List<String>, java.util.concurrent.CompletableFuture<Long>> columnInflight =
+        new ConcurrentHashMap<>();
+    private final Map<List<String>, java.util.concurrent.CompletableFuture<Long>> tableInflight =
+        new ConcurrentHashMap<>();
+    private final Map<String, java.util.concurrent.CompletableFuture<Long>> queryInflight =
+        new ConcurrentHashMap<>();
+
+    /** The single fallback provider; probes are cold-only, no per-call list. */
+    private static final List<SqlStatisticsProviderNew> FALLBACK_PROVIDERS =
+        List.of(new SqlStatisticsProviderNew());
+    private final Map<String, Long> queryMap = new ConcurrentHashMap<>();
 
     public RolapStatisticsCache(RolapStar star) {
         this.star = star;
+    }
+
+    public void clear() {
+        columnMap.clear();
+        tableMap.clear();
+        queryMap.clear();
+    }
+
+    /**
+     * Cached probe: read, probe OUTSIDE the map, single-flight via the
+     * in-flight future. Never runs SQL under a ConcurrentHashMap bin lock,
+     * never fires the same probe twice concurrently (a cold level load
+     * runs its count-distinct once) - and NEVER waits or probes on the
+     * cache manager's thread: the probe path acquires the query-limit
+     * semaphore whose holders block on that thread, so joining a foreign
+     * probe there closes a real deadlock cycle. A cold miss on the actor
+     * returns -1 (the established unknown sentinel) WITHOUT caching;
+     * consumers degrade conservatively and the next query-thread call
+     * probes normally. Note: a THROWING probe caches nothing either -
+     * only a provider-returned -1 is cached (a dead target heals).
+     */
+    public static <K> long cached(Map<K, Long> map,
+            Map<K, java.util.concurrent.CompletableFuture<Long>> inflight, K key,
+            java.util.function.LongSupplier probe) {
+        final Long existing = map.get(key);
+        if (existing != null) {
+            return existing;
+        }
+        if (warnIfOnCacheManagerThread(key)) {
+            return -1;
+        }
+        final java.util.concurrent.CompletableFuture<Long> mine =
+            new java.util.concurrent.CompletableFuture<>();
+        final java.util.concurrent.CompletableFuture<Long> running =
+            inflight.putIfAbsent(key, mine);
+        if (running != null) {
+            try {
+                return running.join();
+            } catch (java.util.concurrent.CompletionException e) {
+                // hand waiters the same exception type the prober saw
+                final Throwable cause = e.getCause();
+                if (cause instanceof RuntimeException runtime) {
+                    throw runtime;
+                }
+                if (cause instanceof Error error) {
+                    throw error;
+                }
+                throw e;
+            }
+        }
+        // a loser of an earlier race may have published between our first
+        // read and the slot claim - re-check before firing SQL
+        final Long published = map.get(key);
+        if (published != null) {
+            mine.complete(published);
+            inflight.remove(key, mine);
+            return published;
+        }
+        try {
+            final long rowCount = probe.getAsLong();
+            map.put(key, rowCount);
+            mine.complete(rowCount);
+            return rowCount;
+        } catch (RuntimeException | Error e) {
+            mine.completeExceptionally(e);
+            throw e;
+        } finally {
+            inflight.remove(key, mine);
+        }
+    }
+
+    /**
+     * Guard AND detector: a cold cardinality request on the cache
+     * manager's thread means the preload in BatchingCellReader missed a
+     * request. The caller returns the unknown sentinel instead of probing
+     * or joining - the WARN names the gap so the preload can be fixed.
+     */
+    public static boolean warnIfOnCacheManagerThread(Object key) {
+        if (Thread.currentThread().getName()
+                .startsWith("daanse.rolap.agg.SegmentCacheManager$ACTOR")) {
+            LOGGER.warn("cold cardinality probe on the cache manager thread - preload gap? key={}", key);
+            return true;
+        }
+        return false;
     }
 
     public long getRelationCardinality(
@@ -87,57 +191,42 @@ public class RolapStatisticsCache {
     {
     	String schema = table.getNamespace() != null ? table.getNamespace().getName() : null;
         final List<String> key = Arrays.asList(schema, table.getName());
-        long rowCount = -1;
-        if (tableMap.containsKey(key)) {
-            rowCount = tableMap.get(key);
-        } else {
-            final List<SqlStatisticsProviderNew> statisticsProviders = List.of(new SqlStatisticsProviderNew());
-            final ExecutionImpl execution =
-                new ExecutionImpl(
-                    star.getCatalog().getInternalConnection()
-                        .getInternalStatement(),
-                    ExecuteDurationUtil.executeDurationValue(star.getCatalog().getInternalConnection().getContext()));
-            for (SqlStatisticsProviderNew statisticsProvider : statisticsProviders) {
+        return cached(tableMap, tableInflight, key, () -> {
+            long rowCount = -1;
+            for (SqlStatisticsProviderNew statisticsProvider
+                    : FALLBACK_PROVIDERS) {
                 rowCount = statisticsProvider.getTableCardinality(
                     star.getContext(),
                     schema,
                     table.getName(),
-                    execution);
+                    newExecution());
                 if (rowCount >= 0) {
                     break;
                 }
             }
+            return rowCount;
+        });
+    }
 
-            // Note: If all providers fail, we put -1 into the cache, to ensure
-            // that we won't try again.
-            tableMap.put(key, rowCount);
-        }
-        return rowCount;
+    private ExecutionImpl newExecution() {
+        return new ExecutionImpl(
+            star.getCatalog().getInternalConnection().getInternalStatement(),
+            ExecuteDurationUtil.executeDurationValue(
+                star.getCatalog().getInternalConnection().getContext()));
     }
 
     private long getQueryCardinality(String sql) {
-        long rowCount = -1;
-        if (queryMap.containsKey(sql)) {
-            rowCount = queryMap.get(sql);
-        } else {
-            final List<SqlStatisticsProviderNew> statisticsProviders = List.of(new SqlStatisticsProviderNew());
-            final ExecutionImpl execution =
-                new ExecutionImpl(
-                    star.getCatalog().getInternalConnection()
-                        .getInternalStatement(),
-                        ExecuteDurationUtil.executeDurationValue(star.getCatalog().getInternalConnection().getContext()));
-            for (SqlStatisticsProviderNew statisticsProvider : statisticsProviders) {
-                rowCount = statisticsProvider.getQueryCardinality( star.getContext(), sql, execution);
+        return cached(queryMap, queryInflight, sql, () -> {
+            long rowCount = -1;
+            for (SqlStatisticsProviderNew statisticsProvider
+                    : FALLBACK_PROVIDERS) {
+                rowCount = statisticsProvider.getQueryCardinality(star.getContext(), sql, newExecution());
                 if (rowCount >= 0) {
                     break;
                 }
             }
-
-            // Note: If all providers fail, we put -1 into the cache, to ensure
-            // that we won't try again.
-            queryMap.put(sql, rowCount);
-        }
-        return rowCount;
+            return rowCount;
+        });
     }
 
     public long getColumnCardinality(
@@ -174,33 +263,22 @@ public class RolapStatisticsCache {
     {
     	String schema = table.getNamespace() != null ? table.getNamespace().getName() : null;
         final List<String> key = Arrays.asList(schema, table.getName(), column);
-        long rowCount = -1;
-        if (columnMap.containsKey(key)) {
-            rowCount = columnMap.get(key);
-        } else {
-            final List<SqlStatisticsProviderNew> statisticsProviders = List.of(new SqlStatisticsProviderNew());
-            final ExecutionImpl execution =
-                new ExecutionImpl(
-                    star.getCatalog().getInternalConnection()
-                        .getInternalStatement(),
-                        ExecuteDurationUtil.executeDurationValue(star.getCatalog().getInternalConnection().getContext()));
-            for (SqlStatisticsProviderNew statisticsProvider : statisticsProviders) {
+        return cached(columnMap, columnInflight, key, () -> {
+            long rowCount = -1;
+            for (SqlStatisticsProviderNew statisticsProvider
+                    : FALLBACK_PROVIDERS) {
                 rowCount = statisticsProvider.getColumnCardinality(
                     star.getContext(),
                     schema,
                     table.getName(),
                     column,
-                    execution);
+                    newExecution());
                 if (rowCount >= 0) {
                     break;
                 }
             }
-
-            // Note: If all providers fail, we put -1 into the cache, to ensure
-            // that we won't try again.
-            columnMap.put(key, rowCount);
-        }
-        return rowCount;
+            return rowCount;
+        });
     }
 
     /** The provenance name for the row-count probe: the caller's alias, else the FROM base alias. */

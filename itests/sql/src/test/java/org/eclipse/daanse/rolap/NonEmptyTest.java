@@ -56,8 +56,8 @@ import org.eclipse.daanse.rolap.api.element.RolapMember;
 import org.eclipse.daanse.rolap.common.catalog.RolapCatalogReader;
 import org.eclipse.daanse.rolap.common.connection.AbstractRolapConnection.NonEmptyResult;
 import org.eclipse.daanse.rolap.common.evaluator.RolapEvaluator;
-import org.eclipse.daanse.rolap.common.member.MemberCacheHelper;
-import org.eclipse.daanse.rolap.common.member.SmartMemberReader;
+import org.eclipse.daanse.rolap.common.member.MemberCacheImpl;
+import org.eclipse.daanse.rolap.common.member.CachingMemberReader;
 import org.eclipse.daanse.rolap.common.nativize.RolapNative.Listener;
 import org.eclipse.daanse.rolap.common.nativize.RolapNative.NativeEvent;
 import org.eclipse.daanse.rolap.common.nativize.RolapNative.TupleEvent;
@@ -2311,16 +2311,16 @@ class NonEmptyTest extends BatchTestCase {
 
     // there currently isn't a cube member to children cache, only
     // a shared cache so use the shared smart member reader
-    SmartMemberReader smr = getSmartMemberReader(context.getConnectionWithDefaultRole(), "Store" );
-    MemberCacheHelper smrch = smr.cacheHelper;
-    MemberCacheHelper rcsmrch =
-      ( (RolapCubeHierarchy.RolapCubeHierarchyMemberReader) smr )
-        .getRolapCubeMemberCacheHelper();
-    SmartMemberReader ssmr = getSharedSmartMemberReader(context.getConnectionWithDefaultRole(), "Store" );
-    MemberCacheHelper ssmrch = ssmr.cacheHelper;
-    clearAndHardenCache( smrch );
-    clearAndHardenCache( rcsmrch );
-    clearAndHardenCache( ssmrch );
+    CachingMemberReader smr = getCachingMemberReader(context.getConnectionWithDefaultRole(), "Store" );
+    MemberCacheImpl smrch = smr.memberCache;
+    MemberCacheImpl rcsmrch =
+      (MemberCacheImpl) ( (RolapCubeHierarchy.RolapCubeHierarchyMemberReader) smr )
+        .getRolapCubeMemberCache();
+    CachingMemberReader ssmr = getSharedCachingMemberReader(context.getConnectionWithDefaultRole(), "Store" );
+    MemberCacheImpl ssmrch = ssmr.memberCache;
+    clearMemberCache( smrch );
+    clearMemberCache( rcsmrch );
+    clearMemberCache( ssmrch );
 
     RolapResult result =
       (RolapResult) executeQuery(
@@ -2418,19 +2418,19 @@ class NonEmptyTest extends BatchTestCase {
       // test.
       return;
     }
-    SmartMemberReader smr = getSmartMemberReader(context.getConnectionWithDefaultRole(), "Customers" );
+    CachingMemberReader smr = getCachingMemberReader(context.getConnectionWithDefaultRole(), "Customers" );
     // use the RolapCubeHierarchy's member cache for levels
-    MemberCacheHelper smrch =
+    MemberCacheImpl smrch =
       ( (RolapCubeHierarchy.CacheRolapCubeHierarchyMemberReader) smr )
-        .rolapCubeCacheHelper;
-    clearAndHardenCache( smrch );
-    MemberCacheHelper smrich = smr.cacheHelper;
-    clearAndHardenCache( smrich );
+        .rolapCubeMemberCache;
+    clearMemberCache( smrch );
+    MemberCacheImpl smrich = smr.memberCache;
+    clearMemberCache( smrich );
 
     // use the shared member cache for mapMemberToChildren
-    SmartMemberReader ssmr = getSharedSmartMemberReader(context.getConnectionWithDefaultRole(), "Customers" );
-    MemberCacheHelper ssmrch = ssmr.cacheHelper;
-    clearAndHardenCache( ssmrch );
+    CachingMemberReader ssmr = getSharedCachingMemberReader(context.getConnectionWithDefaultRole(), "Customers" );
+    MemberCacheImpl ssmrch = ssmr.memberCache;
+    clearMemberCache( ssmrch );
 
     TestCase c = new TestCase(context.getConnectionWithDefaultRole(),
       50,
@@ -2490,19 +2490,19 @@ class NonEmptyTest extends BatchTestCase {
     // members go under a different cache key -- which is what the assertNull below checks. The
     // flushSchemaCache() the port had added is dropped; it emptied the very cache the test fills.
     Connection connection = context.getConnectionWithDefaultRole();
-    SmartMemberReader smr = getSmartMemberReader(connection, "Customers" );
+    CachingMemberReader smr = getCachingMemberReader(connection, "Customers" );
 
-    MemberCacheHelper smrch =
+    MemberCacheImpl smrch =
       ( (RolapCubeHierarchy.CacheRolapCubeHierarchyMemberReader) smr )
-        .rolapCubeCacheHelper;
-    clearAndHardenCache( smrch );
+        .rolapCubeMemberCache;
+    clearMemberCache( smrch );
 
-    MemberCacheHelper smrich = smr.cacheHelper;
-    clearAndHardenCache( smrich );
+    MemberCacheImpl smrich = smr.memberCache;
+    clearMemberCache( smrich );
 
-    SmartMemberReader ssmr = getSharedSmartMemberReader(connection, "Customers" );
-    MemberCacheHelper ssmrch = ssmr.cacheHelper;
-    clearAndHardenCache( ssmrch );
+    CachingMemberReader ssmr = getSharedCachingMemberReader(connection, "Customers" );
+    MemberCacheImpl ssmrch = ssmr.memberCache;
+    clearMemberCache( ssmrch );
 
     Result r = executeQuery(
       "select \n"
@@ -2703,13 +2703,13 @@ class NonEmptyTest extends BatchTestCase {
     }
 
     Connection con = context.getConnectionWithDefaultRole();
-    SmartMemberReader smr = getSmartMemberReader( con, "Customers" );
-    MemberCacheHelper smrch = smr.cacheHelper;
-    clearAndHardenCache( smrch );
+    CachingMemberReader smr = getCachingMemberReader( con, "Customers" );
+    MemberCacheImpl smrch = smr.memberCache;
+    clearMemberCache( smrch );
 
-    SmartMemberReader ssmr = getSmartMemberReader( con, "Customers" );
-    MemberCacheHelper ssmrch = ssmr.cacheHelper;
-    clearAndHardenCache( ssmrch );
+    CachingMemberReader ssmr = getCachingMemberReader( con, "Customers" );
+    MemberCacheImpl ssmrch = ssmr.memberCache;
+    clearMemberCache( ssmrch );
 
     TestCase c =
       new TestCase(
@@ -4876,7 +4876,7 @@ class NonEmptyTest extends BatchTestCase {
       true );
   }
 
-  SmartMemberReader getSmartMemberReader( Connection con, String hierName ) {
+  CachingMemberReader getCachingMemberReader( Connection con, String hierName ) {
     RolapCube cube = (RolapCube) con.getCatalog().lookupCube( "Sales" ).orElseThrow();
     RolapCatalogReader schemaReader =
       (RolapCatalogReader) cube.getCatalogReader();
@@ -4885,11 +4885,11 @@ class NonEmptyTest extends BatchTestCase {
         new IdImpl.NameSegmentImpl( hierName, Quoting.UNQUOTED ),
         false );
     assertNotNull( hierarchy );
-    return (SmartMemberReader)
+    return (CachingMemberReader)
       hierarchy.createMemberReader( schemaReader.getRole() );
   }
 
-  private SmartMemberReader getSharedSmartMemberReader(
+  private CachingMemberReader getSharedCachingMemberReader(
     Connection con, String hierName ) {
     RolapCube cube = (RolapCube) con.getCatalog().lookupCube( "Sales").orElseThrow();
     RolapCatalogReader schemaReader =
@@ -4898,7 +4898,7 @@ class NonEmptyTest extends BatchTestCase {
       (RolapCubeHierarchy) cube.lookupHierarchy(
         new IdImpl.NameSegmentImpl( hierName, Quoting.UNQUOTED ), false );
     assertNotNull( hierarchy );
-    return (SmartMemberReader) hierarchy.getRolapHierarchy()
+    return (CachingMemberReader) hierarchy.getRolapHierarchy()
       .createMemberReader( schemaReader.getRole() );
   }
 
