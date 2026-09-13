@@ -56,7 +56,7 @@ class TopCountNativeEvaluatorTest {
 
     @Test
     void nonNativeWhenExplicitlyDisabled() throws Exception {
-        RolapNativeTopCount nativeTopCount = new RolapNativeTopCount(false);
+        RolapNativeTopCount nativeTopCount = new RolapNativeTopCount(() -> false, 1_000_000);
 
         assertThat(nativeTopCount.createEvaluator(null, null, null, true)).as("Native evaluator should not be created when "
             + "'daanse.native.topcount.enable' is 'false'").isNull();
@@ -98,7 +98,7 @@ class TopCountNativeEvaluatorTest {
     }
 
     private RolapNativeTopCount createTopCountSpy() {
-        RolapNativeTopCount nativeTopCount = new RolapNativeTopCount(true);
+        RolapNativeTopCount nativeTopCount = new RolapNativeTopCount(() -> true, 1_000_000);
         nativeTopCount = spy(nativeTopCount);
         return nativeTopCount;
     }

@@ -108,8 +108,7 @@ public abstract class AbstractRolapConnection extends ConnectionBase {
   protected final RolapCatalog catalog;
   private CatalogReader schemaReader;
   private Role role;
-  private Locale locale = Locale.getDefault(); //TODO need take locale from LcidService
-  private Scenario scenario;
+  private Locale locale = Locale.getDefault();   private Scenario scenario;
   private boolean closed = false;
   private final long id;
   private final Statement internalStatement;
@@ -178,6 +177,7 @@ protected Logger getLogger() {
 public void close() {
     if ( !closed ) {
       closed = true;
+      ( (AbstractBasicContext<?>) context ).getAggregationManager().removeSegmentCacheManager( this );
       context.removeConnection( this );
     }
     if ( internalStatement != null ) {
@@ -193,13 +193,6 @@ public RolapCatalog getCatalog() {
 @Override
 public Locale getLocale() {
     return locale;
-  }
-
-  public void setLocale( Locale locale ) {
-    if ( locale == null ) {
-      throw new IllegalArgumentException( "locale must not be null" );
-    }
-    this.locale = locale;
   }
 
   @Override
@@ -222,10 +215,9 @@ public CacheControl getCacheControl( PrintWriter pw ) {
    * @throws QueryCanceledException         if query was canceled during execution
    * @throws QueryTimeoutException          if query exceeded timeout specified in
    *                                        the property file
-   * @deprecated Use {@link #execute(mondrian.server.ExecutionImpl)}; this method
-   * will be removed in mondrian-4.0
+   * @deprecated Use {@link #execute(ExecutionImpl)}.
    */
-  @Deprecated(since = "this method will be removed in mondrian-4.0")
+  @Deprecated
 @Override
 public Result execute( Query query ) {
     final Statement statement = query.getStatement();

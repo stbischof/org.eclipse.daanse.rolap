@@ -729,6 +729,12 @@
       <version>${revision}</version>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>org.eclipse.daanse</groupId>
+      <artifactId>org.eclipse.daanse.rolap.testkit.assert</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
 </project>

@@ -610,6 +610,36 @@ public class RolapNativeSql {
     }
 
     /**
+     * Compiles the prefix minus (the parser turns a negative literal into a
+     * unary {@code -} call): {@code -x} emits {@code (0 - x)} — the statement
+     * API has no negation node, and the name-less Function wrapper keeps the
+     * subtraction precedence-safe. The infix {@code -} takes two args, so the
+     * one-arg match is unambiguous.
+     */
+    class PrefixMinusSqlCompiler extends FunCallSqlCompiler {
+        protected PrefixMinusSqlCompiler(SqlCompiler argumentCompiler) {
+            super(DataType.NUMERIC, "-", "-", 1, argumentCompiler);
+        }
+
+        @Override
+        public org.eclipse.daanse.sql.statement.api.expression.SqlExpression compileNodeExpr(Expression exp) {
+            if (!match(exp)) {
+                return null;
+            }
+            org.eclipse.daanse.sql.statement.api.expression.SqlExpression inner =
+                compiler.compileNodeExpr(((FunctionCall) exp).getArgs()[0]);
+            if (inner == null) {
+                return null;
+            }
+            return org.eclipse.daanse.sql.statement.api.Expressions.function("",
+                org.eclipse.daanse.sql.statement.api.Expressions.subtract(
+                    org.eclipse.daanse.sql.statement.api.Expressions.literal(0,
+                        org.eclipse.daanse.sql.model.type.Datatype.NUMERIC),
+                    inner));
+        }
+    }
+
+    /**
      * Shortcut for ().
      */
     class ParenthesisSqlCompiler extends FunCallSqlCompiler {
@@ -922,6 +952,8 @@ public class RolapNativeSql {
         numericCompiler.add(
             new InfixOpSqlCompiler(
                 DataType.NUMERIC, "*", "*", numericCompiler));
+        numericCompiler.add(
+            new PrefixMinusSqlCompiler(numericCompiler));
         numericCompiler.add(
             new IifSqlCompiler(DataType.NUMERIC, numericCompiler));
 

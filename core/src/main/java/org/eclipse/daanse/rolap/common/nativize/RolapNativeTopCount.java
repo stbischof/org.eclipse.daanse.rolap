@@ -29,6 +29,7 @@ package org.eclipse.daanse.rolap.common.nativize;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.BooleanSupplier;
 
 import org.eclipse.daanse.olap.api.Context;
 import org.eclipse.daanse.olap.api.catalog.CatalogReader;
@@ -55,9 +56,9 @@ import org.eclipse.daanse.rolap.element.RolapStoredMeasure;
  */
 public class RolapNativeTopCount extends RolapNativeSet {
 
-    public RolapNativeTopCount(boolean enableNativeTopCount) {
-        super.setEnabled(
-            enableNativeTopCount);
+    public RolapNativeTopCount(BooleanSupplier enableNativeTopCount, int nativeTupleCacheMaxTuples) {
+        super(nativeTupleCacheMaxTuples);
+        super.setEnabled(enableNativeTopCount);
     }
 
     public static class TopCountConstraint extends SetConstraint {
@@ -393,7 +394,12 @@ public class RolapNativeTopCount extends RolapNativeSet {
         if ("TopCount".equalsIgnoreCase(funName)) {
             sortingDirection = SortingDirection.DESC;
         } else if ("BottomCount".equalsIgnoreCase(funName)) {
-            sortingDirection = SortingDirection.ASC;
+            // BottomCount is never native: ascending order sorts
+            // empty-measure members FIRST (null is smallest), so the calc
+            // result can contain them — even under NON EMPTY, which filters
+            // AFTER the count — while the native fact join can only rank
+            // members that have fact rows.
+            return null;
         } else {
             return null;
         }
@@ -491,6 +497,7 @@ public class RolapNativeTopCount extends RolapNativeSet {
             SetEvaluator sev =
                 new SetEvaluator(cjArgs, schemaReader, constraint);
             sev.setMaxRows(count);
+            sev.setHierarchizeResult(false);
             sev.setCompleteWithNullValues(!evaluator.isNonEmpty());
             return sev;
         } finally {

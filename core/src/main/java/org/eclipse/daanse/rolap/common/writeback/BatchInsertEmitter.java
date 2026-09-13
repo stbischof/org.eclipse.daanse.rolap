@@ -70,7 +70,17 @@ public class BatchInsertEmitter {
                 LOGGER.error("Error committing writeback values to table: {}", writebackTable.getName(), e);
                 throw new RuntimeException("Writeback commit failed", e);
             }
-            finally { conn.setAutoCommit(prev); }
+            finally {
+                // restore is best-effort: after a SUCCESSFUL commit a
+                // throwing setAutoCommit escaped into the outer catch and
+                // reported "Writeback commit failed" for permanent rows -
+                // the client's retry then double-inserted them
+                try {
+                    conn.setAutoCommit(prev);
+                } catch (SQLException restore) {
+                    LOGGER.warn("autocommit restore failed after writeback commit", restore);
+                }
+            }
         } catch (SQLException e) {
             LOGGER.error("Error committing writeback values to table: {}", writebackTable.getName(), e);
             throw new RuntimeException("Writeback commit failed", e);

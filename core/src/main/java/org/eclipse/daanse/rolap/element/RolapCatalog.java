@@ -147,6 +147,9 @@ public class RolapCatalog implements Catalog {
 	 */
 	private Connection internalConnection;
 
+	private final java.util.concurrent.atomic.AtomicBoolean finalCleanUpDone =
+			new java.util.concurrent.atomic.AtomicBoolean();
+
 	private RolapStarRegistry rolapStarRegistry;
 
 	/**
@@ -257,8 +260,8 @@ public class RolapCatalog implements Catalog {
 		context.removeStatement(internalConnection.getInternalStatement());
 
 		this.aggTableManager = new AggTableManager(this, context);
-		this.nativeRegistry = new RolapNativeRegistry(context.getConfig().enableNativeFilter(),
-				context.getConfig().enableNativeCrossJoin(), context.getConfig().enableNativeTopCount());
+		this.nativeRegistry = new RolapNativeRegistry(context.getConfig(),
+				context.getConfig().nativeTupleCacheMaxTuples());
 
 		load(context, rolapConnectionProps);
 	}
@@ -274,8 +277,8 @@ public class RolapCatalog implements Catalog {
 		this.defaultRole = RoleImpl.createRootRole(this);
 		this.internalConnection = internalConnection;
 		rolapStarRegistry = new RolapStarRegistry(this, context);
-		this.nativeRegistry = new RolapNativeRegistry(context.getConfig().enableNativeFilter(),
-				context.getConfig().enableNativeCrossJoin(), context.getConfig().enableNativeTopCount());
+		this.nativeRegistry = new RolapNativeRegistry(context.getConfig(),
+				context.getConfig().nativeTupleCacheMaxTuples());
 
 	}
 
@@ -308,10 +311,26 @@ public class RolapCatalog implements Catalog {
 	 * Performs a sweep of the JDBC tables caches and the segment data. Only called
 	 * internally when a schema and it's data must be refreshed.
 	 */
+	/**
+	 * Releases everything this catalog caches: segment data, native tuple
+	 * caches, star statistics and the internal connection. Idempotent.
+	 */
 	public void finalCleanUp() {
-		// Cleanup the segment data.
+		if (!finalCleanUpDone.compareAndSet(false, true)) {
+			return;
+		}
 		flushSegments();
+		releaseInstanceResources();
+	}
 
+	private void releaseInstanceResources() {
+		nativeRegistry.flushNativeSetCaches();
+		for (RolapStar star : rolapStarRegistry.getStars()) {
+			star.getStatisticsCache().clear();
+		}
+		if (internalConnection != null) {
+			internalConnection.close();
+		}
 	}
 
 	@Override

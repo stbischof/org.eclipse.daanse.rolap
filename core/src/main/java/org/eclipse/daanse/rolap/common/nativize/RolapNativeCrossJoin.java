@@ -31,6 +31,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 
 import org.eclipse.daanse.olap.api.catalog.CatalogReader;
 import org.eclipse.daanse.olap.api.element.Member;
@@ -80,7 +81,8 @@ import org.eclipse.daanse.rolap.element.RolapVirtualCube;
  */
 public class RolapNativeCrossJoin extends RolapNativeSet {
 
-    public RolapNativeCrossJoin(boolean enableNativeCrossJoin) {
+    public RolapNativeCrossJoin(BooleanSupplier enableNativeCrossJoin, int nativeTupleCacheMaxTuples) {
+        super(nativeTupleCacheMaxTuples);
         super.setEnabled(enableNativeCrossJoin);
     }
 

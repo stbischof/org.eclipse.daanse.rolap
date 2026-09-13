@@ -30,11 +30,12 @@ package org.eclipse.daanse.rolap.common.nativize;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import org.eclipse.daanse.olap.api.Context;
 import org.eclipse.daanse.olap.api.access.AccessHierarchy;
 import org.eclipse.daanse.olap.api.access.Role;
@@ -50,6 +51,7 @@ import org.eclipse.daanse.olap.calc.base.type.tuplebase.DelegatingTupleList;
 import org.eclipse.daanse.olap.common.DelegatingCatalogReader;
 import org.eclipse.daanse.olap.common.Util;
 import org.eclipse.daanse.olap.exceptions.ResultStyleException;
+import org.eclipse.daanse.olap.fun.sort.Sorter;
 import org.eclipse.daanse.rolap.api.element.RolapMember;
 import org.eclipse.daanse.rolap.common.RolapAggregationManager;
 import org.eclipse.daanse.rolap.common.SqlTupleReader;
@@ -57,22 +59,30 @@ import org.eclipse.daanse.rolap.common.TupleReader;
 import org.eclipse.daanse.rolap.common.TupleReader.MemberBuilder;
 import org.eclipse.daanse.rolap.common.aggmatcher.AggStar;
 import org.eclipse.daanse.rolap.common.cache.BoundedCache;
-import org.eclipse.daanse.rolap.common.cache.SimpleCache;
-import org.eclipse.daanse.rolap.common.cache.SoftValueCache;
+import org.eclipse.daanse.rolap.common.constraint.MemberConstraintWriter;
 import org.eclipse.daanse.rolap.common.constraint.SqlContextConstraint;
 import org.eclipse.daanse.rolap.common.evaluator.RolapEvaluator;
 import org.eclipse.daanse.rolap.common.member.MemberExcludeConstraint;
+import org.eclipse.daanse.rolap.common.member.MemberLoadRegistry;
 import org.eclipse.daanse.rolap.common.member.MemberReader;
+import org.eclipse.daanse.rolap.common.sql.AggPlan;
+import org.eclipse.daanse.rolap.common.sql.ConstraintContribution;
+import org.eclipse.daanse.rolap.common.sql.ContributionResult;
 import org.eclipse.daanse.rolap.common.sql.CrossJoinArg;
 import org.eclipse.daanse.rolap.common.sql.CrossJoinArgFactory;
+import org.eclipse.daanse.rolap.common.sql.DescendantsCrossJoinArg;
 import org.eclipse.daanse.rolap.common.sql.MemberChildrenConstraint;
 import org.eclipse.daanse.rolap.common.sql.MemberListCrossJoinArg;
 import org.eclipse.daanse.rolap.common.sql.TupleConstraint;
+import org.eclipse.daanse.rolap.common.star.BitKeyExplain;
+import org.eclipse.daanse.rolap.common.star.RolapStar;
 import org.eclipse.daanse.rolap.element.MultiCardinalityDefaultMember;
 import org.eclipse.daanse.rolap.element.RolapCube;
 import org.eclipse.daanse.rolap.element.RolapHierarchy;
 import org.eclipse.daanse.rolap.element.RolapLevel;
 import org.eclipse.daanse.rolap.element.RolapStoredMeasure;
+import org.eclipse.daanse.sql.statement.api.Predicates;
+import org.eclipse.daanse.sql.statement.api.expression.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -90,8 +100,58 @@ public abstract class RolapNativeSet extends RolapNative {
   protected static final Logger LOGGER =
     LoggerFactory.getLogger( RolapNativeSet.class );
 
-  private SimpleCache<Object, TupleList> cache =
-    new SoftValueCache<>();
+  // weight-bounded: a cached result weighs its tuples times its arity
+  private final BoundedCache<TupleCacheKey, TupleList> cache;
+
+  /**
+   * Bumped by every flush BEFORE the cache is cleared; the publisher
+   * samples it before its SQL read and removes its own entry after the
+   * put when the counter moved. Either the flush's clear runs after the
+   * put (and removes the entry), or the publisher sees the bump - one of
+   * the two always wins. Covers every flush kind uniformly, including
+   * cell flushes that bump no member registry.
+   */
+  private final java.util.concurrent.atomic.AtomicLong flushEpoch =
+      new java.util.concurrent.atomic.AtomicLong();
+
+  protected RolapNativeSet( int maxTuples ) {
+    this.cache = BoundedCache.weighted( maxTuples,
+      ( k, v ) -> (long) v.getArity() * v.size() );
+  }
+
+  /**
+   * Tuple cache key: identity lives in the parts (constraint key, args,
+   * maxRows, role, padding flag). Staleness is not tracked per entry -
+   * every flush bumps the set's flushEpoch and clears the whole cache,
+   * and the publisher validates its put against that one counter.
+   */
+  public static final class TupleCacheKey {
+    private final List<Object> parts;
+
+    public TupleCacheKey( List<Object> parts ) {
+      this.parts = parts;
+    }
+
+    @Override
+    public boolean equals( Object o ) {
+      return o instanceof TupleCacheKey other && parts.equals( other.parts );
+    }
+
+    @Override
+    public int hashCode() {
+      return parts.hashCode();
+    }
+  }
+
+  /** Stats view of the tuple result cache. */
+  public com.github.benmanes.caffeine.cache.stats.CacheStats cacheStats() {
+    return cache.stats();
+  }
+
+  /** package access for tests */
+  BoundedCache<TupleCacheKey, TupleList> testCache() {
+    return cache;
+  }
 
   /**
    * Returns whether certain member types (e.g. calculated members) should disable native SQL evaluation for
@@ -139,15 +199,14 @@ public abstract class RolapNativeSet extends RolapNative {
       return args.length > 1 || super.isJoinRequired();
     }
 
-
     /** Diagnostic log paralleling {@code SqlContextConstraint.BAIL_LOG}: why THIS constraint's
      * contribution fell back — without it, silent early returns make fallbacks unattributable. */
-    private static final org.slf4j.Logger SET_BAIL_LOG =
-        org.slf4j.LoggerFactory.getLogger( "daanse.sql.gen.bail" );
+    private static final Logger SET_BAIL_LOG =
+        LoggerFactory.getLogger( "daanse.sql.gen.bail" );
 
-    protected org.eclipse.daanse.rolap.common.sql.ContributionResult bail( String reason ) {
+    protected ContributionResult bail( String reason ) {
       SET_BAIL_LOG.debug( "{} toContribution bail reason={}", getClass().getSimpleName(), reason );
-      return org.eclipse.daanse.rolap.common.sql.ContributionResult.unsupported( reason );
+      return ContributionResult.unsupported( reason );
     }
 
     /**
@@ -172,16 +231,16 @@ public abstract class RolapNativeSet extends RolapNative {
      * reference query.
      */
     @Override
-    protected org.eclipse.daanse.rolap.common.sql.ContributionResult toContribution(
+    protected ContributionResult toContribution(
         RolapCube baseCube, AggStar aggStar, CalcLift lift ) {
-      org.eclipse.daanse.rolap.common.sql.ContributionResult base =
+      ContributionResult base =
           super.toContribution( baseCube, aggStar, lift );
       if ( !base.isSupported() ) {
         // The inherited context could not be expressed (a deep composition the calc gate could
         // not lift); the context bail below logs its own precise reason.
         return bail( "set-base-context-empty" );
       }
-      org.eclipse.daanse.rolap.common.sql.ConstraintContribution c = base.contribution();
+      ConstraintContribution c = base.contribution();
       if ( aggStar != null && c.aggPlan().isEmpty() ) {
         // Defensive: an agg-routed context contribution always carries its plan (possibly with
         // empty predicates); a plan-less one cannot feed the agg-join channel.
@@ -189,12 +248,12 @@ public abstract class RolapNativeSet extends RolapNative {
       }
       // The agg-join channel: the base context's provenance extended per arg, in the same order
       // the base predicates/args are appended. Null when not agg-routed.
-      List<org.eclipse.daanse.rolap.common.sql.AggPlan.AggColumnPredicate> aggPredicates =
+      List<AggPlan.AggColumnPredicate> aggPredicates =
           aggStar == null ? null : new ArrayList<>( c.aggPlan().get().orderedAggPredicates() );
-      List<org.eclipse.daanse.sql.statement.api.expression.Predicate> wheres = new ArrayList<>();
+      List<Predicate> wheres = new ArrayList<>();
       c.where().ifPresent( wheres::add );
-      List<org.eclipse.daanse.rolap.common.star.RolapStar.Table> joinTables = new ArrayList<>( c.joinTables() );
-      List<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate> ordered =
+      List<RolapStar.Table> joinTables = new ArrayList<>( c.joinTables() );
+      List<ConstraintContribution.ColumnPredicate> ordered =
           new ArrayList<>( c.orderedPredicates() );
       for ( CrossJoinArg arg : args ) {
         if ( !canApplyCrossJoinArgConstraint( arg ) ) {
@@ -216,7 +275,7 @@ public abstract class RolapNativeSet extends RolapNative {
           argMembers = mlArg.getMembers();
           argRestrict = mlArg.isRestrictMemberTypes();
           argExclude = mlArg.isExclude();
-        } else if ( arg instanceof org.eclipse.daanse.rolap.common.sql.DescendantsCrossJoinArg ) {
+        } else if ( arg instanceof DescendantsCrossJoinArg ) {
           argMembers = arg.getMembers(); // [member] (or null when the arg has no member -> adds nothing)
           argRestrict = true;
           argExclude = false;
@@ -235,20 +294,20 @@ public abstract class RolapNativeSet extends RolapNative {
           // restriction. The conjunct references no dimension column, so it is carried on the FACT
           // table: a fact-rooted ColumnPredicate adds no join steps of its own (the fact join is the
           // cross join's existence join, forced anyway) — only the WHERE conjunct, in arg order.
-          org.eclipse.daanse.rolap.common.star.RolapStar star =
+          RolapStar star =
               baseCube != null ? baseCube.getStar() : getEvaluator().getCube().getStar();
           if ( star == null ) {
             // No star to hang the conjunct on (virtual cube without a fact) — cannot express it.
             throw dead( "set-arg-empty-members-no-star" );
           }
-          org.eclipse.daanse.sql.statement.api.expression.Predicate alwaysFalse =
-              org.eclipse.daanse.sql.statement.api.Predicates.raw( argExclude ? "(1 = 1)" : "(1 = 0)" );
-          ordered.add( new org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate(
+          Predicate alwaysFalse =
+              Predicates.raw( argExclude ? "(1 = 1)" : "(1 = 0)" );
+          ordered.add( new ConstraintContribution.ColumnPredicate(
               star.getFactTable(), alwaysFalse ) );
           wheres.add( alwaysFalse );
           if ( aggPredicates != null ) {
             // Column-less conjunct: carried on the AGG fact table, matching the base fact.
-            aggPredicates.add( new org.eclipse.daanse.rolap.common.sql.AggPlan.AggColumnPredicate(
+            aggPredicates.add( new AggPlan.AggColumnPredicate(
                 aggStar.getFactTable(), alwaysFalse ) );
           }
           continue;
@@ -265,8 +324,8 @@ public abstract class RolapNativeSet extends RolapNative {
         // The aggStar-threaded arg channel: under an agg routing the member-set predicate is built
         // on the AGG column nodes (single-value INs and tuple INs alike); a null aggStar is the
         // base form.
-        java.util.Optional<org.eclipse.daanse.rolap.common.sql.ConstraintContribution.ColumnPredicate> argCp =
-            org.eclipse.daanse.rolap.common.constraint.MemberConstraintWriter.memberConstraintContribution(
+        Optional<ConstraintContribution.ColumnPredicate> argCp =
+            MemberConstraintWriter.memberConstraintContribution(
                 baseCube, aggStar, argMembers, argRestrict, argExclude );
         if ( argCp.isEmpty() && aggStar == null && !argExclude ) {
           // Compound-null-parent retry: an arg whose member set memberConstraintContribution
@@ -277,7 +336,7 @@ public abstract class RolapNativeSet extends RolapNative {
           // Predicates.inTuple. Base star only: under an agg routing the compound form is not
           // modelled (no agg provenance), and an exclude arg follows the NOT-IN form — both keep
           // the bail below.
-          argCp = org.eclipse.daanse.rolap.common.constraint.MemberConstraintWriter
+          argCp = MemberConstraintWriter
               .memberConstraintContributionCompoundNullParent( baseCube, argMembers, argRestrict );
         }
         if ( argCp.isEmpty() ) {
@@ -314,13 +373,13 @@ public abstract class RolapNativeSet extends RolapNative {
         if ( aggPredicates != null ) {
           // Provenance for the agg-join channel: the agg table carrying the arg's substituted key
           // column (same first-member level the writer's ColumnPredicate table is derived from).
-          java.util.Optional<org.eclipse.daanse.rolap.common.aggmatcher.AggStar.Table> aggTable =
-              org.eclipse.daanse.rolap.common.constraint.MemberConstraintWriter.aggMemberTable(
+          Optional<AggStar.Table> aggTable =
+              MemberConstraintWriter.aggMemberTable(
                   baseCube, aggStar, argMembers.get( 0 ).getLevel() );
           if ( aggTable.isEmpty() ) {
             throw dead( "set-arg-agg-table-unresolved" );
           }
-          aggPredicates.add( new org.eclipse.daanse.rolap.common.sql.AggPlan.AggColumnPredicate(
+          aggPredicates.add( new AggPlan.AggColumnPredicate(
               aggTable.get(), argCp.get().predicate() ) );
         }
       }
@@ -329,20 +388,20 @@ public abstract class RolapNativeSet extends RolapNative {
       // grouped member-set conjunct must sit one level below the split to keep its parentheses.
       // Carry the base's factJoinRequired so the target level's non-empty existence join
       // to the fact is still emitted (the whole point of a NonEmptyCrossJoin).
-      java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> whereOpt =
-          wheres.isEmpty() ? java.util.Optional.empty()
-              : java.util.Optional.of( org.eclipse.daanse.sql.statement.api.Predicates.and( wheres ) );
-      org.eclipse.daanse.rolap.common.sql.ConstraintContribution result =
-          new org.eclipse.daanse.rolap.common.sql.ConstraintContribution(
+      Optional<Predicate> whereOpt =
+          wheres.isEmpty() ? Optional.empty()
+              : Optional.of( Predicates.and( wheres ) );
+      ConstraintContribution result =
+          new ConstraintContribution(
               whereOpt, joinTables, ordered, c.memberKeyGroup() )
               .withFactJoinRequired( c.factJoinRequired() );
       if ( aggPredicates != null ) {
         // A present plan with EMPTY predicates stays present — the valid unconstrained agg
         // translation.
         result = result.withAggPlan(
-            new org.eclipse.daanse.rolap.common.sql.AggPlan( aggStar, aggPredicates ) );
+            new AggPlan( aggStar, aggPredicates ) );
       }
-      return org.eclipse.daanse.rolap.common.sql.ContributionResult.of( result );
+      return ContributionResult.of( result );
     }
 
     /**
@@ -377,13 +436,13 @@ public abstract class RolapNativeSet extends RolapNative {
       // groups append behind the context conjuncts (emission order). null == a shape outside the
       // context translation (virtual cube, calc/slicer exotic, role access, missing agg node,
       // builder-time exception).
-      List<org.eclipse.daanse.rolap.common.sql.AggPlan.AggColumnPredicate> ctx =
+      List<AggPlan.AggColumnPredicate> ctx =
           aggContextColumnPredicates( aggStar, null );
       if ( ctx == null ) {
         return SqlContextConstraint.AggWhereResult.BAIL;
       }
-      List<org.eclipse.daanse.sql.statement.api.expression.Predicate> all = new ArrayList<>();
-      for ( org.eclipse.daanse.rolap.common.sql.AggPlan.AggColumnPredicate acp : ctx ) {
+      List<Predicate> all = new ArrayList<>();
+      for ( AggPlan.AggColumnPredicate acp : ctx ) {
         all.add( acp.predicate() );
       }
       RolapCube cube = (RolapCube) getEvaluator().getCube();
@@ -399,7 +458,7 @@ public abstract class RolapNativeSet extends RolapNative {
           // above). BAIL.
           return SqlContextConstraint.AggWhereResult.BAIL;
         }
-        if ( arg instanceof org.eclipse.daanse.rolap.common.sql.DescendantsCrossJoinArg ) {
+        if ( arg instanceof DescendantsCrossJoinArg ) {
           List<RolapMember> argMembers = arg.getMembers();
           if ( argMembers == null ) {
             // No member dimension -> this arg adds nothing.
@@ -409,7 +468,7 @@ public abstract class RolapNativeSet extends RolapNative {
           if ( m.isCalculated() || m.isNull() ) {
             return SqlContextConstraint.AggWhereResult.BAIL;
           }
-          java.util.Optional<org.eclipse.daanse.sql.statement.api.expression.Predicate> group =
+          Optional<Predicate> group =
               aggMemberKeyGroup( aggStar, cube, m );
           if ( group == null ) {
             return SqlContextConstraint.AggWhereResult.BAIL;
@@ -426,7 +485,7 @@ public abstract class RolapNativeSet extends RolapNative {
         return SqlContextConstraint.AggWhereResult.UNCONSTRAINED;
       }
       return SqlContextConstraint.AggWhereResult.of(
-          org.eclipse.daanse.sql.statement.api.Predicates.and( all ) );
+          Predicates.and( all ) );
     }
 
     /**
@@ -478,6 +537,8 @@ public abstract class RolapNativeSet extends RolapNative {
     private final TupleConstraint constraint;
     private int maxRows = 0;
     private boolean completeWithNullValues;
+    /** Ranking evaluators disable this: their order IS the ranking. */
+    private boolean hierarchizeResult = true;
 
     public SetEvaluator(
       CrossJoinArg[] args,
@@ -492,6 +553,10 @@ public abstract class RolapNativeSet extends RolapNative {
           new CatalogReaderWithMemberReaderCache( schemaReader );
       }
       this.constraint = constraint;
+    }
+
+    public void setHierarchizeResult( boolean hierarchizeResult ) {
+      this.hierarchizeResult = hierarchizeResult;
     }
 
     public void setCompleteWithNullValues( boolean completeWithNullValues ) {
@@ -531,17 +596,26 @@ public abstract class RolapNativeSet extends RolapNative {
       // [MONDRIAN-2411] adds the roles to the key. Normally, the
       // schemaReader would apply the roles, but we cache the lists over
       // its head.
-      List<Object> key = new ArrayList<>();
-      key.add( tr.getCacheKey() );
-      key.addAll( Arrays.asList( args ) );
-      key.add( maxRows );
-      key.add( schemaReader.getRole() );
-
-      TupleList result = cache.get( key );
+      // one symmetric gate for read AND write: disableCaching must not
+      // keep serving entries it no longer accepts. The (deep) key parts are
+      // only built when the cache is in play at all.
+      final boolean cacheUsable = nativeCacheEnabled()
+          && !schemaReader.getContext().getConfig().disableCaching();
+      List<Object> parts = null;
+      TupleList result = null;
+      if ( cacheUsable ) {
+        parts = tupleCacheKeyParts( tr );
+        result = cache.get( new TupleCacheKey( parts ) );
+      }
       boolean hasEnumTargets = ( tr.getEnumTargetCount() > 0 );
       if ( result != null && !hasEnumTargets ) {
+        if ( BitKeyExplain.enabled() ) {
+          BitKeyExplain.EXPLAIN.debug(
+              "tuple cache hit: {} arg(s), {} tuple(s) served without SQL",
+              args.length, result.size() );
+        }
         if ( listener != null ) {
-          TupleEvent e = new TupleEvent( this, tr );
+          TupleEvent e = new TupleEvent( this );
           listener.foundInCache( e );
         }
         return new DelegatingTupleList(
@@ -549,59 +623,95 @@ public abstract class RolapNativeSet extends RolapNative {
       }
 
       // execute sql and store the result
+      if ( result == null
+          && BitKeyExplain.enabled() ) {
+        BitKeyExplain.EXPLAIN.debug(
+            "tuple cache miss: {} arg(s) -> native SQL", args.length );
+      }
       if ( result == null && listener != null ) {
-        TupleEvent e = new TupleEvent( this, tr );
+        TupleEvent e = new TupleEvent( this );
         listener.executingSql( e );
       }
 
       // if we don't have a cached result in the case where we have
       // enumerated targets, then retrieve and cache that partial result
       TupleList partialResult = result;
-      List<List<RolapMember>> newPartialResult = null;
-      if ( hasEnumTargets && partialResult == null ) {
-        newPartialResult = new ArrayList<>();
-      }
-      Context context= schemaReader.getContext();
-      if ( args.length == 1 ) {
-        result =
-          tr.readMembers(
-              context, partialResult, newPartialResult );
-      } else {
-        result =
-          tr.readTuples(
-              context, partialResult, newPartialResult );
-      }
+      List<List<RolapMember>> newPartialResult =
+          hasEnumTargets && partialResult == null ? new ArrayList<>() : null;
+      Context context = schemaReader.getContext();
+      // Fence the native read like a member load: the tuple read writes
+      // members and children lists into the target hierarchies' member
+      // caches on THIS thread, and without the fence those writes ignored
+      // bumpGeneration - a flush (member delete) racing the read was
+      // overwritten by pre-flush rows, resurrecting a deleted member with
+      // identity and children list from a result set that started before
+      // the delete. Inside the fence a generation bump silently discards
+      // the writes instead (the read result itself stays correct).
+      final List<MemberLoadRegistry> fencedRegistries = targetLoadRegistries();
+      // sampled BEFORE the read, validated after the put
+      final long epochAtRead = flushEpoch.get();
+      MemberLoadRegistry.Fenced<TupleList> fenced =
+          MemberLoadRegistry.withMemberLoadFences( fencedRegistries, () -> {
+        TupleList read;
+        if ( args.length == 1 ) {
+          read =
+            tr.readMembers(
+                context, partialResult, newPartialResult );
+        } else {
+          read =
+            tr.readTuples(
+                context, partialResult, newPartialResult );
+        }
 
-      // Check limit of result size already is too large
-      Util.checkCJResultLimit( result.size() );
+        if ( hierarchizeResult ) {
+          // The SQL order is dialect collation; the calc engine hierarchizes
+          // its lists in Java (case-insensitive sibling fallback when levels
+          // carry no ordinal) — sort the same way, BEFORE caching, so hits
+          // serve calc order too. Ranking evaluators (Top/BottomCount) keep
+          // their SQL order instead.
+          read = Sorter.hierarchizeTupleList( read, false );
+        }
 
-      // Did not get as many members as expected - try to complete using
-      // less constraints
-      if ( completeWithNullValues && result.size() < maxRows ) {
-        RolapLevel l = args[ 0 ].getLevel();
-        List<RolapMember> list = new ArrayList<>();
-        for ( List<Member> lm : result ) {
-          for ( Member m : lm ) {
-            list.add( (RolapMember) m );
+        // Check limit of result size already is too large
+        Util.checkCJResultLimit( read.size() );
+
+        // Did not get as many members as expected - try to complete using
+        // less constraints
+        if ( completeWithNullValues && read.size() < maxRows ) {
+          RolapLevel l = args[ 0 ].getLevel();
+          List<RolapMember> list = new ArrayList<>();
+          for ( List<Member> lm : read ) {
+            for ( Member m : lm ) {
+              list.add( (RolapMember) m );
+            }
           }
-        }
-        SqlTupleReader str = new SqlTupleReader(
-          new MemberExcludeConstraint(
-            list, l,
-            constraint instanceof SetConstraint setConstraint
-              ? setConstraint : null ) );
-        str.setAllowHints( false );
-        for ( CrossJoinArg arg : args ) {
-          addLevel( str, arg );
-        }
+          SqlTupleReader str = new SqlTupleReader(
+            new MemberExcludeConstraint(
+              list, l,
+              constraint instanceof SetConstraint setConstraint
+                ? setConstraint : null ) );
+          str.setAllowHints( false );
+          for ( CrossJoinArg arg : args ) {
+            addLevel( str, arg );
+          }
 
-        str.setMaxRows( maxRows - result.size() );
-        result.addAll(
-          str.readMembers(
-            context, null, new ArrayList<>() ) );
-      }
+          str.setMaxRows( maxRows - read.size() );
+          read.addAll(
+            str.readMembers(
+              context, null, new ArrayList<>() ) );
+        }
+        return read;
+      } );
+      result = fenced.value();
+      // writesAllowed was decided INSIDE the bracket: a generation bump
+      // during the read means these rows predate a flush - the member
+      // caches discarded their writes, and the TUPLE cache below must not
+      // publish the stale list either (the resurrection otherwise just
+      // moved one cache level up)
+      boolean fencedWritesAllowed = fenced.writesAllowed();
 
-      if ( !schemaReader.getContext().getConfig().disableCaching() ) {
+      if ( cacheUsable && fencedWritesAllowed ) {
+        TupleCacheKey key = new TupleCacheKey( parts );
         if ( hasEnumTargets ) {
           if ( newPartialResult != null ) {
             cache.put(
@@ -613,8 +723,44 @@ public abstract class RolapNativeSet extends RolapNative {
         } else {
           cache.put( key, result );
         }
+        // put-then-validate: a flush can land between the writesAllowed
+        // decision and the put above, and its clear then misses this
+        // entry. Every flush bumps the epoch BEFORE clearing, so either
+        // the clear runs after the put (removing the entry), or this
+        // check sees the moved counter and removes it
+        if ( flushEpoch.get() != epochAtRead ) {
+          cache.remove( key );
+        }
       }
       return filterInaccessibleTuples( result );
+    }
+
+    /** The (deep) cache-key parts: constraint key, projection, limits, role. */
+    private List<Object> tupleCacheKeyParts( SqlTupleReader tr ) {
+      List<Object> parts = new ArrayList<>();
+      parts.add( tr.getCacheKey() );
+      parts.addAll( Arrays.asList( args ) );
+      parts.add( maxRows );
+      parts.add( schemaReader.getRole() );
+      // a padded (non-NON-EMPTY) TopCount result differs from the unpadded
+      // one for the same constraint
+      parts.add( completeWithNullValues );
+      return parts;
+    }
+
+    private boolean nativeCacheEnabled() {
+      if ( constraint.getEvaluator() != null
+          && constraint.getEvaluator().getCube() instanceof RolapCube rolapCube ) {
+        // no caching while the cube's fact carries a session's pending
+        // writeback literals: a tuple list read from that fact contains
+        // UNCOMMITTED, session-private values and must not become
+        // visible to other sessions through the shared catalog cache.
+        // (Reads that STARTED before the bracket and publish after it
+        // are caught by the epoch bump at bracket exit.)
+        return rolapCube.getCachePolicy().nativeSets()
+            && !rolapCube.sessionRowsActive();
+      }
+      return true;
     }
 
     /**
@@ -624,7 +770,7 @@ public abstract class RolapNativeSet extends RolapNative {
       if ( needsFiltering( tupleList ) ) {
         final java.util.function.Predicate<Member> memberInaccessible =
           memberInaccessiblePredicate();
-        List<List<Member>> ret=    tupleList.stream().filter( tupleAccessiblePredicate( memberInaccessible ) ).toList();
+        List<List<Member>> ret = tupleList.stream().filter( tupleAccessiblePredicate( memberInaccessible ) ).toList();
         return new DelegatingTupleList(tupleList.getArity(), ret);
       }
       return tupleList;
@@ -681,6 +827,31 @@ public abstract class RolapNativeSet extends RolapNative {
 		return memberList -> memberList.stream().noneMatch(memberInaccessible);
 	}
 
+    /**
+     * The load registries of every target hierarchy, identity-deduped.
+     * The native read publishes into their member caches, so each fences
+     * this thread for the duration of the read.
+     */
+    private List<MemberLoadRegistry> targetLoadRegistries() {
+      final List<MemberLoadRegistry> registries = new ArrayList<>();
+      for ( CrossJoinArg arg : args ) {
+        RolapLevel level = arg.getLevel();
+        if ( level == null ) {
+          continue;
+        }
+        MemberReader reader = schemaReader.getMemberReader( level.getHierarchy() );
+        // walk delegating chains: role-restricted and ragged hierarchies
+        // wrap the caching reader, and a bare instanceof missed them -
+        // the fence was a no-op on every connection with a non-default role
+        MemberLoadRegistry registry = MemberLoadRegistry.of( reader );
+        if ( registry != null
+            && registries.stream().noneMatch( existing -> existing == registry ) ) {
+          registries.add( registry );
+        }
+      }
+      return registries;
+    }
+
     private void addLevel( TupleReader tr, CrossJoinArg arg ) {
       RolapLevel level = arg.getLevel();
       if ( level == null ) {
@@ -727,10 +898,6 @@ public abstract class RolapNativeSet extends RolapNative {
         return Optional.empty();
     }
 
-    int getMaxRows() {
-      return maxRows;
-    }
-
     void setMaxRows( int maxRows ) {
       this.maxRows = maxRows;
     }
@@ -751,19 +918,6 @@ public abstract class RolapNativeSet extends RolapNative {
       }
     }
     return true;
-  }
-
-  /**
-   * disable garbage collection for test
-   */
-  @Override
-@SuppressWarnings( { "unchecked", "rawtypes" } )
-  void useHardCache( boolean hard ) {
-    if ( hard ) {
-      cache = BoundedCache.ofEntries(Long.MAX_VALUE);
-    } else {
-      cache = new SoftValueCache();
-    }
   }
 
   /**
@@ -818,7 +972,6 @@ public abstract class RolapNativeSet extends RolapNative {
     }
   }
 
-
   public interface CatalogReaderWithMemberReaderAvailable
     extends CatalogReader {
     MemberReader getMemberReader( Hierarchy hierarchy );
@@ -828,16 +981,23 @@ public abstract class RolapNativeSet extends RolapNative {
     extends DelegatingCatalogReader
     implements CatalogReaderWithMemberReaderAvailable {
     private final Map<Hierarchy, MemberReader> hierarchyReaders =
-      new HashMap<>();
+      new ConcurrentHashMap<>();
 
     CatalogReaderWithMemberReaderCache( CatalogReader schemaReader ) {
       super( schemaReader );
     }
 
     @Override
-	public synchronized MemberReader getMemberReader( Hierarchy hierarchy ) {
-      return hierarchyReaders.computeIfAbsent(hierarchy,
-          k -> ( (RolapHierarchy) hierarchy ).createMemberReader(schemaReader.getRole() ));
+	public MemberReader getMemberReader( Hierarchy hierarchy ) {
+      // get-then-putIfAbsent: reader construction does real work and must
+      // not run under a map lock; losing the race only builds a spare reader
+      MemberReader reader = hierarchyReaders.get( hierarchy );
+      if ( reader == null ) {
+        MemberReader created = ( (RolapHierarchy) hierarchy ).createMemberReader( schemaReader.getRole() );
+        MemberReader raced = hierarchyReaders.putIfAbsent( hierarchy, created );
+        reader = raced != null ? raced : created;
+      }
+      return reader;
     }
 
     @Override
@@ -847,6 +1007,9 @@ public abstract class RolapNativeSet extends RolapNative {
   }
 
   public void flushCache() {
+    // bump FIRST, clear last: a publisher that sampled before the bump
+    // sees the moved counter after its put and removes its own entry
+    flushEpoch.incrementAndGet();
     cache.clear();
   }
 }

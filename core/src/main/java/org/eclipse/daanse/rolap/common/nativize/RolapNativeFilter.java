@@ -32,6 +32,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
 
 import org.eclipse.daanse.olap.api.Context;
 import org.eclipse.daanse.olap.api.catalog.CatalogReader;
@@ -59,7 +60,8 @@ import org.eclipse.daanse.rolap.element.RolapCube;
  */
 public class RolapNativeFilter extends RolapNativeSet {
 
-  public RolapNativeFilter(boolean enableNativeFilter) {
+  public RolapNativeFilter(BooleanSupplier enableNativeFilter, int nativeTupleCacheMaxTuples) {
+    super( nativeTupleCacheMaxTuples );
     super.setEnabled( enableNativeFilter );
   }
 
@@ -299,6 +301,66 @@ protected boolean restrictMemberTypes() {
     return true;
   }
 
+  private enum EmptyVerdict {
+    TRUE, FALSE, UNKNOWN;
+
+    EmptyVerdict not() {
+      return switch (this) {
+      case TRUE -> FALSE;
+      case FALSE -> TRUE;
+      default -> UNKNOWN;
+      };
+    }
+  }
+
+  /**
+   * What the condition evaluates to for a member whose measure cells are all
+   * empty. Comparisons over a non-literal operand are FALSE there (the calc
+   * comparisons collapse MDX NULL to false), IsEmpty is TRUE, NOT/AND/OR
+   * follow Kleene logic; anything unrecognized is UNKNOWN and treated as
+   * potentially true by the caller.
+   */
+  private static EmptyVerdict conditionMayAcceptEmpty( Expression exp ) {
+    if ( !( exp instanceof org.eclipse.daanse.olap.api.query.component.FunctionCall call ) ) {
+      return EmptyVerdict.UNKNOWN;
+    }
+    String name = call.getOperationAtom().name();
+    Expression[] callArgs = call.getArgs();
+    switch ( name ) {
+    case "()":
+      return callArgs.length == 1 ? conditionMayAcceptEmpty( callArgs[0] ) : EmptyVerdict.UNKNOWN;
+    case "NOT":
+      return conditionMayAcceptEmpty( callArgs[0] ).not();
+    case "AND": {
+      EmptyVerdict l = conditionMayAcceptEmpty( callArgs[0] );
+      EmptyVerdict r = conditionMayAcceptEmpty( callArgs[1] );
+      if ( l == EmptyVerdict.FALSE || r == EmptyVerdict.FALSE ) {
+        return EmptyVerdict.FALSE;
+      }
+      return l == EmptyVerdict.TRUE && r == EmptyVerdict.TRUE ? EmptyVerdict.TRUE : EmptyVerdict.UNKNOWN;
+    }
+    case "OR": {
+      EmptyVerdict l = conditionMayAcceptEmpty( callArgs[0] );
+      EmptyVerdict r = conditionMayAcceptEmpty( callArgs[1] );
+      if ( l == EmptyVerdict.TRUE || r == EmptyVerdict.TRUE ) {
+        return EmptyVerdict.TRUE;
+      }
+      return l == EmptyVerdict.FALSE && r == EmptyVerdict.FALSE ? EmptyVerdict.FALSE : EmptyVerdict.UNKNOWN;
+    }
+    case "IsEmpty":
+      return EmptyVerdict.TRUE;
+    case ">", "<", ">=", "<=", "=", "<>": {
+      // false on empty as soon as one operand reads a cell; a pure
+      // literal-vs-literal comparison is constant and stays UNKNOWN
+      boolean cellDependent = !( callArgs[0] instanceof org.eclipse.daanse.olap.api.query.component.Literal )
+          || !( callArgs[1] instanceof org.eclipse.daanse.olap.api.query.component.Literal );
+      return cellDependent ? EmptyVerdict.FALSE : EmptyVerdict.UNKNOWN;
+    }
+    default:
+      return EmptyVerdict.UNKNOWN;
+    }
+  }
+
   @Override
 NativeEvaluator createEvaluator( RolapEvaluator evaluator, FunctionDefinition fun, Expression[] args, final boolean enableNativeFilter ) {
     if ( !isEnabled() ) {
@@ -349,6 +411,15 @@ NativeEvaluator createEvaluator( RolapEvaluator evaluator, FunctionDefinition fu
         null, evaluator, cjArgs[0].getLevel() );
     final Expression filterExpr = args[1];
     if ( sql.generateFilterPredicate( filterExpr ) == null ) {
+      return null;
+    }
+    if ( !evaluator.isNonEmpty() && conditionMayAcceptEmpty( filterExpr ) != EmptyVerdict.FALSE ) {
+      // The native SQL inner-joins the fact table, so members WITHOUT fact
+      // rows never appear — correct only when the condition is false for an
+      // empty cell (comparisons collapse MDX NULL to false). A condition
+      // that can be true on empty (IsEmpty, negations over comparisons)
+      // stays on the calc engine unless NON EMPTY drops those members
+      // anyway.
       return null;
     }
 

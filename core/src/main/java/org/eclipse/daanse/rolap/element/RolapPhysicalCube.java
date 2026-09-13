@@ -66,7 +66,6 @@ import org.eclipse.daanse.rolap.common.writeback.RolapWritebackAttribute;
 import org.eclipse.daanse.rolap.common.writeback.RolapWritebackColumn;
 import org.eclipse.daanse.rolap.common.writeback.RolapWritebackMeasure;
 import org.eclipse.daanse.rolap.common.writeback.RolapWritebackTable;
-import org.eclipse.daanse.rolap.mapping.model.RolapMappingFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -158,13 +157,6 @@ public class RolapPhysicalCube extends RolapCube implements PhysicalCube {
                 factCountMeasure = measure;
             }
         }
-
-        // boolean writebackEnabled = false;
-        // for (RolapHierarchy hierarchy : hierarchyList) {
-        // if (ScenarioImpl.isScenario(hierarchy)) {
-        // writebackEnabled = true;
-        // }
-        // }
 
         // Ensure that cube has an atomic cell count
         // measure even if the schema does not contain one.
