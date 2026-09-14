@@ -38,6 +38,7 @@
 
   <properties>
     <revision>0.0.1-SNAPSHOT</revision>
+    <caffeine.version>3.1.8</caffeine.version>
     <slf4j.version>2.0.9</slf4j.version>
 
     <!-- JUnit pool size: availableProcessors() * factor. Override per build,
@@ -69,6 +70,7 @@
       It joins the reactor once that module does.
     -->
     <module>documentation</module>
+    <module>segmentcache</module>
     <module>testkit</module>
     <module>itests</module>
   </modules>
