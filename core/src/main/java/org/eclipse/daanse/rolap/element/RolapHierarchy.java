@@ -109,7 +109,6 @@ import org.eclipse.daanse.rolap.common.evaluator.RolapEvaluator;
 import org.eclipse.daanse.rolap.common.member.MemberReader;
 import org.eclipse.daanse.rolap.common.member.CachingRestrictedMemberReader;
 import org.eclipse.daanse.rolap.common.member.SubstitutingMemberReader;
-import org.eclipse.daanse.rolap.common.result.RolapResult;
 import org.eclipse.daanse.rolap.common.sql.MemberChildrenConstraint;
 import org.eclipse.daanse.rolap.common.sql.QueryRecorder;
 import org.eclipse.daanse.rolap.common.star.RolapSqlExpression;

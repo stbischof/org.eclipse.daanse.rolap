@@ -39,7 +39,6 @@ import org.eclipse.daanse.olap.api.evaluator.NativeEvaluator;
 import org.eclipse.daanse.olap.api.function.FunctionDefinition;
 import org.eclipse.daanse.olap.api.query.component.Expression;
 import org.eclipse.daanse.olap.evaluator.NativeEvaluatorFactory;
-import org.eclipse.daanse.rolap.common.evaluator.RolapEvaluator;
 
 /**
  * Composite of {@link NativeEvaluatorFactory}s. Uses chain of responsibility
