@@ -47,7 +47,7 @@ import org.eclipse.daanse.rolap.common.agg.CellRequest;
 import org.eclipse.daanse.rolap.common.agg.DrillThroughCellRequest;
 import org.eclipse.daanse.rolap.common.agg.CompoundPredicateInfo;
 import org.eclipse.daanse.rolap.common.evaluator.RolapEvaluator;
-import org.eclipse.daanse.rolap.common.result.CellReader;
+import org.eclipse.daanse.olap.api.result.CellReader;
 import org.eclipse.daanse.rolap.common.result.RolapCell;
 import org.eclipse.daanse.rolap.common.star.RolapStar;
 import org.eclipse.daanse.rolap.common.star.StarPredicate;
@@ -559,14 +559,14 @@ public abstract class RolapAggregationManager {
         boolean countOnly);
 
     /**
-     * Returns a {@link org.eclipse.daanse.rolap.common.result.CellReader} which reads cells from cache.
+     * Returns a {@link org.eclipse.daanse.olap.api.result.CellReader} which reads cells from cache.
  */
     public CellReader getCacheCellReader() {
         return new CellReader() {
             // implement CellReader
             @Override
-			public CellValue get(RolapEvaluator evaluator) {
-                CellRequest request = makeRequest(evaluator);
+			public CellValue get(Evaluator evaluator) {
+                CellRequest request = makeRequest((RolapEvaluator) evaluator);
                 if (request == null || request.isUnsatisfiable()) {
                     // request out of bounds
                     return NullValue.INSTANCE;
@@ -595,7 +595,7 @@ public abstract class RolapAggregationManager {
      * Bridges the object convention of the cache probe API (raw value,
      * {@link NullValue#INSTANCE} for a stored NULL, Java {@code null} for
      * "not in cache") into the sealed {@link CellValue} protocol of the
-     * {@link org.eclipse.daanse.rolap.common.result.CellReader} chain.
+     * {@link org.eclipse.daanse.olap.api.result.CellReader} chain.
      *
      * @param o          cell value from the probe API
      * @param whenAbsent state to report when the cache has no answer
