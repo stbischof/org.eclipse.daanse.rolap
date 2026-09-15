@@ -59,6 +59,8 @@ public final class CacheStatsReport {
     /** The aggregate; every field is a plain snapshot, never live state. */
     public record Snapshot(
             CacheStats catalogLive,
+            long catalogLoads,
+            long catalogLoadNanos,
             CacheStats memberLists,
             int memberCachesVisited,
             Map<String, CacheStats> nativeTupleCaches,
@@ -68,7 +70,9 @@ public final class CacheStatsReport {
         public String formatted() {
             StringBuilder sb = new StringBuilder(256);
             sb.append("cache stats snapshot\n");
-            sb.append("  catalogs: live=").append(brief(catalogLive)).append('\n');
+            sb.append("  catalogs: live=").append(brief(catalogLive))
+              .append(" loads=").append(catalogLoads)
+              .append(" loadMillis=").append(catalogLoadNanos / 1_000_000).append('\n');
             sb.append("  memberLists(").append(memberCachesVisited).append(" caches): ")
               .append(brief(memberLists)).append('\n');
             nativeTupleCaches.forEach((name, stats) ->
@@ -139,6 +143,8 @@ public final class CacheStatsReport {
 
         Snapshot snapshot = new Snapshot(
             catalogCache.getCacheStats(),
+            catalogCache.catalogLoadCount(),
+            catalogCache.catalogLoadNanos(),
             memberLists,
             visited,
             nativeStats,

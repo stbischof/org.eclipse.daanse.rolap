@@ -139,24 +139,6 @@ public class RolapCubeCatalogReader extends RolapCatalogReader
         @Override
         public List<Member> getCalculatedMembers() {
 //            List<Member> list =
-//                roleToAccessibleCalculatedMembers.get(getRole());
-//            if (list == null) {
-//                list = new ArrayList<Member>();
-//
-//                for (Formula formula : calculatedMemberList) {
-//                    Member member = formula.getMdxMember();
-//                    if (getRole().canAccess(member)) {
-//                        list.add(member);
-//                    }
-//                }
-//                //  calculatedMembers array may not have been initialized
-//                if (list.size() > 0) {
-//                    roleToAccessibleCalculatedMembers.put(getRole(), list);
-//                }
-//            }
-
-            //Without roleToAccessibleCalculatedMembers
-            //Issues with session objects
             List<Member> list = new ArrayList<>();
 
             for (Formula formula : rolapCube.getCalculatedMemberList()) {

@@ -113,7 +113,7 @@ class RolapCatalogTest {
 
     private RolapCatalog createSchema() {
         RolapCatalogKey key = new RolapCatalogKey(
-            new RolapCatalogContentKey("test", 1), new ConnectionKey(1, "1"));
+            new RolapCatalogContentKey("test", "00".repeat(32)), new ConnectionKey(java.util.UUID.randomUUID(), "1", null, null));
 
         //noinspection deprecation
         //mock rolap connection to eliminate calls for cache loading

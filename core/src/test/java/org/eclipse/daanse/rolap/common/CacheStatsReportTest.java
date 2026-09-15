@@ -73,10 +73,8 @@ class CacheStatsReportTest {
     void snapshotFieldsAreValueLike() {
         CacheStatsReport.Snapshot snapshot = new CacheStatsReport.Snapshot(
             com.github.benmanes.caffeine.cache.stats.CacheStats.empty(),
-            com.github.benmanes.caffeine.cache.stats.CacheStats.empty(),
+            3, 5_000_000, com.github.benmanes.caffeine.cache.stats.CacheStats.empty(),
             0, Map.of(), List.of());
-        assertThat(snapshot.formatted())
-            .contains("catalogs: live=")
-            .contains("memberLists(0 caches)");
+        assertThat(snapshot.formatted()).contains("loads=3").contains("loadMillis=5");
     }
 }
