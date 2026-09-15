@@ -29,7 +29,7 @@ package org.eclipse.daanse.rolap.common.member;
 import java.util.Collection;
 import java.util.function.UnaryOperator;
 
-import org.eclipse.daanse.rolap.common.cache.SimpleCache;
+import org.eclipse.daanse.olap.cache.SimpleCache;
 
 /**
  * Uses a SimpleCache to store a collection of values.

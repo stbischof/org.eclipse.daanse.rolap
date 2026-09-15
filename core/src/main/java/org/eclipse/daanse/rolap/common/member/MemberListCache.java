@@ -28,11 +28,11 @@
 package org.eclipse.daanse.rolap.common.member;
 
 import org.eclipse.daanse.olap.util.Pair;
-import org.eclipse.daanse.rolap.common.cache.SimpleCache;
+import org.eclipse.daanse.olap.cache.SimpleCache;
 import org.eclipse.daanse.rolap.common.sql.SqlConstraint;
 
 /**
- * Uses a {@link org.eclipse.daanse.rolap.common.cache.SimpleCache} to store lists of members,
+ * Uses a {@link org.eclipse.daanse.olap.cache.SimpleCache} to store lists of members,
  * where the key depends on a {@link org.eclipse.daanse.rolap.common.sql.SqlConstraint}.
  *
  * Example 1:

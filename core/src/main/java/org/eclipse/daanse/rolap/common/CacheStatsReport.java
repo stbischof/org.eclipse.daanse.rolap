@@ -23,7 +23,7 @@ import org.eclipse.daanse.olap.api.element.Hierarchy;
 import org.eclipse.daanse.rolap.api.RolapContext;
 import org.eclipse.daanse.rolap.common.agg.SegmentCacheManager;
 import org.eclipse.daanse.rolap.common.agg.SegmentCacheStats;
-import org.eclipse.daanse.rolap.common.cache.BoundedCache;
+import org.eclipse.daanse.olap.cache.BoundedCache;
 import org.eclipse.daanse.rolap.common.catalog.RolapCatalogCache;
 import org.eclipse.daanse.rolap.common.member.CachingMemberReader;
 import org.eclipse.daanse.rolap.common.member.MemberCacheImpl;
