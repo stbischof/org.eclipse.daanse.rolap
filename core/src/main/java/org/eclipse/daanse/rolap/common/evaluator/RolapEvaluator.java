@@ -70,7 +70,7 @@ import org.eclipse.daanse.olap.util.format.Format;
 import org.eclipse.daanse.rolap.api.element.RolapMember;
 import org.eclipse.daanse.rolap.common.agg.CompoundPredicateInfo;
 import org.eclipse.daanse.rolap.common.constraint.SlicerAnalyzer;
-import org.eclipse.daanse.rolap.common.result.CellReader;
+import org.eclipse.daanse.olap.api.result.CellReader;
 import org.eclipse.daanse.rolap.element.CompoundSlicerRolapMember;
 import org.eclipse.daanse.rolap.element.RolapCube;
 import org.eclipse.daanse.rolap.element.RolapCubeLevel;

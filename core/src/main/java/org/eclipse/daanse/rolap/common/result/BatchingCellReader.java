@@ -57,6 +57,8 @@ import org.eclipse.daanse.olap.spi.SegmentBody;
 import org.eclipse.daanse.olap.spi.SegmentHeader;
 import org.eclipse.daanse.olap.spi.SegmentIdentity;
 import  org.eclipse.daanse.olap.util.Pair;
+import org.eclipse.daanse.olap.api.evaluator.Evaluator;
+import org.eclipse.daanse.olap.api.result.CellReader;
 import org.eclipse.daanse.rolap.common.RolapAggregationManager;
 import org.eclipse.daanse.rolap.common.agg.AggregationManager;
 import org.eclipse.daanse.rolap.common.agg.CellRequest;
@@ -234,7 +236,8 @@ public class BatchingCellReader implements CellReader {
     }
 
     @Override
-	public CellValue get(RolapEvaluator evaluator) {
+	public CellValue get(Evaluator evaluator0) {
+        final RolapEvaluator evaluator = (RolapEvaluator) evaluator0;
         final CellRequest request =
             RolapAggregationManager.makeRequest(evaluator);
 
