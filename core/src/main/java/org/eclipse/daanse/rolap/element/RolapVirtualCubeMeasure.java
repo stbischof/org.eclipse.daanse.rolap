@@ -28,6 +28,7 @@ package org.eclipse.daanse.rolap.element;
 import org.eclipse.daanse.olap.api.aggregator.Aggregator;
 import org.eclipse.daanse.olap.api.element.MetaData;
 import org.eclipse.daanse.olap.api.element.VirtualCubeMeasure;
+import org.eclipse.daanse.olap.result.ValueFormatter;
 import org.eclipse.daanse.rolap.api.element.RolapMember;
 import org.eclipse.daanse.rolap.common.result.RolapResult;
 import org.eclipse.daanse.rolap.common.star.RolapSqlExpression;
@@ -94,7 +95,7 @@ public class RolapVirtualCubeMeasure
     }
 
     @Override
-	public RolapResult.ValueFormatter getFormatter() {
+	public ValueFormatter getFormatter() {
         return cubeMeasure.getFormatter();
     }
 

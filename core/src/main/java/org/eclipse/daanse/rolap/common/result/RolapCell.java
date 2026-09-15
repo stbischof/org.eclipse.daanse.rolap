@@ -85,6 +85,7 @@ import org.eclipse.daanse.olap.function.def.aggregate.AggregateFunDef;
 import org.eclipse.daanse.olap.function.def.set.SetFunDef;
 import org.eclipse.daanse.olap.query.component.MdxVisitorImpl;
 import org.eclipse.daanse.olap.query.component.ResolvedFunCallImpl;
+import org.eclipse.daanse.olap.result.CellInfo;
 import org.eclipse.daanse.rolap.api.element.RolapMember;
 import org.eclipse.daanse.rolap.common.RolapAggregationManager;
 import org.eclipse.daanse.rolap.common.RolapUtil;
@@ -117,7 +118,7 @@ public class RolapCell implements Cell {
 
     private final RolapResult result;
     protected final int[] pos;
-    protected RolapResult.CellInfo ci;
+    protected CellInfo ci;
     private final static String drillthroughDisabled =
         "Can''t perform drillthrough operations because ''{0}'' is set to false.";
 
@@ -128,7 +129,7 @@ public class RolapCell implements Cell {
      * @param pos Coordinates of cell
      * @param ci Cell information, containing value et cetera
  */
-    RolapCell(RolapResult result, int[] pos, RolapResult.CellInfo ci) {
+    RolapCell(RolapResult result, int[] pos, CellInfo ci) {
         this.result = result;
         this.pos = pos;
         this.ci = ci;
