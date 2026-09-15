@@ -42,7 +42,6 @@ import org.eclipse.daanse.rolap.aggregator.CountAggregator;
 import org.eclipse.daanse.rolap.aggregator.DistinctCountAggregator;
 import org.eclipse.daanse.rolap.aggregator.extra.ListAggAggregator;
 import org.eclipse.daanse.rolap.api.element.RolapMember;
-import org.eclipse.daanse.rolap.common.result.RolapResult;
 import org.eclipse.daanse.rolap.common.star.RolapSqlExpression;
 import org.eclipse.daanse.rolap.mapping.model.database.relational.ColumnInternalDataType;
 import org.eclipse.daanse.sql.model.type.Datatype;
