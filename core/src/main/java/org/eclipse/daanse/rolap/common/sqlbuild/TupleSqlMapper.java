@@ -144,8 +144,8 @@ public final class TupleSqlMapper {
     /**
      * As {@link #levelMembersSql(RolapLevel)} but renders dialect-aware: a view/inline-table relation
      * (also when nested in a join) becomes a {@code From.raw} (or converted) FROM, and computed
-     * (expression) columns render with their dialect-specific SQL — see {@link #supportsViaDialectFrom}
-     * and {@link #supportsAllowingExpressions}.
+     * (expression) columns render with their dialect-specific SQL — see
+     * {@link #supportsAllowingExpressions}.
      */
     public static SelectStatement levelMembersSql(RolapLevel targetLevel,
             boolean viewAware) {
@@ -1264,7 +1264,7 @@ public final class TupleSqlMapper {
     }
 
     /**
-     * Broadest predicate: like {@link #supportsViaDialectFrom} but also allows computed (expression)
+     * Broadest predicate: allows a view/inline-table relation and computed (expression)
      * key/caption/ordinal/property columns, which the dialect {@code levelMembersSql} overload renders
      * via each expression's dialect-specific SQL. Guarded-only: a computed column adds no table to the
      * FROM subset, so on a multi-table relation the subset may be wrong — must be verified per case.
