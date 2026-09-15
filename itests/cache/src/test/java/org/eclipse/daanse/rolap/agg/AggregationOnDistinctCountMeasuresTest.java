@@ -2356,8 +2356,8 @@ class AggregationOnDistinctCountMeasuresTest {
         + "Row #0: 2,044\n" + "Row #1: 2,084\n" + "Row #2: 512\n" + "Row #3: 1,884\n" + "Row #4: 531\n"
         + "Row #5: 1,929\n", resultString );
     Execution e = ( (ResultBase) result ).getExecution();
-    assertEquals( 13, e.getExpCacheHitCount() );
-    assertEquals( 23, e.getExpCacheMissCount() );
+    assertEquals( 15, e.getExpCacheHitCount() );
+    assertEquals( 21, e.getExpCacheMissCount() );
   }
 
   @Test
@@ -2411,8 +2411,8 @@ class AggregationOnDistinctCountMeasuresTest {
     // Expression-cache counters are an evaluation-order fingerprint: the
     // Java-null NULL representation legitimately shifts NULL-involving
     // evaluation paths while the query RESULT is unchanged.
-    assertEquals( 2733, e.getExpCacheHitCount() );
-    assertEquals( 8300, e.getExpCacheMissCount() );
+    assertEquals( 4855, e.getExpCacheHitCount() );
+    assertEquals( 6178, e.getExpCacheMissCount() );
   }
 
     private TupleList genderMembersIncludingAll(

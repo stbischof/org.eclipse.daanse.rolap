@@ -631,13 +631,21 @@ class SegmentBuilderTest {
 
     private void loadCacheWithQueries(Connection connection, String [] queries) {
         flushSchemaCache(connection);
-        // the schema flush drops segments asynchronously; empty the composite
-        // cache here so the rollup input map holds exactly the segments the
-        // queries below load, never stale same-shaped ones
+        // the schema flush and earlier tests write to the stores
+        // asynchronously; drain those writes before emptying the composite
+        // cache, and drain again after the queries, so the rollup input map
+        // holds exactly the segments the queries below load
+        awaitPendingCacheWrites(connection);
         clearAggregationCache(connection);
         for (String query : queries) {
             executeQuery(connection, query);
         }
+        awaitPendingCacheWrites(connection);
+    }
+
+    private void awaitPendingCacheWrites(Connection connection) {
+        ((SegmentCacheManager) ((AbstractBasicContext) connection.getContext())
+            .getAggregationManager().getSegmentCacheManager()).awaitPendingCacheWrites();
     }
 
     enum Order {
