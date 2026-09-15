@@ -32,7 +32,7 @@ import org.eclipse.daanse.olap.api.connection.Connection;
 import org.eclipse.daanse.olap.api.result.Axis;
 import org.eclipse.daanse.olap.api.result.Result;
 import org.eclipse.daanse.olap.common.ConfigConstants;
-import org.eclipse.daanse.rolap.common.result.RolapAxis;
+import org.eclipse.daanse.olap.result.AxisImpl;
 import org.eclipse.daanse.rolap.testkit.assertions.SqlAssert;
 import org.eclipse.daanse.rolap.testkit.junit.api.DbScope;
 import org.eclipse.daanse.rolap.testkit.junit.api.RolapConfig;
@@ -252,7 +252,7 @@ class MultipleColsInTupleAggTest {
             + "} on columns from Fact").getAxes()[0];
         assertEquals(
             "Black",
-            ((RolapAxis) axis).getTupleList().get(0).get(0)
+            ((AxisImpl) axis).getTupleList().get(0).get(0)
                 .getPropertyValue("Product Color"), "Member property value was not loaded correctly.");
     }
 
