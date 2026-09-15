@@ -66,6 +66,7 @@ import org.eclipse.daanse.rolap.api.aggmatch.AggregationMatchRulesSupplier;
 import org.eclipse.daanse.rolap.common.AbstractRolapContext;
 import org.eclipse.daanse.rolap.common.agg.AggregationManager;
 import org.eclipse.daanse.rolap.common.aggregator.AggregationFactoryImpl;
+import org.eclipse.daanse.rolap.common.catalog.ContentIdentity;
 import org.eclipse.daanse.rolap.common.catalog.RolapCatalogCache;
 import org.eclipse.daanse.rolap.common.connection.ExternalRolapConnection;
 import org.eclipse.daanse.rolap.common.connection.InternalRolapConnection;
@@ -106,6 +107,7 @@ public class BasicContext extends AbstractRolapContext implements RolapContext {
 
     private volatile org.eclipse.daanse.rolap.mapping.model.catalog.Catalog cachedCatalogMapping;
 
+    private volatile byte[] cachedContentIdentitySha256;
 
     private ExpressionCompilerFactory expressionCompilerFactory;
 
@@ -234,12 +236,14 @@ public class BasicContext extends AbstractRolapContext implements RolapContext {
     @Reference(name = BASIC_CONTEXT_REF_NAME_CONNECTION_POOL, target = UNRESOLVABLE_FILTER)
     protected void setConnectionPool(ConnectionPool connectionPool) {
         this.connectionPool = connectionPool;
+        this.cachedContentIdentitySha256 = null;
     }
 
     protected void unsetConnectionPool(ConnectionPool connectionPool) {
         if (this.connectionPool == connectionPool) {
             this.connectionPool = null;
-            }
+            this.cachedContentIdentitySha256 = null;
+        }
     }
 
     @Reference(name = BASIC_CONTEXT_REF_NAME_DIALECT_FACTORY, target = UNRESOLVABLE_FILTER)
@@ -257,13 +261,15 @@ public class BasicContext extends AbstractRolapContext implements RolapContext {
     protected void setCatalogMappingSupplier(CatalogMappingSupplier catalogMappingSupplier) {
         this.catalogMappingSupplier = catalogMappingSupplier;
         this.cachedCatalogMapping = null;
+        this.cachedContentIdentitySha256 = null;
     }
 
     protected void unsetCatalogMappingSupplier(CatalogMappingSupplier catalogMappingSupplier) {
         if (this.catalogMappingSupplier == catalogMappingSupplier) {
             this.catalogMappingSupplier = null;
             this.cachedCatalogMapping = null;
-            }
+            this.cachedContentIdentitySha256 = null;
+        }
     }
 
     @Reference(name = BASIC_CONTEXT_REF_NAME_EXPRESSION_COMPILER_FACTORY)
@@ -440,6 +446,37 @@ public class BasicContext extends AbstractRolapContext implements RolapContext {
             cachedCatalogMapping = catalogMappingSupplier.get();
         }
         return cachedCatalogMapping;
+    }
+
+    @Override
+    public byte[] getContentIdentitySha256() {
+        byte[] identity = cachedContentIdentitySha256;
+        if (identity == null) {
+            // one JDBC round-trip, not one per racing first connection
+            synchronized (this) {
+                identity = cachedContentIdentitySha256;
+                if (identity == null) {
+                    try (Connection connection = getDataSource().getConnection()) {
+                        DatabaseMetaData metaData = connection.getMetaData();
+                        identity = ContentIdentity.sha256(catalogMappingSupplier.sha256(),
+                                metaData.getURL(), metaData.getUserName(), connection.getCatalog(),
+                                schemaOf(connection));
+                        cachedContentIdentitySha256 = identity;
+                    } catch (SQLException e) {
+                        throw new IllegalStateException("content identity unavailable", e);
+                    }
+                }
+            }
+        }
+        return identity.clone();
+    }
+
+    private static String schemaOf(Connection connection) {
+        try {
+            return connection.getSchema();
+        } catch (SQLException e) {
+            return "";
+        }
     }
 
     @Override

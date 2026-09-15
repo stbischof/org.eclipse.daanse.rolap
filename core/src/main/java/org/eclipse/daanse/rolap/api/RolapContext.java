@@ -25,6 +25,13 @@ public interface RolapContext extends Context<Connection> {
 
 	Catalog getCatalogMapping();
 
+	/**
+	 * SHA-256 content identity of this context (mapping hash + database
+	 * identity); catalog cache keys and SegmentHeader.schemaChecksum build on
+	 * it, so only instances serving the same catalog content against the same
+	 * database share segments.
+	 */
+	byte[] getContentIdentitySha256();
 
 	Optional<AggregationMatchRulesSupplier> getAggMatchRulesSupplier();
 

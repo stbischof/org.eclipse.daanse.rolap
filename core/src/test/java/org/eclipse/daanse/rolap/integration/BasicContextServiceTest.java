@@ -18,10 +18,12 @@ import static org.eclipse.daanse.rolap.core.api.Constants.BASIC_CONTEXT_PID;
 import static org.eclipse.daanse.rolap.core.api.Constants.BASIC_CONTEXT_REF_NAME_CATALOG_MAPPING_SUPPLIER;
 import static org.eclipse.daanse.rolap.core.api.Constants.BASIC_CONTEXT_REF_NAME_CONNECTION_POOL;
 import static org.eclipse.daanse.rolap.core.api.Constants.BASIC_CONTEXT_REF_NAME_DIALECT_FACTORY;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.osgi.test.common.dictionary.Dictionaries.dictionaryOf;
 
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.SQLException;
 import java.util.Dictionary;
 import java.util.Hashtable;
@@ -117,6 +119,13 @@ class BasicContextServiceTest {
         when(connectionPool.getConnection()).thenReturn(connection);
         when(connectionPool.dataSource()).thenReturn(dataSource);
         when(dialectFactory.createDialect(connection)).thenReturn(dialect);
+        // the content identity reads url/user/catalog/schema of the database
+        DatabaseMetaData metaData = mock(DatabaseMetaData.class);
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.getMetaData()).thenReturn(metaData);
+        when(metaData.getURL()).thenReturn("jdbc:h2:mem:it");
+        when(metaData.getUserName()).thenReturn("sa");
+        when(catalogMappingSupplier.sha256()).thenReturn(new byte[32]);
         when(catalogMappingSupplier.get()).thenReturn(catalogMapping);
         catalogMapping.setName("schemaName");
 

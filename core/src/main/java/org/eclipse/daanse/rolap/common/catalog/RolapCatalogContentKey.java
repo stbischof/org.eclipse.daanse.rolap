@@ -13,10 +13,15 @@
  */
 package org.eclipse.daanse.rolap.common.catalog;
 
-public record RolapCatalogContentKey(String catalogName, int catalogMappingHash) {
-	public static RolapCatalogContentKey create(org.eclipse.daanse.rolap.mapping.model.catalog.Catalog catalogMapping) {
+import java.util.HexFormat;
 
-		int hash = System.identityHashCode(catalogMapping);
-		return new RolapCatalogContentKey(catalogMapping.getName(), hash);
+/**
+ * Content part of the catalog cache key: name plus the supplier's SHA-256
+ * content identity, so content-equal mappings share one pool entry and a
+ * changed mapping misses it.
+ */
+public record RolapCatalogContentKey(String catalogName, String contentFingerprint) {
+	public static RolapCatalogContentKey of(String catalogName, byte[] sha256) {
+		return new RolapCatalogContentKey(catalogName, HexFormat.of().formatHex(sha256));
 	}
 }

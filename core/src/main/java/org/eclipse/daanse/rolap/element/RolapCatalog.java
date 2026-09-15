@@ -38,6 +38,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -183,7 +184,7 @@ public class RolapCatalog implements Catalog {
 	 */
 	private Role defaultRole;
 
-	private ByteString sha512Bytes;
+	private ByteString contentChecksum;
 
 	/**
 	 * A schema's aggregation information
@@ -319,6 +320,19 @@ public class RolapCatalog implements Catalog {
 		releaseInstanceResources();
 	}
 
+	/**
+	 * Tears this INSTANCE down without touching the shared segment side.
+	 * flushSegments() is key-scoped and a measures-region flush deletes from
+	 * the external stores too, so when a successor catalog already holds the
+	 * same key its segments are still valid and must survive.
+	 */
+	public void finalCleanUpKeepingSegments() {
+		if (!finalCleanUpDone.compareAndSet(false, true)) {
+			return;
+		}
+		releaseInstanceResources();
+	}
+
 	private void releaseInstanceResources() {
 		nativeRegistry.flushNativeSetCaches();
 		for (RolapStar star : rolapStarRegistry.getStars()) {
@@ -359,7 +373,9 @@ public class RolapCatalog implements Catalog {
 		// TODO: get from schema var
 		mappingCatalog = context.getCatalogMapping();
 
-		sha512Bytes = new ByteString(("" + mappingCatalog.hashCode()).getBytes());
+		// identity computed once at cache-key creation
+		contentChecksum = new ByteString(
+				HexFormat.of().parseHex(key.catalogContentKey().contentFingerprint()));
 
 		// todo: use this >jdk19
 //		sha512Bytes = new ByteString(Objects.toIdentityString(xmlSchema).getBytes());
@@ -1108,7 +1124,7 @@ public class RolapCatalog implements Catalog {
 	 * @return MD5 checksum of this schema
 	 */
 	public ByteString getChecksum() {
-		return sha512Bytes;
+		return contentChecksum;
 	}
 
 	/**
