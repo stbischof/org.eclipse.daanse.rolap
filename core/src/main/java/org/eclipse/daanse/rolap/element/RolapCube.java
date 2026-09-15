@@ -148,6 +148,7 @@ import org.eclipse.daanse.cwm.model.cwm.resource.relational.util.RowSets;
 import org.eclipse.daanse.cwm.model.cwm.resource.relational.util.Rows;
 import org.eclipse.daanse.rolap.mapping.model.provider.util.CwmHelper;
 import org.eclipse.daanse.cwm.model.cwm.foundation.businessinformation.util.Descriptions;
+import org.eclipse.daanse.olap.element.KPIImpl;
 /**
  * RolapCube implements {@link Cube} for a ROLAP database.
  *
@@ -252,11 +253,11 @@ public abstract class RolapCube extends CubeBase {
 
     /**
      * Holds the cube still while one caller's pending rows are in its fact; see
-     * {@link org.eclipse.daanse.rolap.common.writeback.PendingFact} for why that
+     * {@link org.eclipse.daanse.olap.writeback.PendingFact} for why that
      * has to be exclusive.
      */
-    private final org.eclipse.daanse.rolap.common.writeback.PendingFact pendingFact =
-        new org.eclipse.daanse.rolap.common.writeback.PendingFact();
+    private final org.eclipse.daanse.olap.writeback.PendingFact pendingFact =
+        new org.eclipse.daanse.olap.writeback.PendingFact();
 
     /**
      * Used for virtual cubes.
@@ -463,7 +464,7 @@ public abstract class RolapCube extends CubeBase {
     private void fillKpiIfExist(org.eclipse.daanse.rolap.mapping.model.olap.cube.Cube cube) {
         if (cube != null && cube.getKpis() != null) {
             cube.getKpis().stream().forEach(kpiMapping -> {
-                RolapKPI kpi = new RolapKPI();
+                KPIImpl kpi = new KPIImpl();
                 kpi.setName(kpiMapping.getName());
                 kpi.setDisplayFolder(kpiMapping.getDisplayFolder());
                 kpi.setCurrentTimeMember(body(kpiMapping.getCurrentTimeMember()));
@@ -483,7 +484,7 @@ public abstract class RolapCube extends CubeBase {
                     if (oKpi.isPresent()) {
                         Optional<KPI> oKpiParent = kpis.stream().filter(k -> k.getName().equals(kpiMapping.getParentKpi().getName())).findFirst();
                         if (oKpiParent.isPresent()) {
-                            ((RolapKPI)oKpi.get()).setParentKpi(oKpiParent.get());
+                            ((KPIImpl)oKpi.get()).setParentKpi(oKpiParent.get());
                         }
                     }
                 }
