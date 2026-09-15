@@ -28,6 +28,7 @@
 package org.eclipse.daanse.rolap.element;
 
 import org.eclipse.daanse.olap.api.element.Measure;
+import org.eclipse.daanse.olap.result.ValueFormatter;
 import org.eclipse.daanse.rolap.common.result.RolapResult;
 
 /**
@@ -43,5 +44,5 @@ public interface RolapMeasure extends Measure {
      *
      * @return formatter
      */
-    RolapResult.ValueFormatter getFormatter();
+    ValueFormatter getFormatter();
 }

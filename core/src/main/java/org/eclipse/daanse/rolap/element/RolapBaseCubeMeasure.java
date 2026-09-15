@@ -36,6 +36,8 @@ import org.eclipse.daanse.olap.api.formatter.CellFormatter;
 import org.eclipse.daanse.olap.common.StandardProperty;
 import org.eclipse.daanse.olap.exceptions.CastInvalidTypeException;
 import org.eclipse.daanse.olap.query.component.StringLiteralImpl;
+import org.eclipse.daanse.olap.result.CellFormatterValueFormatter;
+import org.eclipse.daanse.olap.result.ValueFormatter;
 import org.eclipse.daanse.rolap.aggregator.CountAggregator;
 import org.eclipse.daanse.rolap.aggregator.DistinctCountAggregator;
 import org.eclipse.daanse.rolap.aggregator.extra.ListAggAggregator;
@@ -86,7 +88,7 @@ public class RolapBaseCubeMeasure
      */
     private Object starMeasure;
 
-    private RolapResult.ValueFormatter formatter;
+    private ValueFormatter formatter;
 
     /**
      * Creates a RolapBaseCubeMeasure.
@@ -180,13 +182,13 @@ public class RolapBaseCubeMeasure
     }
 
     @Override
-	public RolapResult.ValueFormatter getFormatter() {
+	public ValueFormatter getFormatter() {
         return formatter;
     }
 
     public void setFormatter(CellFormatter cellFormatter) {
         this.formatter =
-            new RolapResult.CellFormatterValueFormatter(cellFormatter);
+            new CellFormatterValueFormatter(cellFormatter);
     }
 
     @Override
