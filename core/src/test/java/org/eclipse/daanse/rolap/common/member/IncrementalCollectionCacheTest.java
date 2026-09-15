@@ -18,7 +18,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.TreeSet;
 
-import org.eclipse.daanse.rolap.common.cache.BoundedCache;
+import org.eclipse.daanse.olap.cache.BoundedCache;
 import org.junit.jupiter.api.Test;
 
 class IncrementalCollectionCacheTest {
