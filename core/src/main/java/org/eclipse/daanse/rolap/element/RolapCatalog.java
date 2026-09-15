@@ -123,6 +123,9 @@ import org.eclipse.daanse.rolap.mapping.model.provider.util.CwmHelper;
 import org.eclipse.daanse.cwm.model.cwm.foundation.businessinformation.util.Descriptions;
 import org.eclipse.daanse.cwm.model.cwm.objectmodel.core.util.Packages;
 import org.eclipse.daanse.cwm.model.cwm.resource.relational.Schema;
+import org.eclipse.daanse.olap.element.db.DatabaseColumnImpl;
+import org.eclipse.daanse.olap.element.db.DatabaseSchemaImpl;
+import org.eclipse.daanse.olap.element.db.DatabaseTableImpl;
 /**
  * A RolapCatalog is a collection of {@link RolapCube}s and shared
  * {@link RolapDimension}s. It is shared betweeen {@link Connection}s. It
@@ -159,11 +162,11 @@ public class RolapCatalog implements Catalog {
 	 */
 	private final Map<org.eclipse.daanse.rolap.mapping.model.olap.cube.Cube, RolapCube> mapMappingToRolapCube = new LinkedHashMap<>();
 
-	private final Map<org.eclipse.daanse.cwm.model.cwm.resource.relational.Schema, RolapDatabaseSchema> mapMappingToRolapDatabaseSchema = new HashMap<>();
+	private final Map<org.eclipse.daanse.cwm.model.cwm.resource.relational.Schema, DatabaseSchemaImpl> mapMappingToRolapDatabaseSchema = new HashMap<>();
 
-	private final Map<org.eclipse.daanse.cwm.model.cwm.resource.relational.NamedColumnSet, RolapDatabaseTable> mapMappingToRolapDatabaseTable = new HashMap<>();
+	private final Map<org.eclipse.daanse.cwm.model.cwm.resource.relational.NamedColumnSet, DatabaseTableImpl> mapMappingToRolapDatabaseTable = new HashMap<>();
 
-	private final Map<org.eclipse.daanse.cwm.model.cwm.resource.relational.Column, RolapDatabaseColumn> mapMappingToRolapDatabaseColumn = new HashMap<>();
+	private final Map<org.eclipse.daanse.cwm.model.cwm.resource.relational.Column, DatabaseColumnImpl> mapMappingToRolapDatabaseColumn = new HashMap<>();
 
 	/**
 	 * Maps {@link String shared hierarchy name} to {@link MemberReader}. Shared
@@ -177,7 +180,7 @@ public class RolapCatalog implements Catalog {
 	 */
 	private final Map<org.eclipse.daanse.rolap.mapping.model.olap.dimension.Dimension, RolapHierarchy> mapSharedHierarchyNameToHierarchy = new HashMap<>();
 
-	private List<RolapDatabaseSchema> rolapDbSchemas = new ArrayList<>();
+	private List<DatabaseSchemaImpl> rolapDbSchemas = new ArrayList<>();
 
 	/**
 	 * The default role for connections to this schema.
@@ -526,18 +529,18 @@ public class RolapCatalog implements Catalog {
 		}
 
 	    for (org.eclipse.daanse.cwm.model.cwm.resource.relational.Schema dbSchemaMapping : Packages.available(mappingCatalog2, Schema.class)) {
-	        RolapDatabaseSchema rolapDbSchema = new RolapDatabaseSchema();
+	        DatabaseSchemaImpl rolapDbSchema = new DatabaseSchemaImpl();
 	        List<DatabaseTable> rolapDbTables = new ArrayList<>();
 	        rolapDbSchema.setName(dbSchemaMapping.getName());
 
 	        for (org.eclipse.daanse.cwm.model.cwm.resource.relational.NamedColumnSet table : (Iterable<org.eclipse.daanse.cwm.model.cwm.resource.relational.NamedColumnSet>) Namespaces
 	                .ownedElementStream(dbSchemaMapping, org.eclipse.daanse.cwm.model.cwm.resource.relational.NamedColumnSet.class)::iterator) {
-	            RolapDatabaseTable rolapDbTable = new RolapDatabaseTable();
+	            DatabaseTableImpl rolapDbTable = new DatabaseTableImpl();
 	            List<DatabaseColumn> rolapDbColumns = new ArrayList<>();
 	            rolapDbTable.setName(table.getName());
 
 	            for (org.eclipse.daanse.cwm.model.cwm.resource.relational.Column column : ColumnSets.columns(table)) {
-	                RolapDatabaseColumn rolapDbColumn = new RolapDatabaseColumn();
+	                DatabaseColumnImpl rolapDbColumn = new DatabaseColumnImpl();
 	                rolapDbColumn.setName(column.getName());
 	                rolapDbColumn.setType(column.getType() != null ? DataTypeJdbc.fromValue(column.getType().getName()) : null);
 	                org.eclipse.daanse.cwm.model.cwm.resource.relational.SQLSimpleType _st = column.getType() instanceof org.eclipse.daanse.cwm.model.cwm.resource.relational.SQLSimpleType _s ? _s : null;
@@ -647,7 +650,7 @@ public class RolapCatalog implements Catalog {
 	}
 
 	public void handleDatabaseSchemaGrant(RoleImpl role, org.eclipse.daanse.rolap.mapping.model.access.database.AccessDatabaseSchemaGrant databaseSchemaGrant) {
-        RolapDatabaseSchema databaseSchema = lookupDatabaseSchema(databaseSchemaGrant.getDatabaseSchema());
+        DatabaseSchemaImpl databaseSchema = lookupDatabaseSchema(databaseSchemaGrant.getDatabaseSchema());
         if (databaseSchema == null) {
             throw Util.newError(
                     new StringBuilder("Unknown databaseSchema '").append(databaseSchemaGrant.getDatabaseSchema().getName()).append("'").toString());
@@ -659,7 +662,7 @@ public class RolapCatalog implements Catalog {
     }
 
     private void handleTableGrant(RoleImpl role, org.eclipse.daanse.rolap.mapping.model.access.database.AccessTableGrant tableGrant) {
-        RolapDatabaseTable table = lookupTable(tableGrant.getTable());
+        DatabaseTableImpl table = lookupTable(tableGrant.getTable());
         if (table == null) {
             throw Util.newError(
                     new StringBuilder("Unknown table '").append(tableGrant.getTable().getName()).append("'").toString());
@@ -671,7 +674,7 @@ public class RolapCatalog implements Catalog {
     }
 
     private void handleColumnGrant(RoleImpl role, org.eclipse.daanse.rolap.mapping.model.access.database.AccessColumnGrant columnGrant) {
-        RolapDatabaseColumn column = lookupColumn(columnGrant.getColumn());
+        DatabaseColumnImpl column = lookupColumn(columnGrant.getColumn());
         if (column == null) {
             throw Util.newError(
                     new StringBuilder("Unknown column '").append(columnGrant.getColumn().getName()).append("'").toString());
@@ -687,7 +690,7 @@ public class RolapCatalog implements Catalog {
         throw Util.newError(new StringBuilder("Bad value access='").append(accessString).append("'").toString());
     }
 
-    private RolapDatabaseColumn lookupColumn(org.eclipse.daanse.cwm.model.cwm.resource.relational.Column column) {
+    private DatabaseColumnImpl lookupColumn(org.eclipse.daanse.cwm.model.cwm.resource.relational.Column column) {
         return mapMappingToRolapDatabaseColumn.get(column);
     }
 
@@ -699,7 +702,7 @@ public class RolapCatalog implements Catalog {
         throw Util.newError(new StringBuilder("Bad value access='").append(accessString).append("'").toString());
     }
 
-    private RolapDatabaseTable lookupTable(org.eclipse.daanse.cwm.model.cwm.resource.relational.NamedColumnSet table) {
+    private DatabaseTableImpl lookupTable(org.eclipse.daanse.cwm.model.cwm.resource.relational.NamedColumnSet table) {
         return mapMappingToRolapDatabaseTable.get(table);
     }
 
@@ -711,7 +714,7 @@ public class RolapCatalog implements Catalog {
         throw Util.newError(new StringBuilder("Bad value access='").append(accessString).append("'").toString());
     }
 
-    private RolapDatabaseSchema lookupDatabaseSchema(org.eclipse.daanse.cwm.model.cwm.resource.relational.Schema databaseSchema) {
+    private DatabaseSchemaImpl lookupDatabaseSchema(org.eclipse.daanse.cwm.model.cwm.resource.relational.Schema databaseSchema) {
         return mapMappingToRolapDatabaseSchema.get(databaseSchema);
     }
 

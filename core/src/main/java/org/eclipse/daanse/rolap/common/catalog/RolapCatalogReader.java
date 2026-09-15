@@ -88,8 +88,8 @@ import org.eclipse.daanse.rolap.common.sql.MemberChildrenConstraint;
 import org.eclipse.daanse.rolap.common.sql.TupleConstraint;
 import org.eclipse.daanse.rolap.element.RolapCatalog;
 import org.eclipse.daanse.rolap.element.RolapCubeHierarchy;
-import org.eclipse.daanse.rolap.element.RolapDatabaseSchema;
-import org.eclipse.daanse.rolap.element.RolapDatabaseTable;
+import org.eclipse.daanse.olap.element.db.DatabaseSchemaImpl;
+import org.eclipse.daanse.olap.element.db.DatabaseTableImpl;
 import org.eclipse.daanse.rolap.element.RolapHierarchy;
 import org.eclipse.daanse.rolap.element.RolapLevel;
 import org.slf4j.Logger;
@@ -755,7 +755,7 @@ public class RolapCatalogReader
         if (AccessDatabaseSchema.ALL.equals(access)) {
             return ds;
         }
-        RolapDatabaseSchema rolapDbSchema = new RolapDatabaseSchema();
+        DatabaseSchemaImpl rolapDbSchema = new DatabaseSchemaImpl();
         rolapDbSchema.setName(ds.getName());
         List<DatabaseTable> rolapDbTables = new ArrayList<>();
         for (DatabaseTable t : ds.getDbTables()) {
@@ -764,7 +764,7 @@ public class RolapCatalogReader
                 rolapDbTables.add(t);
             }
             if (AccessDatabaseTable.CUSTOM.equals(accessDatabaseTable)) {
-                RolapDatabaseTable rolapDbTable = new RolapDatabaseTable();
+                DatabaseTableImpl rolapDbTable = new DatabaseTableImpl();
                 rolapDbTable.setName(t.getName());
                 rolapDbTable.setDescription(t.getDescription());
                 List<DatabaseColumn> rolapDbColumns = new ArrayList<>();
