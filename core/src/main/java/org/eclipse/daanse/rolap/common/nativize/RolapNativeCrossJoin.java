@@ -126,7 +126,7 @@ public class RolapNativeCrossJoin extends RolapNativeSet {
     }
 
     @Override
-	NativeEvaluator createEvaluator(
+	protected NativeEvaluator createEvaluator(
         RolapEvaluator evaluator,
         FunctionDefinition fun,
         Expression[] args, final boolean enableNativeFilter)

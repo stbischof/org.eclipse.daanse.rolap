@@ -32,7 +32,7 @@ import org.eclipse.daanse.olap.api.element.Dimension;
 import org.eclipse.daanse.olap.api.element.Hierarchy;
 import org.eclipse.daanse.olap.api.element.Level;
 import org.eclipse.daanse.olap.common.ConfigConstants;
-import org.eclipse.daanse.rolap.common.nativize.RolapNative;
+import org.eclipse.daanse.olap.evaluator.NativeEvaluatorFactory;
 import org.eclipse.daanse.rolap.common.nativize.RolapNativeRegistry;
 import org.eclipse.daanse.rolap.element.RolapCatalog;
 import org.eclipse.daanse.rolap.mapping.instance.api.CatalogTestInstance;
@@ -51,23 +51,23 @@ class NativeCrossJoinActivationTest {
 
     private static final String CATALOG = "complex.school";
 
-    private static final class CountingListener implements RolapNative.Listener {
+    private static final class CountingListener implements NativeEvaluatorFactory.Listener {
         final AtomicInteger found = new AtomicInteger();
         final AtomicInteger sql = new AtomicInteger();
         final AtomicInteger cacheHits = new AtomicInteger();
 
         @Override
-        public void foundEvaluator(RolapNative.NativeEvent e) {
+        public void foundEvaluator(NativeEvaluatorFactory.NativeEvent e) {
             found.incrementAndGet();
         }
 
         @Override
-        public void foundInCache(RolapNative.TupleEvent e) {
+        public void foundInCache(NativeEvaluatorFactory.TupleEvent e) {
             cacheHits.incrementAndGet();
         }
 
         @Override
-        public void executingSql(RolapNative.TupleEvent e) {
+        public void executingSql(NativeEvaluatorFactory.TupleEvent e) {
             sql.incrementAndGet();
         }
     }

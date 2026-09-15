@@ -362,7 +362,7 @@ protected boolean restrictMemberTypes() {
   }
 
   @Override
-NativeEvaluator createEvaluator( RolapEvaluator evaluator, FunctionDefinition fun, Expression[] args, final boolean enableNativeFilter ) {
+protected NativeEvaluator createEvaluator( RolapEvaluator evaluator, FunctionDefinition fun, Expression[] args, final boolean enableNativeFilter ) {
     if ( !isEnabled() ) {
       return null;
     }

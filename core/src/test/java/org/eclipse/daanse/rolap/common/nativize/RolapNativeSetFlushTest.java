@@ -41,7 +41,7 @@ class RolapNativeSetFlushTest {
         }
 
         @Override
-        org.eclipse.daanse.olap.api.evaluator.NativeEvaluator createEvaluator(
+        protected org.eclipse.daanse.olap.api.evaluator.NativeEvaluator createEvaluator(
                 org.eclipse.daanse.rolap.common.evaluator.RolapEvaluator evaluator,
                 org.eclipse.daanse.olap.api.function.FunctionDefinition fun,
                 org.eclipse.daanse.olap.api.query.component.Expression[] args,
