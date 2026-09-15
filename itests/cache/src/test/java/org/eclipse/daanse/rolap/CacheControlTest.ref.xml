@@ -162,8 +162,9 @@ Axes:[
     {time_by_day.quarter=(*)}
     {time_by_day.the_year=(*)}]
 Excluded Regions:[
+  Box{
     {time_by_day.quarter=('Q1')}
-    {time_by_day.the_year=('1997')}]
+    {time_by_day.the_year=('1997')}}]
 Compound Predicates:[]
 
 *Segment Header
@@ -176,8 +177,9 @@ Axes:[
     {time_by_day.quarter=(*)}
     {time_by_day.the_year=(*)}]
 Excluded Regions:[
+  Box{
     {time_by_day.quarter=('Q1')}
-    {time_by_day.the_year=('1997')}]
+    {time_by_day.the_year=('1997')}}]
 Compound Predicates:[]
 
 *Segment Header
@@ -188,7 +190,8 @@ Axes:[
     {product_class.product_family=(*)}
     {time_by_day.the_year=(*)}]
 Excluded Regions:[
-    {time_by_day.the_year=('1997')}]
+  Box{
+    {time_by_day.the_year=('1997')}}]
 Compound Predicates:[]
 
 
@@ -205,8 +208,9 @@ Axes:[
     {time_by_day.quarter=(*)}
     {time_by_day.the_year=(*)}]
 Excluded Regions:[
+  Box{
     {time_by_day.quarter=('Q1')}
-    {time_by_day.the_year=('1997')}]
+    {time_by_day.the_year=('1997')}}]
 Compound Predicates:[]
 
 *Segment Header
@@ -219,8 +223,9 @@ Axes:[
     {time_by_day.quarter=(*)}
     {time_by_day.the_year=(*)}]
 Excluded Regions:[
+  Box{
     {time_by_day.quarter=('Q1')}
-    {time_by_day.the_year=('1997')}]
+    {time_by_day.the_year=('1997')}}]
 Compound Predicates:[]
 
 *Segment Header
@@ -231,7 +236,8 @@ Axes:[
     {product_class.product_family=(*)}
     {time_by_day.the_year=(*)}]
 Excluded Regions:[
-    {time_by_day.the_year=('1997')}]
+  Box{
+    {time_by_day.the_year=('1997')}}]
 Compound Predicates:[]
 
 
@@ -245,8 +251,9 @@ Axes:[
     {time_by_day.quarter=(*)}
     {time_by_day.the_year=(*)}]
 Excluded Regions:[
+  Box{
     {time_by_day.quarter=('Q1')}
-    {time_by_day.the_year=('1997')}]
+    {time_by_day.the_year=('1997')}}]
 Compound Predicates:[]
 
 *Segment Header
@@ -259,8 +266,9 @@ Axes:[
     {time_by_day.quarter=(*)}
     {time_by_day.the_year=(*)}]
 Excluded Regions:[
+  Box{
     {time_by_day.quarter=('Q1')}
-    {time_by_day.the_year=('1997')}]
+    {time_by_day.the_year=('1997')}}]
 Compound Predicates:[]
 
 *Segment Header
@@ -271,7 +279,8 @@ Axes:[
     {product_class.product_family=(*)}
     {time_by_day.the_year=(*)}]
 Excluded Regions:[
-    {time_by_day.the_year=('1997')}]
+  Box{
+    {time_by_day.the_year=('1997')}}]
 Compound Predicates:[]
 
 
@@ -288,8 +297,9 @@ Axes:[
     {time_by_day.quarter=(*)}
     {time_by_day.the_year=(*)}]
 Excluded Regions:[
+  Box{
     {time_by_day.quarter=('Q1')}
-    {time_by_day.the_year=('1997')}]
+    {time_by_day.the_year=('1997')}}]
 Compound Predicates:[]
 
 *Segment Header
@@ -302,8 +312,9 @@ Axes:[
     {time_by_day.quarter=(*)}
     {time_by_day.the_year=(*)}]
 Excluded Regions:[
+  Box{
     {time_by_day.quarter=('Q1')}
-    {time_by_day.the_year=('1997')}]
+    {time_by_day.the_year=('1997')}}]
 Compound Predicates:[]
 
 *Segment Header
@@ -314,7 +325,8 @@ Axes:[
     {product_class.product_family=(*)}
     {time_by_day.the_year=(*)}]
 Excluded Regions:[
-    {time_by_day.the_year=('1997')}]
+  Box{
+    {time_by_day.the_year=('1997')}}]
 Compound Predicates:[]
 
 
@@ -328,8 +340,9 @@ Axes:[
     {time_by_day.quarter=(*)}
     {time_by_day.the_year=(*)}]
 Excluded Regions:[
+  Box{
     {time_by_day.quarter=('Q1')}
-    {time_by_day.the_year=('1997')}]
+    {time_by_day.the_year=('1997')}}]
 Compound Predicates:[]
 
 *Segment Header
@@ -342,8 +355,9 @@ Axes:[
     {time_by_day.quarter=(*)}
     {time_by_day.the_year=(*)}]
 Excluded Regions:[
+  Box{
     {time_by_day.quarter=('Q1')}
-    {time_by_day.the_year=('1997')}]
+    {time_by_day.the_year=('1997')}}]
 Compound Predicates:[]
 
 *Segment Header
@@ -354,7 +368,8 @@ Axes:[
     {product_class.product_family=(*)}
     {time_by_day.the_year=(*)}]
 Excluded Regions:[
-    {time_by_day.the_year=('1997')}]
+  Box{
+    {time_by_day.the_year=('1997')}}]
 Compound Predicates:[]
 
 
@@ -368,25 +383,15 @@ Cube:[Sales]
 Measure:[Unit Sales]
 Axes:[
     {product_class.product_family=(*)}
-    {time_by_day.quarter=(*)}
-    {time_by_day.the_year=(*)}]
-Excluded Regions:[
-    {time_by_day.quarter=('Q1')}
-    {time_by_day.the_year=('1997')}]
-Compound Predicates:[]
-
-*Segment Header
-Schema:[FoodMart]
-Cube:[Sales]
-Measure:[Unit Sales]
-Axes:[
-    {product_class.product_family=(*)}
     {time_by_day.month_of_year=(*)}
     {time_by_day.quarter=(*)}
     {time_by_day.the_year=(*)}]
 Excluded Regions:[
+  Box{
+    {time_by_day.the_year=('1997')}}
+  Box{
     {time_by_day.quarter=('Q1')}
-    {time_by_day.the_year=('1997')}]
+    {time_by_day.the_year=('1997')}}]
 Compound Predicates:[]
 
 *Segment Header
@@ -397,11 +402,10 @@ Axes:[
     {product_class.product_family=(*)}
     {time_by_day.the_year=(*)}]
 Excluded Regions:[
-    {time_by_day.the_year=('1997')}]
+  Box{
+    {time_by_day.the_year=('1997')}}]
 Compound Predicates:[]
 
-
-discard segment - it cannot be constrained and maintain consistency:
 *Segment Header
 Schema:[FoodMart]
 Cube:[Sales]
@@ -411,36 +415,13 @@ Axes:[
     {time_by_day.quarter=(*)}
     {time_by_day.the_year=(*)}]
 Excluded Regions:[
+  Box{
+    {time_by_day.the_year=('1997')}}
+  Box{
     {time_by_day.quarter=('Q1')}
-    {time_by_day.the_year=('1997')}]
+    {time_by_day.the_year=('1997')}}]
 Compound Predicates:[]
 
-discard segment - it cannot be constrained and maintain consistency:
-*Segment Header
-Schema:[FoodMart]
-Cube:[Sales]
-Measure:[Unit Sales]
-Axes:[
-    {product_class.product_family=(*)}
-    {time_by_day.month_of_year=(*)}
-    {time_by_day.quarter=(*)}
-    {time_by_day.the_year=(*)}]
-Excluded Regions:[
-    {time_by_day.quarter=('Q1')}
-    {time_by_day.the_year=('1997')}]
-Compound Predicates:[]
-
-discard segment - it cannot be constrained and maintain consistency:
-*Segment Header
-Schema:[FoodMart]
-Cube:[Sales]
-Measure:[Unit Sales]
-Axes:[
-    {product_class.product_family=(*)}
-    {time_by_day.the_year=(*)}]
-Excluded Regions:[
-    {time_by_day.the_year=('1997')}]
-Compound Predicates:[]
 
 Cache state after flush:
 
@@ -496,9 +477,10 @@ Axes:[
     {time_by_day.quarter=(*)}
     {time_by_day.the_year=(*)}]
 Excluded Regions:[
+  Box{
     {product_class.product_family=('Drink')}
     {time_by_day.quarter=('Q1')}
-    {time_by_day.the_year=('1997')}]
+    {time_by_day.the_year=('1997')}}]
 Compound Predicates:[]
 
 *Segment Header
@@ -509,8 +491,9 @@ Axes:[
     {product_class.product_family=(*)}
     {time_by_day.the_year=(*)}]
 Excluded Regions:[
+  Box{
     {product_class.product_family=('Drink')}
-    {time_by_day.the_year=('1997')}]
+    {time_by_day.the_year=('1997')}}]
 Compound Predicates:[]
 
 *Segment Header
@@ -523,9 +506,10 @@ Axes:[
     {time_by_day.quarter=(*)}
     {time_by_day.the_year=(*)}]
 Excluded Regions:[
+  Box{
     {product_class.product_family=('Drink')}
     {time_by_day.quarter=('Q1')}
-    {time_by_day.the_year=('1997')}]
+    {time_by_day.the_year=('1997')}}]
 Compound Predicates:[]
 
 
@@ -537,10 +521,22 @@ Schema:[FoodMart]
 Cube:[Sales]
 Measure:[Unit Sales]
 Axes:[
-    {product_class.product_family=(*)}
-    {time_by_day.quarter=(*)}
-    {time_by_day.the_year=(*)}]
+    {product_class.product_family=('Drink')}
+    {time_by_day.the_year=('1997')}]
 Excluded Regions:[]
+Compound Predicates:[]
+
+*Segment Header
+Schema:[FoodMart]
+Cube:[Sales]
+Measure:[Unit Sales]
+Axes:[
+    {product_class.product_family=(*)}
+    {time_by_day.the_year=(*)}]
+Excluded Regions:[
+  Box{
+    {product_class.product_family=('Drink')}
+    {time_by_day.the_year=('1997')}}]
 Compound Predicates:[]
 
 *Segment Header
@@ -552,18 +548,20 @@ Axes:[
     {time_by_day.quarter=(*)}
     {time_by_day.the_year=(*)}]
 Excluded Regions:[
+  Box{
+    {product_class.product_family=('Drink')}
+    {time_by_day.quarter=('Q1')}
+    {time_by_day.the_year=('1997')}}]
+Compound Predicates:[]
+
+*Segment Header
+Schema:[FoodMart]
+Cube:[Sales]
+Measure:[Unit Sales]
+Axes:[
     {product_class.product_family=('Drink')}
     {time_by_day.quarter=('Q1')}
     {time_by_day.the_year=('1997')}]
-Compound Predicates:[]
-
-*Segment Header
-Schema:[FoodMart]
-Cube:[Sales]
-Measure:[Unit Sales]
-Axes:[
-    {product_class.product_family=(*)}
-    {time_by_day.the_year=(*)}]
 Excluded Regions:[]
 Compound Predicates:[]
 
@@ -572,11 +570,11 @@ Schema:[FoodMart]
 Cube:[Sales]
 Measure:[Unit Sales]
 Axes:[
-    {product_class.product_family=(*)}
-    {time_by_day.the_year=(*)}]
-Excluded Regions:[
     {product_class.product_family=('Drink')}
+    {time_by_day.month_of_year=('1','2','3')}
+    {time_by_day.quarter=('Q1')}
     {time_by_day.the_year=('1997')}]
+Excluded Regions:[]
 Compound Predicates:[]
 
 *Segment Header
@@ -589,21 +587,10 @@ Axes:[
     {time_by_day.quarter=(*)}
     {time_by_day.the_year=(*)}]
 Excluded Regions:[
+  Box{
     {product_class.product_family=('Drink')}
     {time_by_day.quarter=('Q1')}
-    {time_by_day.the_year=('1997')}]
-Compound Predicates:[]
-
-*Segment Header
-Schema:[FoodMart]
-Cube:[Sales]
-Measure:[Unit Sales]
-Axes:[
-    {product_class.product_family=(*)}
-    {time_by_day.month_of_year=(*)}
-    {time_by_day.quarter=(*)}
-    {time_by_day.the_year=(*)}]
-Excluded Regions:[]
+    {time_by_day.the_year=('1997')}}]
 Compound Predicates:[]
 
 ]]>

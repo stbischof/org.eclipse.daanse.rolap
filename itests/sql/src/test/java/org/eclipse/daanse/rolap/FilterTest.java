@@ -1107,10 +1107,8 @@ class FilterTest extends BatchTestCase {
   @RolapConfig(key = ConfigConstants.EXPAND_NON_NATIVE, value = "false", type = Boolean.class)
   @RolapConfig(key = ConfigConstants.ENABLE_NATIVE_FILTER, value = "true", type = Boolean.class)
   public void  testNativeFilterWithNullMeasure(Context<?> context) {
-    // Currently this behaves differently from the non-native evaluation.
-    // Get a fresh connection; Otherwise the mondrian property setting
-    // is not refreshed for this parameter.
-    //final TestContext<?> context = getTestContext().withFreshConnection();
+    // The condition is true for a store without fact rows, so the native
+    // filter stays on the calc engine and returns what the non-native one does.
     Connection connection = context.getConnectionWithDefaultRole();
     try {
       MdxAssert.assertThatQuery(connection,
@@ -1124,17 +1122,32 @@ class FilterTest extends BatchTestCase {
           + "{[Measures].[Grocery Sqft]}\n"
           + "Axis #2:\n"
           + "{[Store].[Store].[Mexico].[DF].[Mexico City].[Store 9]}\n"
+          + "{[Store].[Store].[Mexico].[DF].[San Andres].[Store 21]}\n"
           + "{[Store].[Store].[Mexico].[Yucatan].[Merida].[Store 8]}\n"
+          + "{[Store].[Store].[USA].[CA].[Alameda].[HQ]}\n"
+          + "{[Store].[Store].[USA].[CA].[San Diego].[Store 24]}\n"
           + "{[Store].[Store].[USA].[WA].[Bremerton].[Store 3]}\n"
           + "{[Store].[Store].[USA].[WA].[Tacoma].[Store 17]}\n"
+          + "{[Store].[Store].[USA].[WA].[Walla Walla].[Store 22]}\n"
+          + "{[Store].[Store].[USA].[WA].[Yakima].[Store 23]}\n"
           + "Row #0: 36,509\n"
           + "Row #0: 22,450\n"
-          + "Row #1: 30,797\n"
-          + "Row #1: 20,141\n"
-          + "Row #2: 39,696\n"
-          + "Row #2: 24,390\n"
-          + "Row #3: 33,858\n"
-          + "Row #3: 22,123\n" );
+          + "Row #1: \n"
+          + "Row #1: \n"
+          + "Row #2: 30,797\n"
+          + "Row #2: 20,141\n"
+          + "Row #3: \n"
+          + "Row #3: \n"
+          + "Row #4: \n"
+          + "Row #4: \n"
+          + "Row #5: 39,696\n"
+          + "Row #5: 24,390\n"
+          + "Row #6: 33,858\n"
+          + "Row #6: 22,123\n"
+          + "Row #7: \n"
+          + "Row #7: \n"
+          + "Row #8: \n"
+          + "Row #8: \n" );
     } finally {
       connection.close();
     }
