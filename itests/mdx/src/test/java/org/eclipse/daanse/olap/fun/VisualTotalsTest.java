@@ -49,7 +49,7 @@ import org.eclipse.daanse.olap.api.result.Position;
 import org.eclipse.daanse.olap.common.ConfigConstants;
 import org.eclipse.daanse.olap.impl.CellImpl;
 import org.eclipse.daanse.olap.impl.CoordinateIterator;
-import org.eclipse.daanse.rolap.function.def.visualtotals.VisualTotalsFunDef;
+import org.eclipse.daanse.olap.function.def.visualtotals.VisualTotalsFunDef;
 import org.eclipse.daanse.rolap.mapping.instance.emf.complex.foodmart.FoodmartTestInstance;
 import org.eclipse.daanse.rolap.testkit.assertions.MdxAssert;
 import org.eclipse.daanse.rolap.testkit.junit.api.RolapContextTest;

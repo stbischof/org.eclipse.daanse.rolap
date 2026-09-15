@@ -126,6 +126,8 @@ import org.slf4j.LoggerFactory;
 import org.eclipse.daanse.rolap.mapping.model.database.source.SourceFactory;
 import org.eclipse.daanse.rolap.mapping.model.provider.util.CwmHelper;
 import org.eclipse.daanse.cwm.model.cwm.foundation.businessinformation.util.Descriptions;
+import org.eclipse.daanse.olap.result.CellFormatterValueFormatter;
+import org.eclipse.daanse.olap.result.ValueFormatter;
 /**
  * RolapHierarchy implements {@link Hierarchy} for a ROLAP database.
  *
@@ -1504,7 +1506,7 @@ public class RolapHierarchy extends HierarchyBase {
         extends RolapCalculatedMember
         implements RolapMeasure
     {
-        private RolapResult.ValueFormatter cellFormatter;
+        private ValueFormatter cellFormatter;
 
         public RolapCalculatedMeasure(
             RolapMember parent, RolapLevel level, String name, Formula formula)
@@ -1540,14 +1542,14 @@ public class RolapHierarchy extends HierarchyBase {
         }
 
         @Override
-		public RolapResult.ValueFormatter getFormatter() {
+		public ValueFormatter getFormatter() {
             return cellFormatter;
         }
 
         private void setCellFormatter(CellFormatter cellFormatter) {
             if (cellFormatter != null) {
                 this.cellFormatter =
-                    new RolapResult.CellFormatterValueFormatter(cellFormatter);
+                    new CellFormatterValueFormatter(cellFormatter);
             }
         }
     }
@@ -1818,4 +1820,12 @@ public class RolapHierarchy extends HierarchyBase {
             throw new UnsupportedOperationException();
         }
     }
+
+	/** The evaluator casts context members to RolapMember, so the visual total member is a RolapMemberBase. */
+	@Override
+	public org.eclipse.daanse.olap.api.element.VisualTotalMember createVisualTotalMember(Member member, String name,
+			String caption, Expression exp) {
+		return new VisualTotalMember(member, name, caption, exp);
+	}
+
 }

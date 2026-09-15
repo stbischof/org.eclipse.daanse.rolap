@@ -37,7 +37,8 @@ import org.eclipse.daanse.olap.query.component.UnresolvedFunCallImpl;
  * its value is a calculation computed by aggregating all of the
  *     members which occur following it in the list
  */
-public class VisualTotalMember  extends RolapMemberBase {
+public class VisualTotalMember extends RolapMemberBase
+        implements org.eclipse.daanse.olap.api.element.VisualTotalMember {
     final Member member;
     private Expression exp;
 
@@ -109,10 +110,12 @@ public class VisualTotalMember  extends RolapMemberBase {
         return exp;
     }
 
+    @Override
     public void setExpression(Expression exp) {
         this.exp = exp;
     }
 
+    @Override
     public void setExpression(
         Evaluator evaluator,
         List<Member> childMembers)
@@ -153,6 +156,7 @@ public class VisualTotalMember  extends RolapMemberBase {
         throw new UnsupportedOperationException();
     }
 
+    @Override
     public Member getMember() {
         return member;
     }
