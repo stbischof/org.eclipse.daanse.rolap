@@ -32,6 +32,7 @@ import java.util.Map;
 
 import org.eclipse.daanse.olap.api.calc.tuple.TupleIterable;
 import org.eclipse.daanse.olap.api.element.Member;
+import org.eclipse.daanse.olap.api.element.VisualTotalMember;
 import org.eclipse.daanse.olap.api.evaluator.Evaluator;
 import org.eclipse.daanse.olap.api.query.component.Expression;
 import org.eclipse.daanse.olap.api.type.SetType;
@@ -54,9 +55,8 @@ import org.eclipse.daanse.rolap.element.RolapCubeLevel;
 import org.eclipse.daanse.rolap.element.RolapCubeMember;
 import org.eclipse.daanse.rolap.element.RolapMeasure;
 import org.eclipse.daanse.rolap.common.constraint.CalculatedMemberExpander;
-import org.eclipse.daanse.rolap.common.constraint.TupleConstraintStruct;
+import org.eclipse.daanse.olap.calc.base.util.TupleConstraintStruct;
 import org.eclipse.daanse.rolap.element.RolapStoredMeasure;
-import org.eclipse.daanse.rolap.element.VisualTotalMember;
 
 /**
  * Constructs a Pair of BitKey and StarPredicate for a tuple list and

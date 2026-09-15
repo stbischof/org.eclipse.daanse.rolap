@@ -13,16 +13,9 @@
 package org.eclipse.daanse.rolap.testkit.core;
 
 import org.eclipse.daanse.olap.api.function.FunctionService;
-import org.eclipse.daanse.rolap.function.def.intersect.IntersectResolver;
-import org.eclipse.daanse.rolap.function.def.visualtotals.VisualTotalsResolver;
 
 /**
- * Thin wrapper around
- * {@link org.eclipse.daanse.olap.function.services.standard.StandardFunctions}
- * that additionally registers the two ROLAP-specific resolvers
- * ({@code IntersectResolver}, {@code VisualTotalsResolver}) that live in
- * {@code rolap.core} and are therefore not visible to the olap-level standard
- * registry.
+ * The standard function registry, as the test kit hands it out.
  */
 public final class FunctionServices {
 
@@ -31,8 +24,6 @@ public final class FunctionServices {
 
     public static FunctionService standard() {
         FunctionService svc = org.eclipse.daanse.olap.function.services.standard.StandardFunctions.standard();
-        svc.addResolver(new IntersectResolver());
-        svc.addResolver(new VisualTotalsResolver());
         return svc;
     }
 }
