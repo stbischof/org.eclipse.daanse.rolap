@@ -663,10 +663,10 @@ public abstract class RolapNativeSet extends RolapNative {
                 context, partialResult, newPartialResult );
         }
 
-        if ( hierarchizeResult ) {
-          // The SQL order is dialect collation; the calc engine hierarchizes
-          // its lists in Java (case-insensitive sibling fallback when levels
-          // carry no ordinal) — sort the same way, BEFORE caching, so hits
+        if ( hierarchizeResult && !orderedByOrdinalColumns() ) {
+          // Without ordinal columns the SQL order is dialect collation; the
+          // calc engine hierarchizes its lists in Java (case-insensitive
+          // sibling fallback) — sort the same way, BEFORE caching, so hits
           // serve calc order too. Ranking evaluators (Top/BottomCount) keep
           // their SQL order instead.
           read = Sorter.hierarchizeTupleList( read, false );
@@ -733,6 +733,24 @@ public abstract class RolapNativeSet extends RolapNative {
         }
       }
       return filterInaccessibleTuples( result );
+    }
+
+    /**
+     * Whether a target level or one of its ancestors orders by ordinal
+     * columns. The SQL then already sorts by them, as the calc engine's
+     * member lists do; a Java re-sort would compare member ordinals, which
+     * a native read does not assign.
+     */
+    private boolean orderedByOrdinalColumns() {
+      for ( CrossJoinArg arg : args ) {
+        for ( RolapLevel level = arg.getLevel(); level != null;
+            level = (RolapLevel) level.getParentLevel() ) {
+          if ( level.hasOrdinalExp() ) {
+            return true;
+          }
+        }
+      }
+      return false;
     }
 
     /** The (deep) cache-key parts: constraint key, projection, limits, role. */
