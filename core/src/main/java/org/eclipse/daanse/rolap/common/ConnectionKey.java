@@ -22,7 +22,7 @@ import javax.sql.DataSource;
  * Session-scoped part of the catalog pool key. Each DataSource instance
  * gets a process-local UUID — collision-free across live pools and GC
  * reuse; cross-instance identity comes from the content fingerprint in
- * {@code RolapCatalogContentKey}. The aggregate scan properties are part
+ * {@code CatalogContentKey}. The aggregate scan properties are part
  * of the key because they filter the aggregate-table scan and thereby
  * shape the AggStar set of the loaded catalog.
  */

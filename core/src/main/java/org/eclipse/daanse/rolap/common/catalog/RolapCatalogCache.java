@@ -33,6 +33,7 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.Expiry;
 import com.github.benmanes.caffeine.cache.RemovalListener;
 import com.github.benmanes.caffeine.cache.stats.CacheStats;
+import org.eclipse.daanse.olap.catalog.CatalogContentKey;
 
 /**
  * Thread-safe pool of RolapCatalog instances on one Caffeine cache.
@@ -214,8 +215,8 @@ public class RolapCatalogCache implements CatalogCache {
     public RolapCatalog getOrCreateCatalog(org.eclipse.daanse.rolap.mapping.model.catalog.Catalog catalogMapping, final ConnectionProps connectionProps) {
 
         final boolean useCatalogCache = connectionProps.useCatalogCache();
-        final RolapCatalogContentKey catalogContentKey =
-                RolapCatalogContentKey.of(catalogMapping.getName(), context.getContentIdentitySha256());
+        final CatalogContentKey catalogContentKey =
+                CatalogContentKey.of(catalogMapping.getName(), context.getContentIdentitySha256());
         final ConnectionKey connectionKey = ConnectionKey.of(context.getDataSource(),
                 connectionProps.sessionId().orElse(null),
                 connectionProps.aggregateScanSchema().orElse(null),

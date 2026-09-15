@@ -30,6 +30,7 @@ import org.eclipse.daanse.rolap.common.result.RolapCell;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import org.eclipse.daanse.olap.writeback.Updateable;
 
 public final class UpdateabilityResolver {
 

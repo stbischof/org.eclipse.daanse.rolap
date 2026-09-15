@@ -20,6 +20,7 @@ import static org.mockito.Mockito.withSettings;
 
 import java.lang.ref.WeakReference;
 import java.util.UUID;
+import org.eclipse.daanse.olap.catalog.CatalogContentKey;
 
 import org.eclipse.daanse.olap.core.AbstractBasicContext;
 import org.eclipse.daanse.rolap.api.RolapContext;
@@ -36,7 +37,7 @@ import org.junit.jupiter.api.Test;
 class CatalogGcCleanupTest {
 
     private static final RolapCatalogKey KEY = new RolapCatalogKey(
-            new RolapCatalogContentKey("cat", "00".repeat(32)),
+            new CatalogContentKey("cat", "00".repeat(32)),
             new ConnectionKey(UUID.randomUUID(), null, null, null));
 
     @Test
