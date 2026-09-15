@@ -66,7 +66,7 @@ import org.eclipse.daanse.olap.api.result.Result;
 import org.eclipse.daanse.olap.api.result.Scenario;
 import org.eclipse.daanse.olap.calc.base.type.tuplebase.TupleCollections;
 import org.eclipse.daanse.olap.common.ExecuteDurationUtil;
-import org.eclipse.daanse.olap.common.ResultBase;
+import org.eclipse.daanse.olap.result.ResultBase;
 import org.eclipse.daanse.olap.common.Util;
 import org.eclipse.daanse.olap.connection.ConnectionBase;
 import org.eclipse.daanse.olap.core.AbstractBasicContext;
@@ -82,17 +82,17 @@ import org.eclipse.daanse.rolap.api.RolapContext;
 import org.eclipse.daanse.rolap.common.RolapUtil;
 import org.eclipse.daanse.rolap.common.catalog.RolapCatalogCache;
 import org.eclipse.daanse.rolap.common.catalog.RolapCatalogReader;
-import org.eclipse.daanse.rolap.common.result.RolapAxis;
+import org.eclipse.daanse.olap.result.AxisImpl;
 import org.eclipse.daanse.rolap.common.result.RolapCell;
 import org.eclipse.daanse.rolap.common.result.RolapResult;
-import org.eclipse.daanse.rolap.common.statement.InternalStatement;
-import org.eclipse.daanse.rolap.common.statement.ReentrantInternalStatement;
+import org.eclipse.daanse.olap.execution.InternalStatement;
+import org.eclipse.daanse.olap.execution.ReentrantInternalStatement;
 import org.eclipse.daanse.rolap.common.writeback.ScenarioImpl;
 import org.eclipse.daanse.rolap.element.RolapCatalog;
 import org.eclipse.daanse.rolap.element.RolapCube;
-import org.eclipse.daanse.rolap.util.FauxMemoryMonitor;
-import org.eclipse.daanse.rolap.util.MemoryMonitor;
-import org.eclipse.daanse.rolap.util.NotificationMemoryMonitor;
+import org.eclipse.daanse.olap.util.FauxMemoryMonitor;
+import org.eclipse.daanse.olap.util.MemoryMonitor;
+import org.eclipse.daanse.olap.util.NotificationMemoryMonitor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -496,7 +496,7 @@ public Context<?> getContext() {
       this.pos = new int[ axisCount ];
       this.slicerAxis = underlying.getSlicerAxis();
       TupleList tupleList =
-        ( (RolapAxis) underlying.getAxes()[ axis ] ).getTupleList();
+        ( (AxisImpl) underlying.getAxes()[ axis ] ).getTupleList();
 
       final TupleList filteredTupleList;
 
@@ -512,7 +512,7 @@ public Context<?> getContext() {
 			}
 		}
 
-      this.axes[ axis ] = new RolapAxis( filteredTupleList );
+      this.axes[ axis ] = new AxisImpl( filteredTupleList );
     }
 
     @Override

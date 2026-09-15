@@ -57,7 +57,7 @@ import org.eclipse.daanse.olap.api.result.Result;
 import org.eclipse.daanse.olap.calc.base.type.tuplebase.ArrayTupleList;
 import org.eclipse.daanse.olap.calc.base.type.tuplebase.UnaryTupleList;
 import org.eclipse.daanse.olap.common.ConfigConstants;
-import org.eclipse.daanse.olap.common.ResultBase;
+import org.eclipse.daanse.olap.result.ResultBase;
 import org.eclipse.daanse.olap.common.Util;
 import org.eclipse.daanse.olap.execution.ExecutionImpl;
 import org.eclipse.daanse.olap.function.def.aggregate.AggregateCalc;

@@ -66,7 +66,7 @@ import org.eclipse.daanse.rolap.api.aggmatch.AggregationMatchRulesSupplier;
 import org.eclipse.daanse.rolap.common.AbstractRolapContext;
 import org.eclipse.daanse.rolap.common.agg.AggregationManager;
 import org.eclipse.daanse.rolap.common.aggregator.AggregationFactoryImpl;
-import org.eclipse.daanse.rolap.common.catalog.ContentIdentity;
+import org.eclipse.daanse.olap.catalog.ContentIdentity;
 import org.eclipse.daanse.rolap.common.catalog.RolapCatalogCache;
 import org.eclipse.daanse.rolap.common.connection.ExternalRolapConnection;
 import org.eclipse.daanse.rolap.common.connection.InternalRolapConnection;
@@ -75,7 +75,7 @@ import org.eclipse.daanse.rolap.common.evaluator.RolapEvaluator;
 import org.eclipse.daanse.rolap.common.evaluator.RolapEvaluatorRoot;
 import org.eclipse.daanse.rolap.common.evaluator.RolapInterceptableEvaluator;
 import org.eclipse.daanse.rolap.common.result.RolapResult;
-import org.eclipse.daanse.rolap.common.result.RolapResultShepherd;
+import org.eclipse.daanse.olap.result.ResultShepherdImpl;
 import org.eclipse.daanse.rolap.core.api.BasicContextOCD;
 import org.eclipse.daanse.rolap.mapping.model.provider.CatalogMappingSupplier;
 import org.eclipse.daanse.sql.guard.api.SqlGuardFactory;
@@ -380,7 +380,7 @@ public class BasicContext extends AbstractRolapContext implements RolapContext {
             LOGGER.error(ERR_MSG_DIALECT_INIT, e);
         }
 
-        shepherd = new RolapResultShepherd(
+        shepherd = new ResultShepherdImpl(
                 getConfig().rolapConnectionShepherdThreadPollingInterval(),
                 getConfig().rolapConnectionShepherdThreadPollingIntervalUnit(),
                 getConfig().rolapConnectionShepherdNbThreads());
