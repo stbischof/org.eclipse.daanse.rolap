@@ -46,7 +46,10 @@ import org.eclipse.daanse.olap.api.element.HideMemberCondition;
 import org.eclipse.daanse.olap.api.element.Hierarchy;
 import org.eclipse.daanse.olap.api.element.Level;
 import org.eclipse.daanse.olap.api.element.Member;
+import org.eclipse.daanse.olap.api.evaluator.Evaluator;
 import org.eclipse.daanse.olap.api.evaluator.NativeEvaluator;
+import org.eclipse.daanse.olap.api.function.FunctionDefinition;
+import org.eclipse.daanse.olap.api.query.component.Expression;
 import org.eclipse.daanse.olap.calc.base.type.tuplebase.DelegatingTupleList;
 import org.eclipse.daanse.olap.common.DelegatingCatalogReader;
 import org.eclipse.daanse.olap.common.Util;
@@ -58,7 +61,8 @@ import org.eclipse.daanse.rolap.common.SqlTupleReader;
 import org.eclipse.daanse.rolap.common.TupleReader;
 import org.eclipse.daanse.rolap.common.TupleReader.MemberBuilder;
 import org.eclipse.daanse.rolap.common.aggmatcher.AggStar;
-import org.eclipse.daanse.rolap.common.cache.BoundedCache;
+import org.eclipse.daanse.olap.cache.BoundedCache;
+import org.eclipse.daanse.olap.evaluator.NativeEvaluatorFactory;
 import org.eclipse.daanse.rolap.common.constraint.MemberConstraintWriter;
 import org.eclipse.daanse.rolap.common.constraint.SqlContextConstraint;
 import org.eclipse.daanse.rolap.common.evaluator.RolapEvaluator;
@@ -96,7 +100,18 @@ import org.slf4j.LoggerFactory;
  * @author av
  * @since Nov 12, 2005
  */
-public abstract class RolapNativeSet extends RolapNative {
+public abstract class RolapNativeSet extends NativeEvaluatorFactory {
+
+    @Override
+    public final NativeEvaluator createEvaluator(Evaluator evaluator, FunctionDefinition fun, Expression[] args,
+            final boolean enableNativeFilter) {
+        return createEvaluator((RolapEvaluator) evaluator, fun, args, enableNativeFilter);
+    }
+
+    /** The relational form: the evaluator is the ROLAP one. */
+    protected abstract NativeEvaluator createEvaluator(RolapEvaluator evaluator, FunctionDefinition fun,
+            Expression[] args, final boolean enableNativeFilter);
+
   protected static final Logger LOGGER =
     LoggerFactory.getLogger( RolapNativeSet.class );
 

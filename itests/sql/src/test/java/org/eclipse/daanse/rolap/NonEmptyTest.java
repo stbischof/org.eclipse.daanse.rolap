@@ -58,9 +58,9 @@ import org.eclipse.daanse.rolap.common.connection.AbstractRolapConnection.NonEmp
 import org.eclipse.daanse.rolap.common.evaluator.RolapEvaluator;
 import org.eclipse.daanse.rolap.common.member.MemberCacheImpl;
 import org.eclipse.daanse.rolap.common.member.CachingMemberReader;
-import org.eclipse.daanse.rolap.common.nativize.RolapNative.Listener;
-import org.eclipse.daanse.rolap.common.nativize.RolapNative.NativeEvent;
-import org.eclipse.daanse.rolap.common.nativize.RolapNative.TupleEvent;
+import org.eclipse.daanse.olap.evaluator.NativeEvaluatorFactory.Listener;
+import org.eclipse.daanse.olap.evaluator.NativeEvaluatorFactory.NativeEvent;
+import org.eclipse.daanse.olap.evaluator.NativeEvaluatorFactory.TupleEvent;
 import org.eclipse.daanse.rolap.common.nativize.RolapNativeRegistry;
 import org.eclipse.daanse.rolap.common.result.RolapResult;
 import org.eclipse.daanse.rolap.common.sql.MemberChildrenConstraint;

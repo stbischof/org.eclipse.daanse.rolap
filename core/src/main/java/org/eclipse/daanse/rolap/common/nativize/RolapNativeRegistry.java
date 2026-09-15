@@ -34,19 +34,21 @@ import java.util.Map;
 import java.util.Set;
 
 import org.eclipse.daanse.olap.api.ContextConfig;
+import org.eclipse.daanse.olap.api.evaluator.Evaluator;
 import org.eclipse.daanse.olap.api.evaluator.NativeEvaluator;
 import org.eclipse.daanse.olap.api.function.FunctionDefinition;
 import org.eclipse.daanse.olap.api.query.component.Expression;
+import org.eclipse.daanse.olap.evaluator.NativeEvaluatorFactory;
 import org.eclipse.daanse.rolap.common.evaluator.RolapEvaluator;
 
 /**
- * Composite of {@link RolapNative}s. Uses chain of responsibility
- * to select the appropriate {@link RolapNative} evaluator. The evaluator
+ * Composite of {@link NativeEvaluatorFactory}s. Uses chain of responsibility
+ * to select the appropriate {@link NativeEvaluatorFactory} evaluator. The evaluator
  * map is frozen at construction, so every lookup is lock-free.
  */
-public class RolapNativeRegistry extends RolapNative {
+public class RolapNativeRegistry extends NativeEvaluatorFactory {
 
-    private final Map<String, RolapNative> nativeEvaluatorMap;
+    private final Map<String, NativeEvaluatorFactory> nativeEvaluatorMap;
 
     /**
      * The enable flags are read live from the config on every createEvaluator
@@ -55,7 +57,7 @@ public class RolapNativeRegistry extends RolapNative {
      */
     public RolapNativeRegistry(ContextConfig config, int nativeTupleCacheMaxTuples) {
         super.setEnabled(true);
-        Map<String, RolapNative> map = new LinkedHashMap<>();
+        Map<String, NativeEvaluatorFactory> map = new LinkedHashMap<>();
         // one instance under both names: identical constraints share the
         // same tuple cache
         RolapNativeCrossJoin nativeCrossJoin =
@@ -83,13 +85,13 @@ public class RolapNativeRegistry extends RolapNative {
      */
     @Override
 	public NativeEvaluator createEvaluator(
-        RolapEvaluator evaluator, FunctionDefinition fun, Expression[] args, final boolean enableNativeFilter)
+        Evaluator evaluator, FunctionDefinition fun, Expression[] args, final boolean enableNativeFilter)
     {
         if (!isEnabled()) {
             return null;
         }
 
-        RolapNative rn = nativeEvaluatorMap.get(upper(fun.getFunctionMetaData().operationAtom().name()));
+        NativeEvaluatorFactory rn = nativeEvaluatorMap.get(upper(fun.getFunctionMetaData().operationAtom().name()));
         if (rn == null) {
             return null;
         }
@@ -108,8 +110,8 @@ public class RolapNativeRegistry extends RolapNative {
      */
     public Map<String, com.github.benmanes.caffeine.cache.stats.CacheStats> nativeCacheStats() {
         Map<String, com.github.benmanes.caffeine.cache.stats.CacheStats> stats = new LinkedHashMap<>();
-        Set<RolapNative> seen = Collections.newSetFromMap(new IdentityHashMap<>());
-        for (Map.Entry<String, RolapNative> entry : nativeEvaluatorMap.entrySet()) {
+        Set<NativeEvaluatorFactory> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Map.Entry<String, NativeEvaluatorFactory> entry : nativeEvaluatorMap.entrySet()) {
             if (entry.getValue() instanceof RolapNativeSet set && seen.add(set)) {
                 stats.put(entry.getKey(), set.cacheStats());
             }
@@ -122,7 +124,7 @@ public class RolapNativeRegistry extends RolapNative {
     public
 	void setListener(Listener listener) {
         super.setListener(listener);
-        for (RolapNative rn : nativeEvaluatorMap.values()) {
+        for (NativeEvaluatorFactory rn : nativeEvaluatorMap.values()) {
             rn.setListener(listener);
         }
     }
@@ -135,8 +137,8 @@ public class RolapNativeRegistry extends RolapNative {
 
     /** One visit per instance - registration under several names is normal. */
     private void forEachDistinctSet(java.util.function.Consumer<RolapNativeSet> action) {
-        Set<RolapNative> seen = Collections.newSetFromMap(new IdentityHashMap<>());
-        for (RolapNative rolapNative : nativeEvaluatorMap.values()) {
+        Set<NativeEvaluatorFactory> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (NativeEvaluatorFactory rolapNative : nativeEvaluatorMap.values()) {
             if (rolapNative instanceof RolapNativeSet set && seen.add(set)) {
                 action.accept(set);
             }
